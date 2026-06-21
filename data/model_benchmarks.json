@@ -1,0 +1,136 @@
+{
+  "_meta": {
+    "source": "Arti internal + list-price proxies; cross-check quality/speed at https://artificialanalysis.ai/models",
+    "updated": "2026-06-21",
+    "weight_tier": "light < medium < heavy (relative compute / $/1M ref)"
+  },
+  "models": {
+    "llama-3.1-8b-instant": {
+      "display": "Llama 3.1 8B Instant",
+      "vendor": "Groq",
+      "weight_tier": "light",
+      "ref_input_per_1m": 0.05,
+      "ref_output_per_1m": 0.08,
+      "aa_query": "llama-3.1-8b"
+    },
+    "qwen/qwen3-32b": {
+      "display": "Qwen3 32B",
+      "vendor": "Groq",
+      "weight_tier": "medium",
+      "ref_input_per_1m": 0.29,
+      "ref_output_per_1m": 0.59,
+      "aa_query": "qwen3-32b"
+    },
+    "poolside/laguna-xs.2:free": {
+      "display": "Laguna XS 2",
+      "vendor": "OpenRouter",
+      "weight_tier": "light",
+      "ref_blended_per_1m": 0.08,
+      "aa_query": "laguna"
+    },
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free": {
+      "display": "Nemotron 3 Nano Omni",
+      "vendor": "OpenRouter/NVIDIA",
+      "weight_tier": "medium",
+      "ref_blended_per_1m": 0.12,
+      "aa_query": "nemotron"
+    },
+    "nvidia/nemotron-3-nano-30b-a3b:free": {
+      "display": "Nemotron 3 Nano",
+      "vendor": "OpenRouter/NVIDIA",
+      "weight_tier": "medium",
+      "ref_blended_per_1m": 0.10,
+      "aa_query": "nemotron"
+    },
+    "google/diffusiongemma-26b-a4b-it": {
+      "display": "DiffusionGemma 26B",
+      "vendor": "NVIDIA NIM",
+      "weight_tier": "heavy",
+      "ref_input_per_1m": 0.20,
+      "ref_output_per_1m": 0.60,
+      "aa_query": "gemma"
+    },
+    "gemma-4-26b-a4b-it": {
+      "display": "Gemma 4 26B MoE",
+      "vendor": "Google",
+      "weight_tier": "medium",
+      "ref_input_per_1m": 0.15,
+      "ref_output_per_1m": 0.45,
+      "aa_query": "gemma"
+    },
+    "gemma-4-31b-it": {
+      "display": "Gemma 4 31B",
+      "vendor": "Google",
+      "weight_tier": "heavy",
+      "ref_input_per_1m": 0.18,
+      "ref_output_per_1m": 0.55,
+      "aa_query": "gemma"
+    },
+    "gemini-3.1-flash-lite": {
+      "display": "Gemini 3.1 Flash Lite",
+      "vendor": "Google",
+      "weight_tier": "light",
+      "ref_input_per_1m": 0.075,
+      "ref_output_per_1m": 0.30,
+      "aa_query": "gemini-flash"
+    },
+    "@cf/google/gemma-4-26b-a4b-it": {
+      "display": "CF Gemma 4 26B",
+      "vendor": "Cloudflare",
+      "weight_tier": "medium",
+      "ref_blended_per_1m": 0.25,
+      "aa_query": "gemma"
+    },
+    "glm-4.6v-flash": {
+      "display": "GLM-4.6V Flash",
+      "vendor": "Z.ai",
+      "weight_tier": "light",
+      "ref_input_per_1m": 0.30,
+      "ref_output_per_1m": 0.90,
+      "aa_query": "glm-4"
+    },
+    "glm-4.5-flash": {
+      "display": "GLM-4.5 Flash",
+      "vendor": "Z.ai",
+      "weight_tier": "light",
+      "ref_input_per_1m": 0.20,
+      "ref_output_per_1m": 1.10,
+      "aa_query": "glm-4"
+    },
+    "gemma4:31b-cloud": {
+      "display": "Gemma4 31B Cloud",
+      "vendor": "Ollama",
+      "weight_tier": "heavy",
+      "ref_blended_per_1m": 0.35,
+      "aa_query": "gemma"
+    },
+    "whisper-large-v3": {
+      "display": "Whisper Large V3",
+      "vendor": "Groq",
+      "weight_tier": "medium",
+      "ref_blended_per_1m": 0.05,
+      "aa_query": "whisper"
+    },
+    "whisper-large-v3-turbo": {
+      "display": "Whisper Large V3 Turbo",
+      "vendor": "Groq",
+      "weight_tier": "light",
+      "ref_blended_per_1m": 0.04,
+      "aa_query": "whisper"
+    },
+    "whisper-small": {
+      "display": "Whisper Small (local)",
+      "vendor": "Local/faster-whisper",
+      "weight_tier": "light",
+      "ref_blended_per_1m": 0.0,
+      "aa_query": "whisper"
+    },
+    "text-embedding-mxbai-embed-large-v1": {
+      "display": "mxbai embed large",
+      "vendor": "LM Studio",
+      "weight_tier": "light",
+      "ref_blended_per_1m": 0.02,
+      "aa_query": "mxbai"
+    }
+  }
+}

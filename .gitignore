@@ -1,0 +1,70 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+venv/
+venv312/
+
+# IDE / OS
+.vscode/
+.idea/
+.cursor/
+.cursor-tmp-nvidia/
+.hermes/
+.kiro/
+.DS_Store
+Thumbs.db
+
+# Test / dev cache
+.hypothesis/
+.pytest_cache/
+tasks/
+
+# Secrets & local runtime (NEVER commit)
+.env
+live_session.json
+vts_token.txt
+
+# Personal character files (use .example → copy locally)
+ARTI_SOUL.md
+ARTI_VIEWERS.md
+ARTI_MOOD_STATE.json
+
+# Session / telemetry runtime
+session_logs/
+transcripts/
+data/session_manifest.json
+data/vault_rag.db
+data/vault_rag.db-*
+data/observer_rag.db
+data/observer_rag.db-*
+data/telemetry/
+data/voice_samples/
+
+# Vault live data (structure only in repo)
+vault/sessions/*.md
+vault/sessions/*.jsonl
+vault/concepts/arti_live_learnings*.md
+vault/concepts/arti_origin.md
+vault/watch-parties/*.md
+
+# Test baselines (machine-specific; regenerate locally)
+tests/_baselines/*.json
+
+# Wizard/push notes lokal
+GITHUB_PUSH.md
+
+# Debug / local notes
+debug-*.log
+diff_*.txt
+benchmark_llm_results.json
+docs/research/
+
+# Local RAG databases (rebuilt on first run)
+data/*.db
+data/*.db-*
+
+vendor/agent-skills/

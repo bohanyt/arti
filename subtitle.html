@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Arti Subtitle</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Comic+Relief:wght@400;700&display=swap');
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background: transparent;
+    overflow: hidden;
+    font-family: 'Comic Relief', 'Comic Sans MS', cursive, sans-serif;
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+}
+
+#subtitle-container {
+    position: fixed;
+    bottom: 60px;
+    left: 50%;
+    transform: translateX(-50%);
+    max-width: 85%;
+    text-align: center;
+    padding: 0;
+    pointer-events: none;
+}
+
+#subtitle {
+    display: inline;
+    font-size: 28px;
+    font-weight: 700;
+    color: #fff;
+    text-shadow:
+        -2px -2px 0 #000,
+         2px -2px 0 #000,
+        -2px  2px 0 #000,
+         2px  2px 0 #000,
+        -1px -1px 0 #000,
+         1px -1px 0 #000,
+        -1px  1px 0 #000,
+         1px  1px 0 #000;
+    line-height: 1.5;
+    letter-spacing: 0.5px;
+    word-spacing: 2px;
+}
+
+/* Phrase-based highlight (Supertone) */
+#subtitle .phrase {
+    display: inline;
+    opacity: 0.7;
+    transition: opacity 0.15s, color 0.15s;
+}
+
+#subtitle .phrase.active {
+    opacity: 1;
+    color: #ffe066;
+    transform: scale(1.03);
+}
+
+#subtitle .phrase.said {
+    opacity: 0.5;
+}
+
+/* Word-based karaoke (edge_tts) */
+#subtitle .word {
+    display: inline-block;
+    opacity: 0;
+    animation: wordAppear 0.2s ease-out forwards;
+    margin-right: 6px;
+}
+
+#subtitle .word:last-child {
+    margin-right: 0;
+}
+
+@keyframes wordAppear {
+    from {
+        opacity: 0;
+        transform: translateY(8px) scale(0.9);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+#subtitle .word.highlight {
+    color: #ffe066;
+    text-shadow:
+        -2px -2px 0 #000,
+         2px -2px 0 #000,
+        -2px  2px 0 #000,
+         2px  2px 0 #000;
+}
+
+/* Status indicator */
+#status {
+    position: fixed;
+    top: 10px;
+    right: 10px;
+    padding: 4px 10px;
+    font-size: 12px;
+    font-weight: 700;
+    border: 2px solid #000;
+    background: #fff;
+    color: #000;
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+    font-family: 'Comic Relief', cursive;
+}
+
+#status.show {
+    opacity: 1;
+}
+
+#status.connected {
+    background: #6bff9d;
+}
+
+#status.disconnected {
+    background: #ff6b6b;
+}
+
+/* Karaoke mode - current word highlight */
+#subtitle .word.current {
+    color: #ffe066;
+    transform: scale(1.1);
+}
+
+/* Fade out animation */
+@keyframes fadeOut {
+    from { opacity: 1; }
+    to { opacity: 0; }
+}
+
+.fade-out {
+    animation: fadeOut 0.5s ease-out forwards;
+}
+</style>
+</head>
+<body>
+
+<div id="status">● DISCONNECTED</div>
+
+<div id="subtitle-container">
+    <div id="subtitle"></div>
+</div>
+
+<script>
+// ============================================
+// SUBTITLE RENDERER — OBS Browser Source
+// ============================================
+
+const subtitle = document.getElementById('subtitle');
+const statusEl = document.getElementById('status');
+
+let ws = null;
+let reconnectInterval = null;
+let isConnected = false;
+let clearTimer = null;
+let phrases = null;
+
+// WebSocket connection
+function connect() {
+    const wsUrl = 'ws://localhost:9988';
+    
+    try {
+        ws = new WebSocket(wsUrl);
+    } catch (e) {
+        console.error('[SubTitle] Connection error:', e);
+        scheduleReconnect();
+        return;
+    }
+    
+    ws.onopen = () => {
+        isConnected = true;
+        console.log('[SubTitle] Connected to server');
+        showStatus('● CONNECTED', 'connected');
+        
+        // Send ping to keep alive
+        clearInterval(reconnectInterval);
+        
+        // Ping every 30 seconds
+        setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({ type: 'ping' }));
+            }
+        }, 30000);
+    };
+    
+    ws.onmessage = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            
+            if (data.type === 'subtitle') {
+                renderSubtitle(data.words, data.text);
+            } else if (data.type === 'status') {
+                showStatus(data.message || data.status, data.status);
+            }
+        } catch (e) {
+            console.error('[SubTitle] Parse error:', e);
+        }
+    };
+    
+    ws.onclose = () => {
+        isConnected = false;
+        console.log('[SubTitle] Disconnected');
+        showStatus('● DISCONNECTED', 'disconnected');
+        scheduleReconnect();
+    };
+    
+    ws.onerror = (e) => {
+        console.error('[SubTitle] WebSocket error:', e);
+    };
+}
+
+function scheduleReconnect() {
+    if (reconnectInterval) return;
+    reconnectInterval = setInterval(() => {
+        if (!isConnected) {
+            console.log('[SubTitle] Reconnecting...');
+            connect();
+        }
+    }, 3000);
+}
+
+function showStatus(text, className) {
+    statusEl.textContent = text;
+    statusEl.className = 'show ' + className;
+    
+    // Auto-hide after 3 seconds
+    setTimeout(() => {
+        statusEl.className = statusEl.className.replace('show', '');
+    }, 3000);
+}
+
+// Render subtitle — auto-detects phrase mode (Supertone) vs word mode (edge_tts)
+function renderSubtitle(words, fullText) {
+    // Clear any pending clear timer
+    if (clearTimer) {
+        clearTimeout(clearTimer);
+        clearTimer = null;
+    }
+
+    // Clear previous subtitle
+    subtitle.innerHTML = '';
+    subtitle.className = '';
+
+    if (!words || words.length === 0) {
+        return;
+    }
+
+    // Detect phrase mode: if any "word" entry contains spaces → it's a phrase
+    const isPhraseMode = words.some(w => w.word.includes(' '));
+
+    if (isPhraseMode) {
+        // === PHRASE MODE (Supertone) — satu frasa di layar (Fase 3) ===
+        let idx = 0;
+        function showPhrase(i) {
+            if (i >= words.length) {
+                subtitle.classList.add('fade-out');
+                clearTimer = setTimeout(() => {
+                    subtitle.innerHTML = '';
+                    subtitle.className = '';
+                }, 500);
+                return;
+            }
+            const phraseData = words[i];
+            subtitle.innerHTML = '';
+            subtitle.className = '';
+            const span = document.createElement('span');
+            span.className = 'phrase active';
+            span.textContent = phraseData.word;
+            subtitle.appendChild(span);
+            const holdMs = Math.max(phraseData.duration * 1000, 80);
+            clearTimer = setTimeout(() => showPhrase(i + 1), holdMs);
+        }
+        const startMs = Math.max((words[0].start || 0) * 1000, 0);
+        clearTimer = setTimeout(() => showPhrase(0), startMs);
+
+    } else {
+        // === WORD MODE (edge_tts) ===
+        const wordElements = [];
+        words.forEach((wordData, index) => {
+            const span = document.createElement('span');
+            span.className = 'word';
+            span.textContent = wordData.word + ' ';
+            if (index === 0) {
+                span.classList.add('current');
+            }
+            span.style.animationDelay = (wordData.start * 1000) + 'ms';
+            subtitle.appendChild(span);
+            wordElements.push(span);
+        });
+
+        // Highlight current word
+        words.forEach((wordData, index) => {
+            setTimeout(() => {
+                wordElements.forEach((w, i) => {
+                    if (i < index) w.classList.remove('current');
+                    else if (i === index) w.classList.add('current');
+                });
+            }, wordData.start * 1000);
+        });
+
+        // Clear after last word
+        const lastWord = words[words.length - 1];
+        const clearDelay = (lastWord.start + lastWord.duration + 0.5) * 1000;
+        clearTimer = setTimeout(() => {
+            subtitle.classList.add('fade-out');
+            setTimeout(() => {
+                subtitle.innerHTML = '';
+                subtitle.className = '';
+            }, 500);
+        }, clearDelay);
+    }
+}
+
+// Initialize connection
+connect();
+
+// Log for debugging
+console.log('[SubTitle] Renderer initialized');
+console.log('[SubTitle] WebSocket URL: ws://localhost:9988');
+</script>
+</body>
+</html>

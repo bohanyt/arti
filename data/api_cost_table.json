@@ -1,0 +1,87 @@
+{
+  "_comment": "ref_* = harga referensi USD/1M token (list price / proxy) untuk banding beban model, meski tier gratis. actual charge tetap $0.",
+  "poolside/laguna-xs.2:free": {
+    "free": true,
+    "ref_blended_per_1m": 0.08,
+    "ref_source": "OpenRouter small model proxy"
+  },
+  "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free": {
+    "free": true,
+    "ref_blended_per_1m": 0.12,
+    "ref_source": "OpenRouter Nemotron free tier proxy"
+  },
+  "nvidia/nemotron-3-nano-30b-a3b:free": {
+    "free": true,
+    "ref_blended_per_1m": 0.10,
+    "ref_source": "OpenRouter Nemotron nano proxy"
+  },
+  "google/diffusiongemma-26b-a4b-it": {
+    "ref_input_per_1m": 0.20,
+    "ref_output_per_1m": 0.60,
+    "ref_source": "NVIDIA NIM vision LLM proxy"
+  },
+  "gemma-4-26b-a4b-it": {
+    "ref_input_per_1m": 0.15,
+    "ref_output_per_1m": 0.45,
+    "ref_source": "Google Gemma 4 MoE list proxy"
+  },
+  "gemma-4-31b-it": {
+    "ref_input_per_1m": 0.18,
+    "ref_output_per_1m": 0.55,
+    "ref_source": "Google Gemma 4 dense proxy"
+  },
+  "gemini-3.1-flash-lite": {
+    "free": true,
+    "ref_input_per_1m": 0.075,
+    "ref_output_per_1m": 0.30,
+    "ref_source": "Gemini Flash class proxy"
+  },
+  "@cf/google/gemma-4-26b-a4b-it": {
+    "ref_blended_per_1m": 0.25,
+    "ref_source": "Cloudflare Workers AI neuron proxy"
+  },
+  "glm-4.6v-flash": {
+    "free": true,
+    "ref_input_per_1m": 0.30,
+    "ref_output_per_1m": 0.90,
+    "ref_source": "Z.ai GLM-4.6V paid sibling (Flash is free)"
+  },
+  "glm-4.5-flash": {
+    "free": true,
+    "ref_input_per_1m": 0.20,
+    "ref_output_per_1m": 1.10,
+    "ref_source": "Z.ai GLM-4.5-Air paid sibling (Flash is free)"
+  },
+  "gemma4:31b-cloud": {
+    "ref_blended_per_1m": 0.35,
+    "ref_source": "Ollama cloud GPU proxy"
+  },
+  "llama-3.1-8b-instant": {
+    "ref_input_per_1m": 0.05,
+    "ref_output_per_1m": 0.08,
+    "ref_source": "Groq list"
+  },
+  "qwen/qwen3-32b": {
+    "ref_input_per_1m": 0.29,
+    "ref_output_per_1m": 0.59,
+    "ref_source": "Groq list"
+  },
+  "whisper-large-v3": {
+    "ref_blended_per_1m": 0.05,
+    "ref_source": "Groq Whisper proxy (per audio-minute style)"
+  },
+  "whisper-large-v3-turbo": {
+    "ref_blended_per_1m": 0.04,
+    "ref_source": "Groq Whisper turbo proxy"
+  },
+  "whisper-small": {
+    "free": true,
+    "ref_blended_per_1m": 0.0,
+    "ref_source": "Local ASR — $0 cloud"
+  },
+  "text-embedding-mxbai-embed-large-v1": {
+    "free": true,
+    "ref_blended_per_1m": 0.02,
+    "ref_source": "Local LM Studio embed proxy"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "arti_stable",
+  "description": "Read-only snapshot of live Supertone CONFIG (v0.6.0-stable baseline). Not auto-loaded by bridge.",
+  "tts_engine": "supertone",
+  "supertonic_voice": "F1",
+  "supertonic_speed": 1.1,
+  "supertonic_lang": "id",
+  "supertonic_total_steps": 10,
+  "supertonic_timeout_sec": 45.0,
+  "fallback": {
+    "tts_engine": "edge_tts",
+    "tts_voice": "id-ID-GadisNeural"
+  }
+}
