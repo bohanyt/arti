@@ -51,9 +51,6 @@ vault/concepts/arti_live_learnings*.md
 vault/concepts/arti_origin.md
 vault/watch-parties/*.md
 
-# Test baselines (machine-specific; regenerate locally)
-tests/_baselines/*.json
-
 # Wizard/push notes lokal
 GITHUB_PUSH.md
 

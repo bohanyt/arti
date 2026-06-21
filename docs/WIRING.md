@@ -97,8 +97,4 @@ RAG: `python arti_vault_rag.py --reindex-all` setelah sesi panjang.
 
 ## 9. Cek sehat
 
-```powershell
-python -m pytest tests/ -q --ignore=tests/test_supertone_integration.py
-```
-
-Smoke live: PTT → jawaban TTS → ekspresi VTS (sesuaikan nama state di model kamu).
+Jalankan bridge, tes PTT singkat, pastikan TTS + VTS merespons. Lihat log `[Brain]`, `[TTS]`, `[VTS]` untuk error.

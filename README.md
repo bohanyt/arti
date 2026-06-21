@@ -42,7 +42,6 @@ hermes_vtuber_bridge.py   # entry point live
 arti_*.py                 # modul (voice, RAG, scouter, TTS, …)
 supertone_engine.py       # TTS subprocess
 subtitle_server.py        # OBS subtitle (opsional)
-tests/                    # pytest
 scripts/voice_ab_test.py  # lab suara offline (opsional)
 vault/                    # memori live (kosong di repo)
 data/voice_presets/       # contoh preset TTS
