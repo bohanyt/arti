@@ -191,7 +191,7 @@ def probe_vision_model(provider: str, model: str, config: dict, jpeg_b64: str | 
                 max_tokens=64,
                 temperature=0.1,
                 timeout=45,
-                extra_headers={"HTTP-Referer": "https://github.com/hermes-vtuber-host", "X-Title": "Arti Health"},
+                extra_headers={"HTTP-Referer": "https://github.com/YOUR_USER/YOUR_REPO", "X-Title": "Arti Health"},
             )
         elif p == "groq":
             key = (cfg.get("groq_api_key") or os.environ.get("GROQ_API_KEY") or "").strip()
@@ -266,7 +266,7 @@ def probe_text_model(provider: str, model: str, config: dict) -> DeepProbeRow:
                 max_tokens=32,
                 temperature=0.1,
                 timeout=45,
-                extra_headers={"HTTP-Referer": "https://github.com/hermes-vtuber-host", "X-Title": "Arti Health"},
+                extra_headers={"HTTP-Referer": "https://github.com/YOUR_USER/YOUR_REPO", "X-Title": "Arti Health"},
             )
         elif p == "github":
             _, ms = arti_github_vision.text_chat(

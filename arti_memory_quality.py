@@ -33,13 +33,11 @@ _SKIP_SUBSTRINGS = (
     "baru mulai streaming",
     "memulai live stream",
     "arti berulang kali memastikan stream sudah menyala",
-    "streamer bertanya tentang nasi goreng berulang",
     "streamer berulang kali mengucapkan terima kasih",
     "tidak ada catatan baru",
     "stream fact: none",
     "penonton baru datang dan belum punya konteks waktu",
     "arti debut co-host",
-    "debut co-host 27 mei",
     "asal usul arti",
     "nama arti diberikan",
 )

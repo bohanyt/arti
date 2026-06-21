@@ -101,28 +101,6 @@ sys.stderr = _TeeOutput(_orig_stderr, _log_fh)
 
 print(f"[DebugLogger] Session log aktif: {_DEBUG_LOG_PATH}")
 
-# #region agent log
-_AGENT_DEBUG_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug-f4ed86.log")
-_AGENT_RUN_ID = "idle-revert"
-
-
-def _agent_dbg(hypothesis_id: str, location: str, message: str, data: dict | None = None, run_id: str | None = None):
-    try:
-        payload = {
-            "sessionId": "f4ed86",
-            "runId": run_id or _AGENT_RUN_ID,
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data or {},
-            "timestamp": int(time.time() * 1000),
-        }
-        with open(_AGENT_DEBUG_LOG, "a", encoding="utf-8") as _df:
-            _df.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-# #endregion
-
 # ==========================================
 # KONFIGURASI UTAMA
 # ==========================================
@@ -161,8 +139,8 @@ CONFIG = {
     
     "vts_api_port": 8002,                             # Port VTS API
     "vts_plugin_name": "HermesVTuberBridge",
-    "vts_developer": "AntigravityDeveloper",
-    "tts_voice": "id-ID-GadisNeural",                 # Suara cewek Indonesia natural
+    "vts_developer": "YourDeveloperName",
+    "tts_voice": "id-ID-GadisNeural",                 # Indonesian female Edge TTS voice
     "virtual_cable_name": "CABLE Input",
     
     # Konfigurasi YouTube Live Chat (langsung dari YouTube, tanpa extension)
@@ -240,7 +218,7 @@ CONFIG = {
     "tts_engine": "supertone",                        # "supertone" | "edge_tts" — master engine switch
     "tts_preprocess_numbers": True,                   # Jalankan konversi angka→kata Indonesia sebelum sintesis
     "supertonic_voice": "F1",                         # Voice style: F1-F5 / M1-M5 (F1 disarankan)
-    "supertonic_speed": 1.1,                          # F1 live: 1.1 natural (1.3 kecepetan)
+    "supertonic_speed": 1.1,                          # tuned for live; 1.3 was too fast
     "supertonic_lang": "id",                          # Kode bahasa Supertone
     "supertonic_total_steps": 10,                     # Max quality [5–12] — F1 live (10 = stabil + cepat)
     "supertonic_prewarm_on_startup": True,            # Load model saat startup, hindari timeout jawaban pertama
@@ -753,8 +731,8 @@ def _streamer_spoke_within_sec(sec: float) -> bool:
 def build_origin_context(config: dict | None = None) -> str:
     """Fakta kanon debut + pointer arsip — selalu inject (hemat token)."""
     cfg = config or CONFIG
-    label = cfg.get("arti_debut_label", "27 Mei 2026")
-    archive = cfg.get("arti_archive_from", "2026-05-27")
+    label = cfg.get("arti_debut_label", "debut date")
+    archive = cfg.get("arti_archive_from", "YYYY-MM-DD")
     return (
         f"\n\n[ASAL USUL ARTI]\n"
         f"Debut co-host live: {label} ({cfg.get('arti_debut_date', 'YYYY-MM-DD')}).\n"
@@ -987,7 +965,7 @@ def wait_and_acquire_lock(holder_name="arti-vtuber-bridge", timeout_sec=10):
         return False
 
 def release_vault_lock():
-    """Melepas kunci vault agar proses Hermes lain bisa menulis kembali"""
+    """Melepas kunci vault agar proses bridge lain bisa menulis kembali"""
     if os.path.exists(LOCK_FILE):
         try:
             os.remove(LOCK_FILE)
@@ -1010,7 +988,7 @@ def load_long_term_memories():
                     f.write(f"# Arti Live Learnings ({profile.capitalize()} Profile)\n\n"
                             f"Ini adalah catatan pengetahuan jangka panjang yang dipelajari Arti (VTuber Co-Host) secara otomatis selama sesi live stream untuk profil **{profile}**.\n\n"
                             f"## Memori Jangka Panjang\n\n"
-                            f"- [2026-05-27] Arti aktif membantu streamer sebagai co-host yang imut dan cerdas (Profil: {profile}).\n")
+                            f"- [YYYY-MM-DD] Co-host aktif membantu streamer (Profil: {profile}).\n")
             except Exception as e:
                 print(f"[Memory Error] Gagal inisialisasi file memori: {e}")
             finally:
@@ -1260,7 +1238,7 @@ class VTSController:
             async with self._ws_send_lock:
                 await self.websocket.send(json.dumps(payload))
         except Exception:
-            pass  # Silent fail — nggak mau crash bridge gara-gara eye tracking
+            pass  # avoid crashing bridge on eye-tracking errors
 
     async def send_expression(self, expr_file, active, *, confirm=False):
         """Toggle ekspresi VTS; confirm=True tunggu ACK (mikir/bicara/lampu)."""
@@ -4201,7 +4179,11 @@ async def _expression_track():
     TRACKING_IDS = ("FaceAngleX", "FaceAngleY", "FaceAngleZ")
 
     # Load target poses from expression files
-    MODEL_DIR = r"C:\Program Files (x86)\Steam\steamapps\common\VTube Studio\VTube Studio_Data\StreamingAssets\Live2DModels\A_vts"
+    MODEL_DIR = os.environ.get(
+        "VTS_MODEL_DIR",
+        r"C:\Program Files (x86)\Steam\steamapps\common\VTube Studio"
+        r"\VTube Studio_Data\StreamingAssets\Live2DModels\YOUR_MODEL",
+    )
     poses = {}
     for name in IDLE_EXPRESSIONS:
         fpath = os.path.join(MODEL_DIR, f"{name}.exp3.json")
@@ -4285,9 +4267,6 @@ async def _expression_track():
 
             last_name = expr_name
             print(f"[Idle/Expr] → {expr_name}")
-            # #region agent log
-            _agent_dbg("F", "_expression_track", "pose_hold", {"expr": expr_name})
-            # #endregion
 
             hold_time = random.uniform(EXPR_HOLD_MIN, EXPR_HOLD_MAX)
             hold_end = time.time() + hold_time
@@ -4334,14 +4313,6 @@ def start_idle_animation():
         return
     idle_timer_thread = threading.Thread(target=idle_animation_worker, daemon=True, name="idle-vts")
     idle_timer_thread.start()
-    # #region agent log
-    _agent_dbg(
-        "F",
-        "start_idle_animation",
-        "started",
-        {"thread_alive": idle_timer_thread.is_alive(), "running": idle_timer_running},
-    )
-    # #endregion
 
 
 def stop_idle_animation():
@@ -4356,14 +4327,6 @@ def stop_idle_animation():
         pass
     label = expr or "(none)"
     print(f"[Idle] Paused — deactivate {label} queued, face reset")
-    # #region agent log
-    _agent_dbg(
-        "F",
-        "stop_idle_animation",
-        "stopped",
-        {"running": idle_timer_running, "active_expr": expr},
-    )
-    # #endregion
 
 
 # ==========================================
@@ -4687,14 +4650,6 @@ async def _handle_voice_trigger(
     await _prepare_turn_start(trigger.trigger_type, trigger.viewer_name)
     await asyncio.to_thread(refresh_vision_for_turn)
     timer.mark("after_mikir")
-    # #region agent log
-    _agent_dbg(
-        "G",
-        "_handle_voice_trigger",
-        "mikir",
-        {"hotkey_active": hotkey_active, "trigger_type": trigger.trigger_type},
-    )
-    # #endregion
 
     # Kumpulkan seluruh catatan sejarah 50 aktivitas sebelumnya untuk dikirim ke LLM
     with history_lock:
@@ -4982,19 +4937,6 @@ async def _handle_voice_trigger(
                     )
                     if CONFIG.get("expression_emotion_enabled") and turn_emotion != "neutral":
                         print(f"[Expr] mood: {turn_emotion}")
-                    _agent_dbg(
-                        "H-C",
-                        "_handle_voice_trigger.speaking",
-                        "turn_emotion",
-                        {
-                            "turn_emotion": turn_emotion,
-                            "nod_enabled": arti_expression_runtime.should_nod_for_emotion(
-                                turn_emotion, CONFIG
-                            ),
-                            "user_hint": user_speech[:80],
-                        },
-                        run_id="emotion-fix",
-                    )
                     print(f"Arti menjawab: \"{ai_reply}\"")
                     await arti_expression_runtime.apply_speaking(vts, turn_emotion, CONFIG)
                     nod_cancel = asyncio.Event()
@@ -5138,7 +5080,7 @@ def prompt_live_session_setup() -> bool:
     profile = CONFIG.get("active_profile", "default")
 
     print("\n" + "=" * 60)
-    print("  LIVE SESSION SETUP  (Enter = keep, no VS Code edit)")
+    print("  LIVE SESSION SETUP  (Enter = keep current values)")
     print("=" * 60)
     mic_id, mic_name = resolve_asr_input_device()
     mic_label = f"#{mic_id} {mic_name}" if mic_id is not None else mic_name
@@ -5232,9 +5174,7 @@ def startup_wizard():
     
     if not vts_ok:
         print(f"\n  [WARN] VTS di port {vts_port} tidak terdeteksi!")
-        print("  Tips: Dua instance VTS? Biasanya:")
-        print("    - VTS pertama (pribadi) = port 8001")
-        print("    - VTS kedua (Arti)     = port 8002")
+        print("  Tips: Dua instance VTS? Biasanya port 8001 (instance pertama) dan 8002 (instance kedua).")
         print(f"  [INFO] Jalankan VTS + Start API di port {vts_port}, atau restart wizard.")
 
     youtube_id = CONFIG.get("youtube_video_id", "")

@@ -249,7 +249,7 @@ def probe_openrouter_api(config: dict, timeout: int = 15) -> tuple[str, str]:
             headers={
                 "Authorization": f"Bearer {key}",
                 "Content-Type": "application/json",
-                "HTTP-Referer": "https://github.com/hermes-vtuber-host",
+                "HTTP-Referer": "https://github.com/YOUR_USER/YOUR_REPO",
                 "X-Title": "Arti Health Check",
             },
             json={

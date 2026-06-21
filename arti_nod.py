@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import asyncio
 import math
+import os
 import time
 from typing import Any, Callable
 
 NOD_ATAS = "ArtiNganggukAtas.exp3.json"
 NOD_BAWAH = "ArtiNganggukBawah.exp3.json"
-NOD_MODEL_DIR = (
+NOD_MODEL_DIR = os.environ.get(
+    "VTS_MODEL_DIR",
     r"C:\Program Files (x86)\Steam\steamapps\common\VTube Studio"
-    r"\VTube Studio_Data\StreamingAssets\Live2DModels\A_vts"
+    r"\VTube Studio_Data\StreamingAssets\Live2DModels\YOUR_MODEL",
 )
 NOD_Y_UP = 6.697021484375
 NOD_Y_DOWN = -6.69698429107666
@@ -113,31 +115,6 @@ async def run_nod_while_tts(
     mode = "smooth" if smooth else "toggle"
     print(f"[Nod] {mode} mulai (termasuk tunggu synth TTS)...")
     steps = 0
-    # #region agent log
-    try:
-        import json as _json
-        import os as _os
-        import time as _time
-        _log = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "debug-f4ed86.log")
-        with open(_log, "a", encoding="utf-8") as _f:
-            _f.write(
-                _json.dumps(
-                    {
-                        "sessionId": "f4ed86",
-                        "runId": "emotion-fix",
-                        "hypothesisId": "H-D",
-                        "location": "run_nod_while_tts.start",
-                        "message": "nod_started",
-                        "data": {"mode": mode, "period": period, "fps": fps},
-                        "timestamp": int(_time.time() * 1000),
-                    },
-                    ensure_ascii=False,
-                )
-                + "\n"
-            )
-    except Exception:
-        pass
-    # #endregion
 
     try:
         if smooth:
@@ -174,28 +151,3 @@ async def run_nod_while_tts(
             print(f"[Nod] Selesai ({steps} frame/langkah)")
         else:
             print("[Nod] Skip — tidak ada frame")
-        # #region agent log
-        try:
-            import json as _json
-            import os as _os
-            import time as _time
-            _log = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "debug-f4ed86.log")
-            with open(_log, "a", encoding="utf-8") as _f:
-                _f.write(
-                    _json.dumps(
-                        {
-                            "sessionId": "f4ed86",
-                            "runId": "emotion-fix",
-                            "hypothesisId": "H-D",
-                            "location": "run_nod_while_tts.end",
-                            "message": "nod_finished",
-                            "data": {"steps": steps, "mode": mode},
-                            "timestamp": int(_time.time() * 1000),
-                        },
-                        ensure_ascii=False,
-                    )
-                    + "\n"
-                )
-        except Exception:
-            pass
-        # #endregion

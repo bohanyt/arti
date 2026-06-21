@@ -33,8 +33,8 @@ def is_timeline_question(text: str) -> bool:
 def build_timeline_guard_block(config: dict | None = None) -> str:
     """Hard inject for LLM — debut date is not negotiable."""
     cfg = config or {}
-    label = cfg.get("arti_debut_label", "27 Mei 2026")
-    iso = cfg.get("arti_debut_date", "2026-05-27")
+    label = cfg.get("arti_debut_label", "debut date")
+    iso = cfg.get("arti_debut_date", "YYYY-MM-DD")
     return (
         f"\n\n[GUARD TIMELINE — WAJIB IKUTI]\n"
         f"Fakta kanon: co-host debut live = {label} ({iso}).\n"

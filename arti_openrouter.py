@@ -18,7 +18,7 @@ def _headers(api_key: str, title: str) -> dict[str, str]:
     return {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
-        "HTTP-Referer": "https://hermes-agent.local",
+        "HTTP-Referer": "https://github.com/YOUR_USER/YOUR_REPO",
         "X-Title": title,
     }
 

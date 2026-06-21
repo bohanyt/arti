@@ -295,7 +295,7 @@ def _call_openrouter(prompt: str, config: dict) -> tuple[str, int]:
                 temperature=temperature,
                 timeout=timeout,
                 extra_headers={
-                    "HTTP-Referer": "https://github.com/hermes-vtuber-host",
+                    "HTTP-Referer": "https://github.com/YOUR_USER/YOUR_REPO",
                     "X-Title": "Arti Scouter",
                 },
             )

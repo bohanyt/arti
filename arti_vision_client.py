@@ -174,7 +174,7 @@ def _call_openrouter(prompt: str, jpeg_b64: str, config: dict) -> tuple[str, int
         max_tokens=max_tokens,
         temperature=temperature,
         extra_headers={
-            "HTTP-Referer": "https://github.com/hermes-vtuber-host",
+            "HTTP-Referer": "https://github.com/YOUR_USER/YOUR_REPO",
             "X-Title": "Arti Vision",
         },
     )

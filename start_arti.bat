@@ -6,9 +6,6 @@ chcp 65001 >nul 2>&1
 REM --- Pilih Python (urutan prioritas) ---
 set "PY="
 if exist "%~dp0venv\Scripts\python.exe" set "PY=%~dp0venv\Scripts\python.exe"
-if not defined PY if exist "%LOCALAPPDATA%\hermes\hermes-agent\venv\Scripts\python.exe" (
-  set "PY=%LOCALAPPDATA%\hermes\hermes-agent\venv\Scripts\python.exe"
-)
 if not defined PY set "PY=python"
 
 echo.

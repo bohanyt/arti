@@ -28,14 +28,15 @@ def _load_origin_block() -> str:
 
 def _canon_conflicts(facts: list[Any], config: dict) -> list[str]:
     conflicts: list[str] = []
-    debut = (config.get("arti_debut_label") or "27 Mei 2026").lower()
+    debut = (config.get("arti_debut_label") or "debut date").lower()
+    debut_date = (config.get("arti_debut_date") or "YYYY-MM-DD").lower()
     origin = _load_origin_block().lower()
     for raw in facts:
         text = raw.get("text", raw) if isinstance(raw, dict) else str(raw)
         tl = text.lower()
         if "baru mulai live" in tl or "baru saja memulai" in tl:
             conflicts.append(text[:120])
-        if "debut" in tl and debut not in tl and "27 mei" not in tl and "2026-05-27" not in tl:
+        if "debut" in tl and debut not in tl and debut_date not in tl:
             if "arti" in tl:
                 conflicts.append(text[:120])
     return conflicts

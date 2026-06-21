@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import time
 from typing import Any, Callable
 
 EMOTION_MAP: dict[str, str | None] = {
@@ -17,12 +16,10 @@ EMOTION_MAP: dict[str, str | None] = {
 }
 
 _EXPR_BICARA = "ArtiBicara.exp3.json"
-_VTS_MOOD_DIR = (
+_VTS_MOOD_DIR = os.environ.get(
+    "VTS_MODEL_DIR",
     r"C:\Program Files (x86)\Steam\steamapps\common\VTube Studio"
-    r"\VTube Studio_Data\StreamingAssets\Live2DModels\A_vts"
-)
-_DEBUG_LOG = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "debug-f4ed86.log"
+    r"\VTube Studio_Data\StreamingAssets\Live2DModels\YOUR_MODEL",
 )
 
 # Params mood overlay must not touch (lip-sync, lampu, deformasi mulut)
@@ -72,27 +69,8 @@ def should_nod_for_emotion(emotion: str, config: dict) -> bool:
     return EMOTION_NOD_ENABLED.get(emotion, True)
 
 
-def _emotion_dbg(hypothesis_id: str, location: str, message: str, data: dict | None = None) -> None:
-    # #region agent log
-    try:
-        payload = {
-            "sessionId": "f4ed86",
-            "runId": "emotion-fix",
-            "hypothesisId": hypothesis_id,
-            "location": location,
-            "message": message,
-            "data": data or {},
-            "timestamp": int(time.time() * 1000),
-        }
-        with open(_DEBUG_LOG, "a", encoding="utf-8") as f:
-            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-    # #endregion
-
-
 def audit_mood_exp_on_disk(mood_file: str) -> dict[str, Any]:
-    """Cek param bermasalah yang masih ada di file VTS (H-A stale exp, H-C mouth lock)."""
+    """Cek param bermasalah yang masih ada di file ekspresi VTS."""
     path = os.path.join(_VTS_MOOD_DIR, mood_file)
     out: dict[str, Any] = {"mood_file": mood_file, "path": path, "exists": os.path.isfile(path)}
     if not out["exists"]:
@@ -163,12 +141,6 @@ async def apply_speaking(vts: Any, emotion: str, config: dict) -> None:
     if config.get("expression_emotion_enabled"):
         mood_file = EMOTION_MAP.get(emotion)
     audit = audit_mood_exp_on_disk(mood_file) if mood_file else {}
-    _emotion_dbg(
-        "H-A",
-        "apply_speaking.pre_mood",
-        "bicara_on",
-        {"emotion": emotion, "mood_file": mood_file, "audit": audit},
-    )
     if mood_file:
         await vts.send_expression(mood_file, True)
         # Mood overlay can deactivate ArtiBicara in VTS — re-assert lamp, then mood again
@@ -177,14 +149,8 @@ async def apply_speaking(vts: Any, emotion: str, config: dict) -> None:
         if not audit.get("has_brow_deform") and not audit.get("has_eye_deform"):
             print(
                 f"[Expr] WARN: {mood_file} tidak punya param alis/mata — "
-                "mood mungkin tidak kelihatan (cek templates/ vs folder VTS)."
+                "mood mungkin tidak kelihatan (cek folder model VTS)."
             )
-        _emotion_dbg(
-            "H-B",
-            "apply_speaking.post_mood",
-            "mood_on_bicara_reasserted",
-            {"emotion": emotion, "mood_file": mood_file},
-        )
 
 
 async def apply_turn_end(vts: Any, config: dict) -> None:

@@ -38,8 +38,8 @@ def enrich_rag_query(query: str, config: dict | None = None) -> str:
     needs = needs or ("arti" in ql and any(w in ql for w in ("mulai", "ada", "ingat", "kapan")))
     if not needs:
         return q
-    debut = cfg.get("arti_debut_label", "27 Mei 2026")
-    archive = cfg.get("arti_archive_from", "2026-05-27")
+    debut = cfg.get("arti_debut_label", "debut date")
+    archive = cfg.get("arti_archive_from", "YYYY-MM-DD")
     return (
         f"{q} Arti debut co-host {debut} arsip vault sessions {archive} "
         f"arti_origin sejarah stream"
@@ -935,7 +935,7 @@ def get_canon_origin_block(config: dict | None = None) -> str:
     if path.is_file():
         body = path.read_text(encoding="utf-8", errors="replace").strip()[:1400]
         return f"[VAULT RAG — ASAL USUL (kanon)]\n{body}"
-    label = cfg.get("arti_debut_label", "27 Mei 2026")
+    label = cfg.get("arti_debut_label", "debut date")
     return f"[VAULT RAG — ASAL USUL (kanon)]\nDebut co-host Arti: {label}."
 
 
