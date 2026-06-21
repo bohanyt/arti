@@ -18,7 +18,7 @@ _NOISE_RE = re.compile(r"/no_think", re.IGNORECASE)
 
 _SKIP_SUBSTRINGS = (
     "tidak ditemukan",
-    "jawaban bohan tadi",
+    "jawaban streamer tadi",
     "live stream baru saja dimulai",
     "live stream baru dimulai pada",
     "live stream dimulai pada",
@@ -33,7 +33,7 @@ _SKIP_SUBSTRINGS = (
     "baru mulai streaming",
     "memulai live stream",
     "arti berulang kali memastikan stream sudah menyala",
-    "bohan bertanya tentang nasi goreng berulang",
+    "streamer bertanya tentang nasi goreng berulang",
     "streamer berulang kali mengucapkan terima kasih",
     "tidak ada catatan baru",
     "stream fact: none",

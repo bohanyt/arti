@@ -14,7 +14,7 @@ from arti_wake import is_arti_wake_call
 def test_berarti_not_wake():
     assert is_arti_wake_call("ya berarti belum bisa") is False
     assert is_arti_wake_call("berarti dia gak bodoh") is False
-    assert is_arti_wake_call("berarti bang bohan ganteng") is False
+    assert is_arti_wake_call("berarti bang streamer ganteng") is False
 
 
 def test_real_wake_calls():

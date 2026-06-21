@@ -347,7 +347,7 @@ def strip_reflection_reasoning_preamble(text: str) -> str:
             if any(p in low for p in _REFLECTION_PREAMBLE_PHRASES):
                 continue
             if re.search(
-                r"\b(yang|dengan|dalam|sesi|stream|arti|viewer|bohan)\b",
+                r"\b(yang|dengan|dalam|sesi|stream|arti|viewer|streamer)\b",
                 line,
                 re.I,
             ):

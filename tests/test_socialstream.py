@@ -8,7 +8,7 @@ import io
 # Fix Windows encoding
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
-SESSIONS = ["SuqKSwbY7W", "iBDb7Kpqsc"]
+SESSIONS = ["TEST_SESSION_01", "TEST_SESSION_02"]
 CHANNELS = ["", "/1", "/2", "/3", "/4"]
 
 async def listen(session_id, channel, timeout=15):
