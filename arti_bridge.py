@@ -1278,10 +1278,10 @@ class VTSController:
             if fut:
                 self._pending.pop(rid, None)
 
-    _EXPR_MIKIR = "ArtiMikir.exp3.json"
-    _EXPR_BICARA = "ArtiBicara.exp3.json"
-    _EXPR_AWARE = "ArtiAware.exp3.json"
-    _EXPR_DEFAULT = "ArtiDefault1.exp3.json"
+    _EXPR_MIKIR = "VtuberMikir.exp3.json"
+    _EXPR_BICARA = "VtuberBicara.exp3.json"
+    _EXPR_AWARE = "VtuberAware.exp3.json"
+    _EXPR_DEFAULT = "VtuberDefault1.exp3.json"
 
     async def _activate_expression(self, on_file: str, *off_files: str) -> None:
         """Nyalakan exp baru DULU, baru matikan yang lama — hindari frame kosong (blip)."""
@@ -3726,7 +3726,7 @@ MOTION_INTERVAL_MIN = 25   # seconds between motion triggers
 MOTION_INTERVAL_MAX = 40
 
 # --- Track 2: Expression toggles (micro-expressions) ---
-IDLE_EXPRESSIONS = [f"ArtiIdle{i}" for i in range(1, 51)]
+IDLE_EXPRESSIONS = [f"VtuberIdle{i}" for i in range(1, 51)]
 EXPR_CHECK_MIN = 5     # Not used in cross-fade mode (kept for reference)
 EXPR_CHECK_MAX = 12    # Not used in cross-fade mode (kept for reference)
 EXPR_HOLD_MIN = 8      # Hold each expression 8-18 seconds (accounts for 2.5s fade-in)
@@ -3756,7 +3756,7 @@ def _set_idle_active_expr(name: str | None) -> None:
 
 
 def _queue_idle_deactivate_expr() -> None:
-    """OFF-kan ArtiIdle aktif segera (idle worker thread), hindari bentrok ekspresi jawaban."""
+    """OFF-kan VtuberIdle aktif segera (idle worker thread), hindari bentrok ekspresi jawaban."""
     expr = _get_idle_active_expr()
     loop = _idle_worker_loop
     if expr and loop and loop.is_running():
@@ -3951,7 +3951,7 @@ async def _idle_reset_face_angles() -> None:
 
 
 async def _idle_deactivate_expression(expr_name: str | None) -> bool:
-    """Matikan satu file ArtiIdle{N} di idle websocket."""
+    """Matikan satu file VtuberIdle{N} di idle websocket."""
     name = (expr_name or _get_idle_active_expr() or "").strip()
     if not name or not _idle_ws_ok():
         return False
@@ -4004,7 +4004,7 @@ async def _idle_trigger_hotkey_by_name(name: str) -> bool:
 
 
 async def _idle_cmd_loop() -> None:
-    """Proses hotkey + deactivate ArtiIdle dari thread utama."""
+    """Proses hotkey + deactivate VtuberIdle dari thread utama."""
     while True:
         while True:
             try:
@@ -4327,7 +4327,7 @@ def start_idle_animation():
 
 
 def stop_idle_animation():
-    """Pause idle tracks + OFF ArtiIdle aktif + reset head di idle ws."""
+    """Pause idle tracks + OFF VtuberIdle aktif + reset head di idle ws."""
     global idle_timer_running
     idle_timer_running = False
     expr = _get_idle_active_expr()

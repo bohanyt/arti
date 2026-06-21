@@ -8,14 +8,14 @@ import re
 from typing import Any, Callable
 
 EMOTION_MAP: dict[str, str | None] = {
-    "senang": "ArtiSenyum.exp3.json",
-    "sedih": "ArtiSedih.exp3.json",
-    "marah": "ArtiMarah.exp3.json",
-    "bingung": "ArtiBingung.exp3.json",
+    "senang": "VtuberSenyum.exp3.json",
+    "sedih": "VtuberSedih.exp3.json",
+    "marah": "VtuberMarah.exp3.json",
+    "bingung": "VtuberBingung.exp3.json",
     "neutral": None,
 }
 
-_EXPR_BICARA = "ArtiBicara.exp3.json"
+_EXPR_BICARA = "VtuberBicara.exp3.json"
 _VTS_MOOD_DIR = os.environ.get(
     "VTS_MODEL_DIR",
     r"C:\Program Files (x86)\Steam\steamapps\common\VTube Studio"
@@ -136,7 +136,7 @@ async def apply_speaking(vts: Any, emotion: str, config: dict) -> None:
     audit = audit_mood_exp_on_disk(mood_file, config) if mood_file else {}
     if mood_file:
         await vts.send_expression(mood_file, True)
-        # Mood overlay can deactivate ArtiBicara in VTS — re-assert lamp, then mood again
+        # Mood overlay can deactivate VtuberBicara in VTS — re-assert lamp, then mood again
         await vts.send_expression(_EXPR_BICARA, True, confirm=True)
         await vts.send_expression(mood_file, True)
         if not audit.get("has_brow_deform") and not audit.get("has_eye_deform"):

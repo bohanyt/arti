@@ -8,7 +8,7 @@ Repo ini **tidak** menyertakan file Live2D / `.exp3.json` kamu.
 
 | Yang beda-beda | Contoh di kode (placeholder) |
 |----------------|------------------------------|
-| Nama expression file | `ArtiDefault1`, `ArtiBicara`, … |
+| Nama expression file | `VtuberDefault1`, `VtuberBicara`, `VtuberIdle1`, `VtuberSenyum`, … |
 | Nama hotkey motion | `IdleMotionStop`, `IdleMotion1`, … |
 | Parameter yang ada | `FaceAngleX` vs `ParamAngleX` vs custom |
 | Range nilai | -30..30 vs skala model lain |

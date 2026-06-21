@@ -8,8 +8,8 @@ import os
 import time
 from typing import Any, Callable
 
-NOD_ATAS = "ArtiNganggukAtas.exp3.json"
-NOD_BAWAH = "ArtiNganggukBawah.exp3.json"
+NOD_ATAS = "VtuberNganggukAtas.exp3.json"
+NOD_BAWAH = "VtuberNganggukBawah.exp3.json"
 NOD_MODEL_DIR = os.environ.get(
     "VTS_MODEL_DIR",
     r"C:\Program Files (x86)\Steam\steamapps\common\VTube Studio"
