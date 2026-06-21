@@ -681,7 +681,7 @@ if __name__ == "__main__":
         raise SystemExit(0)
 
     try:
-        import hermes_vtuber_bridge as bridge
+        import arti_bridge as bridge
 
         cfg = dict(bridge.CONFIG)
     except Exception:
@@ -724,7 +724,7 @@ if __name__ == "__main__":
         print("  [WARN] CLOUDFLARE_ACCOUNT_ID kosong — tambah ke .env (token saja tidak cukup)")
 
     def _resolve(_cfg):
-        import hermes_vtuber_bridge as bridge
+        import arti_bridge as bridge
 
         return bridge.resolve_asr_input_device(_cfg)
 

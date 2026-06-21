@@ -36,7 +36,7 @@ if errorlevel 1 (
 start "Arti Telemetry" "%PY%" "%~dp0arti_telemetry_dashboard.py" --watch --open --interval 15
 
 echo [Arti] Bridge starting di window ini...
-"%PY%" "%~dp0hermes_vtuber_bridge.py"
+"%PY%" "%~dp0arti_bridge.py"
 
 echo.
 echo [Arti] Bridge selesai. Dashboard window mungkin masih jalan - tutup manual kalau perlu.

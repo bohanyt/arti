@@ -22,7 +22,7 @@ copy ARTI_VIEWERS.example.md ARTI_VIEWERS.md
 copy ARTI_MOOD_STATE.example.json ARTI_MOOD_STATE.json
 # edit sesuai karakter kamu
 
-python hermes_vtuber_bridge.py
+python arti_bridge.py
 ```
 
 ## Dokumentasi
@@ -38,7 +38,7 @@ python hermes_vtuber_bridge.py
 ## Struktur (yang ada di repo)
 
 ```
-hermes_vtuber_bridge.py   # entry point live
+arti_bridge.py            # entry point live
 arti_*.py                 # modul (voice, RAG, scouter, TTS, …)
 supertone_engine.py       # TTS subprocess
 subtitle_server.py        # OBS subtitle (opsional)

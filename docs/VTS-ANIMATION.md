@@ -13,7 +13,7 @@ Repo ini **tidak** menyertakan file Live2D / `.exp3.json` kamu.
 | Parameter yang ada | `FaceAngleX` vs `ParamAngleX` vs custom |
 | Range nilai | -30..30 vs skala model lain |
 
-**Yang perlu kamu lakukan:** buka VTS → map hotkey & expression ke nama yang **benar di model kamu**, lalu update key CONFIG / string di `hermes_vtuber_bridge.py` & `arti_expression_runtime.py`.
+**Yang perlu kamu lakukan:** buka VTS → map hotkey & expression ke nama yang **benar di model kamu**, lalu update key CONFIG / string di `arti_bridge.py` & `arti_expression_runtime.py`.
 
 Jangan copy angka parameter dari dokumentasi lain tanpa cek di VTS Model Settings.
 
@@ -34,9 +34,12 @@ Jangan copy angka parameter dari dokumentasi lain tanpa cek di VTS Model Setting
 ```python
 "expression_emotion_enabled": True,
 "expression_nod_enabled": True,
+"expression_mood_strip_param_ids": [],  # Param ID model kamu yang jangan disentuh mood overlay
 "idle_motion_stop_hotkey": "IdleMotionStop",   # ganti ke hotkey VTS kamu
 "idle_vts_connect_timeout_sec": 20,
 ```
+
+`expression_mood_strip_param_ids`: cek file `.exp3.json` mood kamu di VTS — kalau ada param lampu/mulut/deformasi custom (mis. `Param48`), masukkan di sini supaya overlay mood tidak merusak lip-sync.
 
 Saat **PTT ON** atau **YT trigger**: idle body motion di-pause, expression “aware/bicara” dipakai (nama state sesuaikan).
 

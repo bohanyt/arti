@@ -1,4 +1,4 @@
-"""Voice turn pipeline — extracted prep logic from hermes_vtuber_bridge."""
+"""Voice turn pipeline — extracted prep logic from arti_bridge."""
 
 from __future__ import annotations
 
@@ -79,25 +79,30 @@ async def prepare_turn_context(
         _load_rag(base_system),
     )
 
+    name = (config.get("cohost_name") or "co-host").strip()
+    tone = (config.get("voice_tone_adjectives") or "ramah dan natural").strip()
+    style = (config.get("voice_reply_style_hint") or "").strip()
     is_from_viewer = speech.startswith("[Pesan Live Chat dari Viewer")
     if is_from_viewer:
-        ctx.target_instruction = (
-            "Jawab pesan/pertanyaan dari viewer tersebut dengan ramah, imut, "
-            "dan cerdas dalam karakter Arti kepada viewer tersebut."
+        custom = (config.get("voice_viewer_instruction") or "").strip()
+        ctx.target_instruction = custom or (
+            f"Jawab pesan/pertanyaan dari viewer tersebut dengan {tone} "
+            f"dalam karakter {name} kepada viewer tersebut."
         )
     else:
-        ctx.target_instruction = (
-            "Jawab panggilan streamer sekarang sebagai Arti. Langsung bicara "
-            "dalam karakter co-host kepada streamer."
+        custom = (config.get("voice_streamer_instruction") or "").strip()
+        ctx.target_instruction = custom or (
+            f"Jawab panggilan streamer sekarang sebagai {name}. Langsung bicara "
+            f"dalam karakter co-host kepada streamer."
         )
 
+    style_line = f"\n{style}" if style else ""
     ctx.prompt_content = f"""[CATATAN SEJARAH STREAM:]
 {ctx.formatted_history}
 
 [Pesan/Panggilan Sekarang:]
 "{speech}"
 
-{ctx.target_instruction}
-Jawab dalam 2-3 kalimat penuh dalam Bahasa Indonesia. Jangan terlalu pendek, jangan yapping.
-Jangan kutip format log, timestamp, atau label [Streamer]/[Arti]. Hanya ucapkan dialog langsung dalam karakter Arti."""
+{ctx.target_instruction}{style_line}
+Jangan kutip format log, timestamp, atau label [Streamer]/[{name}]. Hanya ucapkan dialog langsung dalam karakter {name}."""
     return ctx

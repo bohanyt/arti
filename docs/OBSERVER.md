@@ -27,7 +27,7 @@ Blocking shutdown with progress bar (`observer_shutdown_blocking: true`).
 ## Manual re-run
 
 ```bash
-python -c "import arti_observer_shutdown as o; from hermes_vtuber_bridge import CONFIG; o.run_observer_shutdown(CONFIG)"
+python -c "import arti_observer_shutdown as o; from arti_bridge import CONFIG; o.run_observer_shutdown(CONFIG)"
 ```
 
 ## Health

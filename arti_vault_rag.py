@@ -40,9 +40,12 @@ def enrich_rag_query(query: str, config: dict | None = None) -> str:
         return q
     debut = cfg.get("arti_debut_label", "debut date")
     archive = cfg.get("arti_archive_from", "YYYY-MM-DD")
+    if not cfg.get("vault_rag_enrich_enabled", True):
+        return q
+    name = (cfg.get("cohost_name") or "co-host").strip()
     return (
-        f"{q} Arti debut co-host {debut} arsip vault sessions {archive} "
-        f"arti_origin sejarah stream"
+        f"{q} {name} debut co-host {debut} archive vault sessions {archive} "
+        f"origin stream history"
     )
 
 

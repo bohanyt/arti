@@ -2,7 +2,7 @@
 
 This module is the persistent local synthesis server that runs in the
 Python 3.12 virtual environment (``venv312``). It communicates with the
-bridge (``hermes_vtuber_bridge.py``, Python 3.11) exclusively over its
+bridge (``arti_bridge.py``, Python 3.11) exclusively over its
 inherited stdin/stdout pipes using newline-delimited JSON (NDJSON):
 
     stdin   <- one compact JSON request object per line

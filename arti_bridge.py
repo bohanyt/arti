@@ -138,7 +138,7 @@ CONFIG = {
     "sambanova_model": "meta-llama-3.1-8b-instruct",  # atau "meta-llama-3.3-70b-instruct"
     
     "vts_api_port": 8002,                             # Port VTS API
-    "vts_plugin_name": "HermesVTuberBridge",
+    "vts_plugin_name": "ArtiVTuberBridge",
     "vts_developer": "YourDeveloperName",
     "tts_voice": "id-ID-GadisNeural",                 # Indonesian female Edge TTS voice
     "virtual_cable_name": "CABLE Input",
@@ -342,8 +342,19 @@ CONFIG = {
     "expression_nod_fps": 12,
     "expression_nod_wait_tts_sec": 30.0,
 
-    # Mood overlay saat bicara ([EMOTION:...] dari LLM)
-    "expression_emotion_enabled": True,
+    # Mood overlay: param ID yang tidak boleh disentuh saat ekspresi mood (beda tiap model Live2D)
+    "expression_mood_strip_param_ids": [],  # tambah Param48, Param122, … sesuai model — lihat docs/VTS-ANIMATION.md
+
+    # Voice prompt tuning (ganti tone/style tanpa edit kode)
+    "cohost_name": "Arti",
+    "voice_tone_adjectives": "ramah dan natural",
+    "voice_reply_style_hint": (
+        "Jawab dalam 2-3 kalimat penuh dalam Bahasa Indonesia. "
+        "Jangan terlalu pendek atau terlalu panjang."
+    ),
+
+    # Vault RAG query boost untuk pertanyaan timeline (suffix pencarian, bukan teks ke viewer)
+    "vault_rag_enrich_enabled": True,
 
     # Hotkey VTS untuk potong motion badan saat aware
     "idle_motion_stop_hotkey": "IdleMotionStop",
@@ -933,10 +944,10 @@ def add_to_history(source, message, arti_meta=None):
         print(f"[Transcript] Gagal menulis baris: {e}")
 
 # ==========================================
-# DYNAMIC LEARNING & HERMES VAULT INTEGRATION (LOCK-AWARE HARNESS)
+# DYNAMIC LEARNING & VAULT INTEGRATION (LOCK-AWARE HARNESS)
 # ==========================================
 # Paths Setup untuk Locking Protocol
-LOCK_DIR = os.path.join(os.path.expanduser("~"), ".hermes-locks")
+LOCK_DIR = os.path.join(os.path.expanduser("~"), ".arti-locks")
 LOCK_FILE = os.path.join(LOCK_DIR, "db.lock")
 
 def wait_and_acquire_lock(holder_name="arti-vtuber-bridge", timeout_sec=10):
@@ -1134,7 +1145,7 @@ class VTSController:
     async def send_request(self, message_type, data=None, *, timeout=3.0):
         if not self.websocket:
             raise RuntimeError("VTS not connected")
-        rid = f"Hermes_{time.time_ns()}"
+        rid = f"Arti_{time.time_ns()}"
         payload = {
             "apiName": "VTubeStudioPublicAPI",
             "apiVersion": "1.0",
@@ -1198,7 +1209,7 @@ class VTSController:
         try:
             res = await self.send_request("ParameterCreationRequest", {
                 "parameterName": name,
-                "explanation": f"Hermes Bridge: {name}",
+                "explanation": f"Arti Bridge: {name}",
                 "min": min_val,
                 "max": max_val,
                 "defaultValue": default_val
@@ -4333,7 +4344,7 @@ def stop_idle_animation():
 # 5. MAIN ORCHESTRATOR LOOP
 # ==========================================
 async def main_loop():
-    print("=== HERMES VTUBER BRIDGE (CONTEXT BUFFER ENHANCED) ===")
+    print("=== ARTI VTUBER CO-HOST BRIDGE ===")
     
     global main_event_loop, _brain_busy
     main_event_loop = asyncio.get_event_loop()
@@ -5284,7 +5295,7 @@ def _extract_yt_video_id(text):
 def _save_config_to_file():
     """Update CONFIG dict values back to file."""
     # Find the CONFIG block in file and update specific keys
-    config_path = os.path.join(_SCRIPT_DIR, "hermes_vtuber_bridge.py")
+    config_path = os.path.join(_SCRIPT_DIR, "arti_bridge.py")
     try:
         with open(config_path, "r", encoding="utf-8") as f:
             content = f.read()
@@ -5341,7 +5352,7 @@ if __name__ == "__main__":
         if needs_save and sys.stdin.isatty() and "--no-save-bridge" not in sys.argv:
             try:
                 save_choice = input(
-                    "Simpan juga ke hermes_vtuber_bridge.py sebagai default? (y/N): "
+                    "Simpan juga ke arti_bridge.py sebagai default? (y/N): "
                 ).strip().lower()
             except (EOFError, KeyboardInterrupt):
                 save_choice = ""

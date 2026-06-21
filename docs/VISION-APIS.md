@@ -14,7 +14,7 @@ Multi-provider screenshot describe chain for `[LAYAR:]` inject and Curious.
 8. **Z.ai** — `glm-4.6v-flash` (`ZAI_API_KEY`)
 9. **Ollama Cloud** — `gemma4:31b-cloud` (`OLLAMA_API_KEY`)
 
-## CONFIG (`hermes_vtuber_bridge.py`)
+## CONFIG (`arti_bridge.py`)
 
 - `vision_enabled` — master switch (fitur ada di code)
 - `vision_runtime_on_start` — awal stream: `false` = layar off sampai di-toggle

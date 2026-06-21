@@ -2,7 +2,7 @@
 
 Semua slug di bawah pakai prefix provider, contoh: `poolside/laguna-xs.2:free`.
 
-Edit di `CONFIG` [`hermes_vtuber_bridge.py`](../hermes_vtuber_bridge.py) atau override di `live_session.json`.
+Edit di `CONFIG` [`arti_bridge.py`](../arti_bridge.py) atau override di `live_session.json`.
 
 ## Peran di bridge
 

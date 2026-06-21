@@ -13,6 +13,7 @@ venv312/
 .idea/
 .cursor/
 .cursor-tmp-nvidia/
+.arti-locks/
 .hermes/
 .kiro/
 .DS_Store

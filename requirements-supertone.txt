@@ -6,7 +6,7 @@
 # that runs `supertone_engine.py` as a persistent synthesis subprocess.
 #
 # It is INTENTIONALLY DISTINCT from the bridge's `requirements.txt`, which
-# pins the Python 3.11 environment that runs `hermes_vtuber_bridge.py`.
+# pins the Python 3.11 environment that runs `arti_bridge.py`.
 # The `supertonic` library requires Python 3.12+, so it cannot live in the
 # 3.11 bridge env — keep these two dependency sets isolated.
 #

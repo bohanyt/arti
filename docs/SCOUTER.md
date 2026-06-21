@@ -60,5 +60,5 @@ python bridge_health.py
 ## Module map
 
 - `arti_scouter_client.py` — chain orchestrator
-- `hermes_vtuber_bridge.py` — `scouter_worker`, `apply_scouter_result`, `is_vision_active()`
+- `arti_bridge.py` — `scouter_worker`, `apply_scouter_result`, `is_vision_active()`
 - `arti_curious.py` — `curious_worthy` / `curious_hook` guards

@@ -22,20 +22,13 @@ _VTS_MOOD_DIR = os.environ.get(
     r"\VTube Studio_Data\StreamingAssets\Live2DModels\YOUR_MODEL",
 )
 
-# Params mood overlay must not touch (lip-sync, lampu, deformasi mulut)
-_MOOD_STRIP_IDS = frozenset({
-    "ParamMouthOpenY",
-    "ParamMouthForm",
-    "Param48",
-    "Param122",
-    "Param125",
-    "Param183",
-    "Param186",
-    "Param130",
-    "Param96",
-    "Param97",
-    "Param2",
-})
+# Params mood overlay must not touch (lip-sync + model-specific — lihat CONFIG)
+_BASE_MOOD_STRIP_IDS = frozenset({"ParamMouthOpenY", "ParamMouthForm"})
+
+
+def mood_strip_param_ids(config: dict | None = None) -> frozenset[str]:
+    extra = (config or {}).get("expression_mood_strip_param_ids") or []
+    return _BASE_MOOD_STRIP_IDS | frozenset(extra)
 
 EMOTION_TAG_RE = re.compile(r"\[EMOTION:(\w+)\]\s*", re.IGNORECASE)
 
@@ -69,7 +62,7 @@ def should_nod_for_emotion(emotion: str, config: dict) -> bool:
     return EMOTION_NOD_ENABLED.get(emotion, True)
 
 
-def audit_mood_exp_on_disk(mood_file: str) -> dict[str, Any]:
+def audit_mood_exp_on_disk(mood_file: str, config: dict | None = None) -> dict[str, Any]:
     """Cek param bermasalah yang masih ada di file ekspresi VTS."""
     path = os.path.join(_VTS_MOOD_DIR, mood_file)
     out: dict[str, Any] = {"mood_file": mood_file, "path": path, "exists": os.path.isfile(path)}
@@ -80,7 +73,7 @@ def audit_mood_exp_on_disk(mood_file: str) -> dict[str, Any]:
             data = json.load(f)
         ids = {p.get("Id") for p in data.get("Parameters", []) if p.get("Id")}
         out["param_count"] = len(ids)
-        out["blocked_still_present"] = sorted(ids & _MOOD_STRIP_IDS)
+        out["blocked_still_present"] = sorted(ids & mood_strip_param_ids(config))
         out["has_param_angle_y"] = "ParamAngleY" in ids
         out["has_eye_deform"] = (
             "ParamEyeLOpen" in ids or "ParamEyeROpen" in ids
@@ -140,7 +133,7 @@ async def apply_speaking(vts: Any, emotion: str, config: dict) -> None:
     mood_file = None
     if config.get("expression_emotion_enabled"):
         mood_file = EMOTION_MAP.get(emotion)
-    audit = audit_mood_exp_on_disk(mood_file) if mood_file else {}
+    audit = audit_mood_exp_on_disk(mood_file, config) if mood_file else {}
     if mood_file:
         await vts.send_expression(mood_file, True)
         # Mood overlay can deactivate ArtiBicara in VTS — re-assert lamp, then mood again

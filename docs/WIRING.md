@@ -41,7 +41,7 @@ Opsional: `ARTI_VIEWERS.md` (profil viewer), `ARTI_MOOD_STATE.json` (mood runtim
 2. Jalankan bridge; pertama kali akan minta **Allow** di VTS.
 3. Token disimpan ke `vts_token.txt` (lokal, gitignored).
 
-CONFIG relevan di `hermes_vtuber_bridge.py`:
+CONFIG relevan di `arti_bridge.py`:
 
 ```python
 "vts_api_port": 8002,
