@@ -1,0 +1,39 @@
+# =============================================================================
+# Arti VTuber Co-Host — bridge dependencies (Python 3.11, venv/)
+# =============================================================================
+# Install:
+#   py -3.11 -m venv venv
+#   venv\Scripts\python -m pip install -r requirements.txt
+#
+# Daftar ini HANYA berisi paket yang benar-benar di-import oleh kode Arti
+# (hasil audit AST seluruh modul, 2026-07-26) — bukan pip freeze environment.
+# TTS Supertone punya venv terpisah: lihat requirements-supertone.txt.
+# -----------------------------------------------------------------------------
+
+# --- Audio pipeline ---
+sounddevice==0.5.5        # capture mic + playback ke virtual cable
+soundfile==0.13.1         # baca/tulis WAV
+faster-whisper==1.2.1     # ASR lokal (fallback; utama via Groq Whisper API)
+edge-tts==7.2.8           # TTS fallback (engine utama: Supertone di venv312)
+
+# --- Core ---
+numpy==2.4.6              # resampling audio + embedding vault RAG
+requests==2.34.2          # semua HTTP API (Groq, Gemini, OpenRouter, YT innertube)
+websockets==16.0          # VTube Studio API + subtitle server OBS
+python-dotenv==1.2.2      # load .env (opsional — arti_env.py punya fallback manual)
+
+# --- Input / hotkey ---
+keyboard==0.13.5          # hotkey keyboard PTT
+mouse==0.7.1              # hotkey tombol samping mouse (PTT + vision toggle)
+
+# --- Vision (screenshot layar untuk konteks) ---
+mss==10.2.0               # capture layar
+pillow==12.2.0            # encode/resize screenshot
+
+# --- Progress display ---
+tqdm==4.67.3              # progress bar observer pipeline
+
+# --- Tests ---
+pytest==9.0.3
+pytest-timeout==2.4.0     # potong test yang hang (regresi loop tak berujung)
+hypothesis==6.155.0       # property-based tests (subtitle, preprocessor, speak)

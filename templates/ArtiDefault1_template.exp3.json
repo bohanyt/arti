@@ -1,0 +1,120 @@
+{
+    "Type": "Live2D Expression",
+    "Parameters": [
+        {
+            "Id": "Param33",
+            "Value": -1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param28",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "特殊部件Special parts",
+            "Value": 0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "水印关闭Watermark off",
+            "Value": 1,
+            "Blend": "Add"
+        },
+        {
+            "Id": "刘海切换Style of bangs",
+            "Value": 6,
+            "Blend": "Add"
+        },
+        {
+            "Id": "刘海长度Length of bangs",
+            "Value": -0.74,
+            "Blend": "Add"
+        },
+        {
+            "Id": "刘海宽度Width of bangs",
+            "Value": -0.27,
+            "Blend": "Add"
+        },
+        {
+            "Id": "刘海R切换Style of right bangs",
+            "Value": 2.55,
+            "Blend": "Add"
+        },
+        {
+            "Id": "刘海L切换Style of left bangs",
+            "Value": 2.67,
+            "Blend": "Add"
+        },
+        {
+            "Id": "刘海R长度Length of right bangs",
+            "Value": -0.71,
+            "Blend": "Add"
+        },
+        {
+            "Id": "刘海L长度Length of left bangs",
+            "Value": -0.76,
+            "Blend": "Add"
+        },
+        {
+            "Id": "鬓角切换Style of temples",
+            "Value": 0.4,
+            "Blend": "Add"
+        },
+        {
+            "Id": "鬓角L长度Length of left temples",
+            "Value": 0.7,
+            "Blend": "Add"
+        },
+        {
+            "Id": "鬓角R长度Length of right temples",
+            "Value": 0.71,
+            "Blend": "Add"
+        },
+        {
+            "Id": "鬓角L宽度Width of left temples",
+            "Value": 1,
+            "Blend": "Add"
+        },
+        {
+            "Id": "鬓角R宽度Width of right temples",
+            "Value": 1,
+            "Blend": "Add"
+        },
+        {
+            "Id": "后发切换Style of back hair",
+            "Value": 0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "后发长度外Length of back hair (outer)",
+            "Value": -0.4,
+            "Blend": "Add"
+        },
+        {
+            "Id": "后发长度内Length of back hair (inner)",
+            "Value": -0.82,
+            "Blend": "Add"
+        },
+        {
+            "Id": "后发变形Shape of back hair",
+            "Value": 0.73,
+            "Blend": "Add"
+        },
+        {
+            "Id": "脸宽窄Face width",
+            "Value": -1,
+            "Blend": "Add"
+        },
+        {
+            "Id": "下巴上下Chin position(up&down)",
+            "Value": -1,
+            "Blend": "Add"
+        },
+        {
+            "Id": "眼形Eye shape",
+            "Value": 2,
+            "Blend": "Add"
+        }
+    ]
+}

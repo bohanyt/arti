@@ -1,0 +1,287 @@
+{
+    "Type": "Live2D Expression",
+    "IsModelCustomizationExpression": false,
+    "Comment": "ArtiIdle1 - Celingak celinguk kanan. Kepala miring + mata kanan. Untuk idle animation random.",
+    "Parameters": [
+        {
+            "Id": "Param33",
+            "Value": -1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param28",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param156",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param20",
+            "Value": 6.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param5",
+            "Value": -0.74,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param140",
+            "Value": -0.27,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param103",
+            "Value": 2.55,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param108",
+            "Value": 2.67,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param106",
+            "Value": -0.71,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param107",
+            "Value": -0.76,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param102",
+            "Value": 0.4,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param100",
+            "Value": 0.7,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param101",
+            "Value": 0.71,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param136",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param135",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param117",
+            "Value": 0.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param118",
+            "Value": -0.4,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param127",
+            "Value": -0.82,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param132",
+            "Value": 0.73,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param138",
+            "Value": -1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param139",
+            "Value": -1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param39",
+            "Value": 2.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param56",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param86",
+            "Value": 0.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param155",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param41",
+            "Value": 2.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param49",
+            "Value": 2.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param55",
+            "Value": 2.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param178",
+            "Value": 2.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param96",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param97",
+            "Value": -0.49,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param6",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param87",
+            "Value": 0.39,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param71",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param57",
+            "Value": 3.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param69",
+            "Value": 0.47,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param81",
+            "Value": -1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param82",
+            "Value": -11.74,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param147",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param204",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param130",
+            "Value": 0.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param50",
+            "Value": 8.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param157",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param137",
+            "Value": 0.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param192",
+            "Value": 0.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamAngleX",
+            "Value": 10.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamAngleY",
+            "Value": 15.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamAngleZ",
+            "Value": -8.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamEyeLOpen",
+            "Value": 0.9,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamEyeLSmile",
+            "Value": 0.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamEyeROpen",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamEyeRSmile",
+            "Value": 0.1,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamEyeBallX",
+            "Value": 0.4,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamEyeBallY",
+            "Value": 0.1,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamMouthOpenY",
+            "Value": 0.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "ParamMouthForm",
+            "Value": 0.2,
+            "Blend": "Add"
+        }
+    ]
+}

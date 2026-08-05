@@ -1,0 +1,231 @@
+{
+    "Type": "Live2D Expression",
+    "IsModelCustomizationExpression": false,
+    "Parameters": [
+        {
+            "Id": "Param33",
+            "Value": -1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param28",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param156",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param20",
+            "Value": 6.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param5",
+            "Value": -0.740986704826355,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param140",
+            "Value": -0.2747480869293213,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param103",
+            "Value": 2.547661781311035,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param108",
+            "Value": 2.6725478172302246,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param106",
+            "Value": -0.7076835632324219,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param107",
+            "Value": -0.7576382160186768,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param102",
+            "Value": 0.39963310956954956,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param100",
+            "Value": 0.7002747058868408,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param101",
+            "Value": 0.707683801651001,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param136",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param135",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param117",
+            "Value": 0.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param118",
+            "Value": -0.39963310956954956,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param127",
+            "Value": -0.8159177303314209,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param132",
+            "Value": 0.733578085899353,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param138",
+            "Value": -1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param139",
+            "Value": -1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param39",
+            "Value": 2.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param56",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param86",
+            "Value": 0.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param155",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param41",
+            "Value": 1.9981659650802612,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param49",
+            "Value": 1.9981663227081299,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param55",
+            "Value": 2.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param178",
+            "Value": 2.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param96",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param97",
+            "Value": -0.49121570587158203,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param6",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param87",
+            "Value": 0.3913075923919678,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param71",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param57",
+            "Value": 3.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param69",
+            "Value": 0.47456443309783936,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param81",
+            "Value": -1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param82",
+            "Value": -11.739242553710938,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param147",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param204",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param130",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param50",
+            "Value": 8.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param157",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param137",
+            "Value": 0.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param192",
+            "Value": 0.0,
+            "Blend": "Add"
+        }
+    ]
+}

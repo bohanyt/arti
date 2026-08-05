@@ -1,0 +1,68 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Tooling caches
+.hypothesis/
+.pytest_cache/
+.kiro/
+.hermes/
+
+# Venv
+venv/
+venv312/
+
+# --- Rahasia & identitas — JANGAN PERNAH di-commit ---
+.env
+vts_token.txt
+config_local.json
+
+# --- Data pribadi streamer (repo publik pakai versi .example) ---
+ARTI_SOUL.md
+ARTI_VIEWERS.md
+ARTI_MOOD_STATE.json
+vault/
+PROGRESS.md
+
+# Arsip/backup vault — SALINAN dari vault/ yang di-ignore di atas, jadi isinya
+# sama pribadinya: percakapan stream, nama penonton, cerita pribadi. Tanpa baris
+# ini, `git add -A` akan menariknya masuk (archive/ sendiri tidak di-ignore).
+archive/vault-*/
+archive/hermes-vault-*/
+vault/**/*.bak-*
+vault/**/*.bak2-*
+
+# Runtime session data
+session_logs/
+transcripts/
+live_session.json
+data/session_manifest.json
+data/vault_rag.db
+data/vault_rag.db-*
+data/observer_rag.db
+data/observer_rag.db-*
+data/telemetry/
+
+# Test baselines yang di-generate ulang per mesin (bisa berisi nilai CONFIG lokal)
+tests/_baselines/module_constants_snapshot.json
+
+# Upstream agent-skills (local clone for skill copy; not committed)
+vendor/agent-skills/
+
+# Sampel payload Streamlabs (berisi nama viewer/channel) — diagnostik lokal
+data/streamlabs_events_sample.jsonl
+mc-bot/node_modules/

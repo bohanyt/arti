@@ -1,0 +1,56 @@
+{
+    "Type": "Live2D Expression",
+    "Parameters": [
+        {
+            "Id": "Param33",
+            "Value": -1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Param28",
+            "Value": 1.0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "特殊部件Special parts",
+            "Value": 0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "水印关闭Watermark off",
+            "Value": 1,
+            "Blend": "Add"
+        },
+        {
+            "Id": "眼形Eye shape",
+            "Value": 2,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Face sad",
+            "Value": 0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Face angry",
+            "Value": 0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Face happy",
+            "Value": 0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Face confused",
+            "Value": 0,
+            "Blend": "Add"
+        },
+        {
+            "Id": "Face excited",
+            "Value": 0,
+            "Blend": "Add"
+        }
+    ],
+    "Comment": "Template untuk emotion expression. Adjust parameter values sesuai kebutuhan. Face sad/angry/happy/confused/excited = 1 untuk aktif, 0 untuk non-aktif."
+}

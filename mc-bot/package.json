@@ -1,0 +1,11 @@
+{
+  "name": "arti-mc-bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bot Minecraft Arti — mineflayer, dikendalikan bridge Python via NDJSON stdio",
+  "main": "bot.js",
+  "dependencies": {
+    "mineflayer": "4.37.1",
+    "mineflayer-pathfinder": "2.4.5"
+  }
+}

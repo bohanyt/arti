@@ -1,0 +1,28 @@
+# =============================================================================
+# Cursor SDK — dependensi OPSIONAL untuk jalur brain Composer 2.5
+# =============================================================================
+#
+# File ini menargetkan venv utama (`venv`, Python 3.11) yang menjalankan
+# `hermes_vtuber_bridge.py` — beda dari `requirements-supertone.txt` yang
+# menargetkan `venv312`.
+#
+# SENGAJA TIDAK dimasukkan ke `requirements.txt`. Bridge harus tetap jalan
+# tanpa paket ini: `arti_cursor_agent.py` melakukan lazy import di dalam
+# fungsi, dan `is_available()` menyaring lebih dulu. Kalau paket tidak ada,
+# routing Cursor return False dan rantai provider lama jalan seperti biasa.
+#
+# Pasang:
+#     .\venv\Scripts\Activate.ps1
+#     pip install -r requirements-cursor.txt
+#
+# Lalu bikin User API key di https://cursor.com/dashboard/api dan isi
+# CURSOR_API_KEY di `.env`.
+#
+# HATI-HATI: paket PyPI bernama `cursor` BUKAN SDK Cursor — itu utilitas
+# terminal yang tidak berhubungan sama sekali. Yang benar `cursor-sdk`
+# (nama modulnya `cursor_sdk`).
+#
+# Butuh Python >= 3.10. `venv` saat ini 3.11.9 — memenuhi.
+# =============================================================================
+
+cursor-sdk>=1.0.26
