@@ -1,4 +1,4 @@
-# Arti — VTuber AI Co-host
+# Arti: VTuber AI Co-host
 
 **Co-host VTuber yang benar-benar hadir di siaranmu.** Dia dengar suaramu, baca
 chat YouTube, lihat layarmu, ingat obrolan minggu lalu, bereaksi ke donasi,
@@ -287,11 +287,6 @@ terpisah kalau perlu.
   dan banyak keputusan desain lahir dari kejadian nyata di siaran — komentarnya
   menceritakan itu, dan sengaja tidak dibersihkan karena di situ pelajarannya.
 
-## Keamanan
-
-Jangan commit `.env`, `vts_token.txt`, `config_local.json`, atau `ARTI_SOUL.md`
-(semuanya sudah di-gitignore). Kalau kamu pernah push repo yang berisi API key,
-**rotate** kuncinya di konsol provider sebelum go public.
 
 ## Lisensi
 
