@@ -74,7 +74,7 @@ Minecraft checks in public CI are deterministic/cloud-safe checks only; they do 
 
 ## Stardew Valley
 
-Stardew work is published only when a path is explicitly public-safe under the publication manifest. Private telemetry, local Steam/Stardew evidence, machine-specific controller data, and later OBS-2B2a work are excluded from this refresh. Any included protocol/unit checks establish **UNIT_TESTED / CLOUD_VERIFIED** status only unless a document explicitly scopes stronger pre-existing evidence.
+The Stardew Valley integration remains **REVIEW** for this public refresh and is **not included** in the September 2 export. Its private runtime, SMAPI projects, telemetry, fixtures, and verification material stay outside this repository, and no Stardew test result is claimed by this release. PR #25 / OBS-2B2a terrain work is also outside the frozen source baseline.
 
 ## Tests
 
