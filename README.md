@@ -135,7 +135,7 @@ The public repository deliberately excludes internal development choreography an
 - debug dumps, screenshots, raw telemetry, machine paths, or backup locations;
 - internal handoffs, Control Tower material, task queues, raw research archives, or private fine-tuning data.
 
-If a fixture cannot be proven synthetic/public-safe, do not publish it.
+If a fixture cannot be proven synthetic/public-safe, do not publish it. See [`SECURITY.md`](SECURITY.md) for sensitive vulnerability reporting and disclosure guidance.
 
 ## Contributing
 
