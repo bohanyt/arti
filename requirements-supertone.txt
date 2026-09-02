@@ -37,7 +37,7 @@ huggingface-hub==0.36.2
 # GPU (opsional tapi SANGAT disarankan) — CONFIG `supertonic_use_cuda: true`
 # -----------------------------------------------------------------------------
 #
-# Terukur 2026-07-31 di RTX 4050 Laptop (6 GB), lewat protokol NDJSON asli:
+# Terukur [date removed] di NVIDIA GPU (6 GB), lewat protokol NDJSON asli:
 #
 #     CPU  : p50 26,25 detik per kalimat   (audio 4,4 detik -> 6,5x LEBIH LAMBAT dari realtime)
 #     CUDA : p50  0,28 detik per kalimat   (audio yang sama -> 16x lebih cepat dari realtime)

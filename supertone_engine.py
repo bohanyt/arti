@@ -33,7 +33,7 @@ import time
 from pathlib import Path
 
 # Pure, dependency-light helper (imports only `re`/`logging`), so it is safe to
-# import at module top level in any environment -- including the Python 3.11
+# import at module top level in any environment -- including the Python [time removed]
 # bridge venv used for unit tests where ``supertonic`` is absent.
 from text_preprocessor import preprocess_preserving_tags
 
@@ -116,7 +116,7 @@ def clamp(value, lo, hi):
 # and kept resident for the lifetime of the subprocess (no cold start per
 # utterance). ``supertonic`` is imported lazily inside load_model() so this
 # module still imports cleanly in environments where ``supertonic`` is not
-# installed (e.g. the Python 3.11 bridge venv used for unit tests).
+# installed (e.g. the Python [time removed] bridge venv used for unit tests).
 # --------------------------------------------------------------------------- #
 
 
@@ -226,7 +226,7 @@ def get_voice_style(voice_name: str):
 # stdin one line at a time and dispatches each to the right handler. The loop
 # never terminates on a single bad request -- malformed JSON, version
 # mismatches, type mismatches, and unknown types all produce an error response
-# and keep the loop running (req 8.10, 10.x). Only an explicit "shutdown"
+# and keep the loop running (req [time removed], 10.x). Only an explicit "shutdown"
 # request or stdin EOF ends the loop, after which best-effort temp cleanup runs
 # and the process exits zero.
 # --------------------------------------------------------------------------- #

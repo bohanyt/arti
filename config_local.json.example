@@ -1,31 +1,23 @@
 {
-  "_comment": "Salin file ini jadi config_local.json lalu isi nilai kamu. Semua key CONFIG di hermes_vtuber_bridge.py bisa di-override dari sini. File config_local.json di-gitignore — aman untuk data pribadi/per-mesin.",
-
+  "_comment": "Copy this file to config_local.json and keep the real file untracked. Replace placeholders only with your own local values.",
   "arti_debut_date": "YYYY-MM-DD",
-  "arti_debut_label": "27 Mei 2026 (contoh format label)",
+  "arti_debut_label": "Example debut label",
   "arti_archive_from": "YYYY-MM-DD",
-
-  "youtube_video_id": "ISI_VIDEO_ID_TIAP_STREAM",
-  "streamer_name": "NamaStreamerKamu",
-  "yt_default_viewer": "@handleYtKamu",
-  "vts_model_dir": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\VTube Studio\\VTube Studio_Data\\StreamingAssets\\Live2DModels\\NAMA_MODEL_KAMU",
-
+  "youtube_video_id": "YOUR_LIVE_VIDEO_ID",
+  "streamer_name": "YourStreamerName",
+  "yt_default_viewer": "@your_handle",
+  "minecraft_streamer_name": "YourMinecraftName",
+  "vts_model_dir": "PATH_TO_YOUR_VTUBE_STUDIO_MODEL",
   "vts_api_port": 8002,
   "active_profile": "default",
-
-  "_comment_owner": "Handle YouTube PEMILIK — cuma dari sini perintah ganti mode/misi lewat chat diterima. Tanpa @ atau dengan @, dua-duanya diterima.",
-  "owner_yt_handles": ["handleYtKamu"],
-
-  "_comment_regulars": "Nama penonton tetap, dipakai scripts/backfill_session_summaries.py biar summarizer tidak salah mengeja. Data orang lain — memang sengaja hanya di file yang gitignored.",
+  "owner_yt_handles": ["your_handle"],
   "session_summary_regulars": [],
-
-  "_comment_obs": "Nama scene OBS per mode sesi (kosong = scene itu tidak diganti). Butuh obs-websocket: Tools > WebSocket Server Settings.",
+  "codex_bin": "PATH_TO_CODEX_EXECUTABLE",
+  "codex_scratch_dir": "PATH_TO_EMPTY_SCRATCH_DIR",
   "obs_scene_switch_enabled": false,
   "obs_scene_duet": "",
   "obs_scene_duet_game": "",
   "obs_scene_host_chat": "",
   "obs_scene_host_game": "",
-
-  "_comment_cuda": "Jalankan TTS Supertonic di GPU NVIDIA. Terukur di RTX 4050 Laptop: CPU p50 26,25 detik per kalimat vs CUDA 0,28 detik — sekitar 90x. Butuh onnxruntime-gpu + paket nvidia-* di venv312; lihat requirements-supertone.txt. Kalau CUDA tidak tersedia, Supertonic jatuh ke CPU sendiri (Arti tetap bersuara, cuma lambat).",
   "supertonic_use_cuda": false
 }

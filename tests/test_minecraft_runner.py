@@ -14,7 +14,7 @@ import arti_minecraft  # noqa: E402
 from arti_minecraft import MinecraftRunner  # noqa: E402
 
 CFG = {
-    "minecraft_streamer_name": "bohanyto",
+    "minecraft_streamer_name": "streamer_test",
     "minecraft_reaction_cooldown_sec": 60.0,
     "minecraft_max_bot_respawns": 0,
 }
@@ -99,7 +99,7 @@ def test_event_flow_reactions_history_and_deadman(monkeypatch):
         '{"ev": "spawned", "pos": {}, "health": 20}',
         '{"ev": "status", "health": 20, "food": 20, "task": "follow"}',
         'BUKAN JSON — reader tidak boleh crash',
-        '{"ev": "chat", "from": "bohanyto", "text": "sini arti"}',
+        '{"ev": "chat", "from": "streamer_test", "text": "sini arti"}',
         '{"ev": "chat", "from": "orang_lain", "text": "abaikan"}',
         '{"ev": "death", "killer": "creeper"}',
     ])
@@ -110,8 +110,12 @@ def test_event_flow_reactions_history_and_deadman(monkeypatch):
     assert _wait_until(lambda: runner.gave_up)
     assert runner.last_status is not None and runner.last_status["health"] == 20
     # chat streamer -> history "Streamer" (bangunkan detektor kehidupan);
-    # chat orang lain tidak.
-    assert calls["history"] == [("Streamer", "(chat Minecraft) sini arti")]
+    # chat pemain LAIN ikut masuk history sejak mabar [date removed] — dengan NAMANYA
+    # sendiri, bukan menyamar jadi Streamer (atribusi = gate pemilik).
+    assert calls["history"] == [
+        ("Streamer", "(chat Minecraft) sini arti"),
+        ("orang_lain", "(chat Minecraft) abaikan"),
+    ]
     # death -> 1 reaksi; deadman -> 1 reaksi penutup
     assert len(calls["reactions"]) == 2
     assert "MATI" in calls["reactions"][0]

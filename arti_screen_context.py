@@ -11,10 +11,10 @@ from typing import Any
 
 DEFAULT_RING_SIZE = 5
 
-# Penanda log bridge Arti SENDIRI di layar (temuan live 2026-08-02 sore: vision
+# Penanda log bridge Arti SENDIRI di layar (temuan live [date removed] sore: vision
 # membaca terminal bridge -> Arti narasi dapurnya sendiri: "cursor screen
 # relevant False", "aku membaca 50 pesan sejarah"). Hanya token yang TIDAK
-# mungkin muncul di konten sah (Bohan ngoding ARTI di layar itu konten sah —
+# mungkin muncul di konten sah (operator ngoding ARTI di layar itu konten sah —
 # jangan blokir kata umum seperti "transkripsi" / nama file arti_*.py).
 _BRIDGE_LOG_MARKERS = (
     "[scouter]",
@@ -35,7 +35,7 @@ _BRIDGE_LOG_MARKERS = (
     "vad_tail",
     "uptime ok=",
     "mengirim ke groq",
-    # Echo prompt vision sendiri (live 2026-08-03 pagi: google_gemma
+    # Echo prompt vision sendiri (live [date removed] pagi: google_gemma
     # mengembalikan prompt-nya dan fallback parse menyimpannya sebagai scene).
     "vtuber ai companion",
     "analyze a screenshot",
@@ -229,7 +229,7 @@ def _parse_vision_response_raw(
         data = json.loads(text)
     except json.JSONDecodeError:
         # JSON rusak — paling sering karena KEPOTONG max_tokens di tengah string.
-        # Terpantau di sesi live 2026-08-01: fallback lama menyimpan JSON mentah
+        # Terpantau di sesi live [date removed]: fallback lama menyimpan JSON mentah
         # sebagai scene, yang lalu tersuntik ke prompt Arti sebagai
         # [LAYAR: { "scene": "..."]. Selamatkan nilai field-nya lewat regex dulu;
         # pola `[^"]*` sengaja tanpa quote penutup supaya string yang terpotong

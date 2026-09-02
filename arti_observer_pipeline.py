@@ -184,11 +184,22 @@ def run_observe(
     on_progress: Callable[[str, int, int, str], None] | None = None,
 ) -> list[BeatDraft]:
     """Segment transcript and summarize each segment via observer client."""
-    import arti_observer_client as client
-
     rows = load_transcript_rows(transcript_path)
     minutes = int(config.get("observer_segment_minutes", 10))
     segments = segment_by_minutes(rows, minutes=minutes)
+    return observe_segments(session_id, segments, config, on_progress=on_progress)
+
+
+def observe_segments(
+    session_id: str,
+    segments: list[Segment],
+    config: dict,
+    on_progress: Callable[[str, int, int, str], None] | None = None,
+) -> list[BeatDraft]:
+    """Summarize the GIVEN segments only — dipakai run_observe (semua segmen)
+    dan arti_observer_catchup (hanya segmen yang belum punya beat)."""
+    import arti_observer_client as client
+
     total = len(segments)
     beats: list[BeatDraft] = []
 

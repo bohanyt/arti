@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
 from typing import Any, Callable
 
 EMOTION_MAP: dict[str, str | None] = {
-    # "senang" SENGAJA tanpa berkas overlay (keputusan Bohan 2026-08-01): wajah
+    # "senang" SENGAJA tanpa berkas overlay (keputusan operator [date removed]): wajah
     # default Arti sudah senyum content — itulah ekspresi senangnya. Dua percobaan
-    # overlay senyum (halus & lebar) dua-duanya kelihatan janggal di mata Bohan dan
+    # overlay senyum (halus & lebar) dua-duanya kelihatan janggal di mata operator dan
     # sudah dihapus dari folder model. None = tag [EMOTION:senang] tetap dikenali
     # (nod tetap jalan), cuma tidak ada overlay wajah.
     "senang": None,
@@ -78,8 +79,24 @@ EMOTION_NOD_ENABLED: dict[str, bool] = {
     "senang": True,
     "marah": True,
     "bingung": True,
-    "sedih": False,
+    # DIUBAH [date removed] (keputusan operator): sedih dulu TIDAK mengangguk sama
+    # sekali, jadi "muka sedih sambil ngomong sambil angguk" mustahil. Sekarang
+    # boleh, tapi dilemahkan lewat EMOTION_NOD_SKALA — bukan sekadar dicabut
+    # larangannya, karena angguk bertenaga di wajah sedih terasa tidak nyambung.
+    "sedih": True,
 }
+
+# (pengali amplitudo, pengali periode). >1 pada periode = lebih PELAN.
+EMOTION_NOD_SKALA: dict[str, tuple[float, float]] = {
+    "sedih": (0.45, 1.7),
+}
+
+
+def nod_scale_for_emotion(emotion: str, config: dict) -> tuple[float, float]:
+    """Seberapa besar & cepat angguk untuk mood ini. Default (1.0, 1.0)."""
+    amp, per = EMOTION_NOD_SKALA.get(emotion, (1.0, 1.0))
+    amp = float(config.get("nod_amp_mul_override") or amp)
+    return amp, per
 
 
 def should_nod_for_emotion(emotion: str, config: dict) -> bool:
@@ -113,8 +130,8 @@ def audit_mood_exp_on_disk(mood_file: str) -> dict[str, Any]:
 
 
 # Permintaan ekspresi EKSPLISIT ("pasang muka marah") — menang atas tag LLM.
-# Live 2026-08-02: "kalo kamu pasang muka marah?" ditandai LLM [EMOTION:senang]
-# -> wajah tetap default; Bohan harus maksa dua kali baru marah tampil.
+# Live [date removed]: "kalo kamu pasang muka marah?" ditandai LLM [EMOTION:senang]
+# -> wajah tetap default; operator harus maksa dua kali baru marah tampil.
 _EXPLICIT_FACE_RE = re.compile(
     r"(?:pasang|coba|tunjuk(?:in|kan)?|kasih|bikin)\s+(?:aja\s+)?"
     r"(?:muka|wajah|ekspresi)\s+(senang|sedih|marah|bingung)",
@@ -166,8 +183,57 @@ async def apply_turn_start(vts: Any, stop_idle_fn: Callable[[], None], config: d
     await vts.trigger_expression_state("aware")
 
 
+# --- LINGER EMOSI (A3) ---------------------------------------------------
+#
+# Sebelum ini, `apply_turn_end` mematikan overlay mood pada milidetik yang
+# sama dengan berhentinya suara. Efeknya: Arti selesai mengucapkan kalimat
+# sedih, lalu wajahnya SEKETIKA netral — seperti saklar, bukan orang.
+# operator menyebutnya [date removed]: "sedih marah bingung nya jangan langsung ilang
+# tapi linger rada lama setelah speech selesai".
+#
+# Yang dijadwalkan hanya MOOD. Lampu/mulut (`trigger_expression_state`) tetap
+# kembali ke default seketika — kalau itu ikut ditunda, mulut Arti akan
+# tampak masih bicara padahal sudah diam.
+#
+# Jadwalnya WAJIB dibatalkan saat giliran baru datang: tanpa itu, pembersih
+# dari giliran lama akan menghapus mood giliran BARU beberapa detik setelah
+# dia dipasang — bug yang jauh lebih buruk daripada penyakit yang diobati.
+_linger_task: asyncio.Task | None = None
+
+
+def batalkan_linger() -> None:
+    """Batalkan pembersih mood yang tertunda. Aman dipanggil berulang."""
+    global _linger_task
+    tugas, _linger_task = _linger_task, None
+    if tugas is not None and not tugas.done():
+        tugas.cancel()
+
+
+async def _matikan_mood(vts: Any, fade: float = 0.0) -> None:
+    for mood_file in _ALL_MOOD_FILES:
+        if fade > 0:
+            await vts.send_expression(mood_file, False, fade=fade)
+        else:
+            await vts.send_expression(mood_file, False)
+
+
+async def _linger_lalu_matikan(vts: Any, jeda: float, fade: float = 0.0) -> None:
+    try:
+        await asyncio.sleep(jeda)
+        await _matikan_mood(vts, fade)
+        if fade > 0:
+            print(f"[Expr] linger {jeda:.1f}s habis - mood meleleh {fade:.1f}s")
+        else:
+            print(f"[Expr] linger {jeda:.1f}s habis - mood dimatikan")
+    except asyncio.CancelledError:
+        raise
+    except Exception as e:  # noqa: BLE001 - linger tak boleh menjatuhkan giliran
+        print(f"[Expr] linger gagal: {type(e).__name__}: {e}")
+
+
 async def apply_speaking(vts: Any, emotion: str, config: dict) -> None:
     """bicara + optional mood overlay; re-assert bicara after mood (H-B lamp/mouth)."""
+    batalkan_linger()
     await vts.trigger_expression_state("bicara")
     mood_file = None
     if config.get("expression_emotion_enabled"):
@@ -195,8 +261,31 @@ async def apply_speaking(vts: Any, emotion: str, config: dict) -> None:
 
 
 async def apply_turn_end(vts: Any, config: dict) -> None:
-    """Kembali ke default; matikan mood overlay tanpa frame kosong."""
+    """Kembali ke default; matikan mood overlay tanpa frame kosong.
+
+    Kalau `expression_emosi_linger_sec` > 0, mood dibiarkan hidup selama itu
+    lalu dimatikan di latar (lihat catatan LINGER EMOSI di atas).
+    """
+    batalkan_linger()
     await vts.trigger_expression_state("default")
-    if config.get("expression_emotion_enabled"):
-        for mood_file in _ALL_MOOD_FILES:
-            await vts.send_expression(mood_file, False)
+    if not config.get("expression_emotion_enabled"):
+        return
+    try:
+        jeda = float(config.get("expression_emosi_linger_sec", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        jeda = 0.0
+    try:
+        fade = float(config.get("expression_emosi_fade_sec", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        fade = 0.0
+    fade = max(0.0, min(fade, 2.0))
+    if jeda <= 0:
+        await _matikan_mood(vts, fade)
+        return
+    global _linger_task
+    try:
+        _linger_task = asyncio.create_task(_linger_lalu_matikan(vts, jeda, fade))
+    except RuntimeError:
+        # Tidak ada event loop (mis. dipanggil dari konteks sinkron) - jangan
+        # menggantung mood selamanya, matikan saja seperti perilaku lama.
+        await _matikan_mood(vts, fade)

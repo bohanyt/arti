@@ -1,6 +1,6 @@
 """Ganti scene OBS otomatis — Arti pindah antara mode ngobrol & main game.
 
-Permintaan Bohan 2026-08-04: "nanti bisa gonta ganti antara scene obs pas dia
+Permintaan streamer 2026-08-04: "nanti bisa gonta ganti antara scene obs pas dia
 ngobrol sama main minecraft". Dipakai bridge saat runner Minecraft start/stop.
 
 Protokol: obs-websocket v5 (bawaan OBS 28+; Tools > WebSocket Server Settings).
@@ -74,7 +74,7 @@ def scene_for_mode(config: dict, mode: str) -> str:
     """Nama scene untuk satu mode sesi; "" = jangan ganti apa pun.
 
     Mode = nilai dari arti_session_mode (duet / duet_game / host_chat /
-    host_game) — Bohan minta satu scene per mode (2026-08-04).
+    host_game) — streamer minta satu scene per mode (2026-08-04).
     """
     return str(config.get(f"obs_scene_{mode}") or "").strip()
 

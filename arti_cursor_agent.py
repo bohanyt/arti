@@ -4,7 +4,7 @@ Modul ini TIDAK menyentuh bridge. Ia menyediakan satu API blocking —
 :func:`send_turn` — yang menerima prompt jadi dan mengembalikan teks balasan.
 
 KENAPA ADA
-Bohan langganan Cursor. Composer 2.5 ditarik dari "Cursor Models pool" yang sudah
+streamer langganan Cursor. Composer 2.5 ditarik dari "Cursor Models pool" yang sudah
 termasuk langganan (beda dari API pool pihak ketiga, yang kuotanya sudah habis). Jadi
 menjawab chat viewer lewat Composer memakai resource yang sudah dibayar.
 
@@ -217,20 +217,37 @@ def should_recycle(
     return False, ""
 
 
-KNOWN_ROLES = ("voice", "scout", "observer", "vision", "lookup")
+# CATATAN SEJARAH: dulu di sini ada `cadangan_perlu_dipanaskan()` — predikat
+# "panaskan cadangan hanya saat sesi aktif mendekati batas daur ulang". Dihapus
+# [date removed] oleh KEBIJAKAN KEMBAR (log [time removed]: 24 timeout, breaker 7x, tukar
+# panas 0x — sesi mati MUDA oleh timeout, jalur kematian yang tidak pernah
+# disiapkan predikat itu). Sekarang cadangan dipanaskan SELALU; lihat prewarm().
+
+
+KNOWN_ROLES = ("voice", "scout", "observer", "vision", "lookup", "catchup")
 _warned_unknown_roles: set[str] = set()
 
 
 def resolve_role_model(role: str, config: dict | None = None) -> tuple[str, str | None]:
     """(model_id, effort) untuk satu role. Pure — target unit test.
 
-    Peran (revisi Bohan 2026-08-03 — data usage: grok-high 23,5M token/hari =
-    49% konsumsi, "kemahalan; composer 2.5 NOT FAST is enough"):
+    Peran — SEMUA composer-2.5 NOT FAST (revisi streamer 2026-08-10: "biar
+    hemat, harus composer 2.5 NOT FAST deh, grok 4.5 gausah dulu, i feel
+    composer is smart enough" — MENGGANTIKAN keputusan 2026-08-03 yang masih
+    menahan observer di grok-high dan lookup di grok-low; grok-high pernah
+    49% konsumsi harian). NOT FAST dijamin global: cursor_fast_param default
+    False -> fast="false" di tiap pembuatan sesi. Balik ke grok cukup lewat
+    config_local: cursor_observer_model / cursor_lookup_model.
       voice    -> composer-2.5 (jawaban harian; param: fast saja)
-      scout    -> composer-2.5 (scouter tiap menit — dulu grok-4.5/high,
-                  671 call/12 jam bikin boros; kualitas JSON scouter cukup)
-      observer -> grok-4.5 effort=high (HANYA ringkas akhir live — "buat
-                  ringkas di akhir live gapapa"; kualitas kurasi > biaya)
+      scout    -> composer-2.5 (scouter tiap menit)
+      observer -> composer-2.5 (kurasi akhir live — dulu grok-4.5/high)
+      catchup  -> composer-2.5 (backlog rangkuman; sesi di-reuse antar
+                  segmen jadi cache Cursor kena. Role SENDIRI, bukan numpang
+                  observer: sesi di-keyed per role, kalau numpang maka sesi
+                  bisa saling tercampur antar tugas)
+      lookup   -> composer-2.5 + web tool (dulu grok-4.5/low; kalau composer
+                  ternyata malas memanggil web tool, primary chain lookup
+                  tetap groq/compound — cursor cuma cadangan)
       vision   -> composer-2.5 (baca layar; terverifikasi bisa gambar)
 
     `effort` HANYA dikirim kalau non-kosong: composer-2.5 tidak punya param
@@ -242,8 +259,9 @@ def resolve_role_model(role: str, config: dict | None = None) -> tuple[str, str 
         return str(cfg.get("cursor_model", "composer-2.5")), None
     default_model, default_effort = {
         "scout": ("composer-2.5", ""),      # scouter per menit — hemat pool
-        "observer": ("grok-4.5", "high"),   # kurasi akhir live — paling pinter
-        "lookup": ("grok-4.5", "low"),      # web search — kecepatan (17,6 dtk terukur)
+        "observer": ("composer-2.5", ""),   # kurasi akhir live (operator [date removed])
+        "catchup": ("composer-2.5", ""),    # backlog rangkuman — hemat + cache
+        "lookup": ("composer-2.5", ""),     # web search — hemat (operator [date removed])
     }.get(role, ("composer-2.5", ""))
     model = str(cfg.get(f"cursor_{role}_model", default_model))
     effort = str(cfg.get(f"cursor_{role}_effort", default_effort) or "").strip()
@@ -255,19 +273,22 @@ def role_timeout_sec(role: str, config: dict | None = None) -> float:
     cfg = config or {}
     if role == "voice":
         return float(cfg.get("cursor_timeout_sec", 5.0))
-    # Vision 45: cold + gambar terukur 35,6 dtk (uji produksi 2026-08-01).
+    # Vision 45: cold + gambar terukur 35,6 dtk (uji produksi [date removed]).
     # Timeout di bawah itu = jebakan dingin-timeout-recycle: panggilan pertama
     # selalu gagal, sesi dibuang, dingin lagi — Cursor tidak pernah terpakai
     # (persis cacat prewarm voice dulu). Biaya dinginnya dibayar pemanas startup.
-    # Scout 45 (naik dari 30, spike_scouter_composer.py 2026-08-03): sesudah
+    # Scout 45 (naik dari 30, spike_scouter_composer.py [date removed]): sesudah
     # scouter pindah ke composer-2.5, panggilan TERUKUR cold 27,2 dtk / warm
     # 11,6 dtk — margin 30 dtk cuma ~3 dtk. Sesi scout didaur ulang tiap
     # cursor_session_max_age_sec (1800) / max_turns (20 ~= 20 menit sekali
     # pada cadence scouter), jadi cold berulang sepanjang live; timeout mepet
     # = jatuh diam-diam ke chain gratis tiap daur ulang.
-    # Observer 60: grok-high per segmen terukur 12-32 dtk + cold start pertama
+    # Observer 60: dulu grok-high terukur 12-32 dtk/segmen; kini composer
+    # (cold 27,2 / warm 11,6) — 60 dipertahankan sebagai margin cold start
     # (tidak di-prewarm — cuma hidup saat shutdown).
-    default = {"scout": 45.0, "lookup": 30.0, "observer": 60.0}.get(role, 45.0)
+    # Catchup 45: composer sama dengan scout (cold 27,2 / warm 11,6 terukur).
+    default = {"scout": 45.0, "lookup": 30.0, "observer": 60.0,
+               "catchup": 45.0}.get(role, 45.0)
     return float(cfg.get(f"cursor_{role}_timeout_sec", default))
 
 
@@ -463,9 +484,9 @@ class CursorSession:
         model_id, effort = resolve_role_model(self.role, self.config)
         fast = "true" if self.config.get("cursor_fast_param", False) else "false"
         # SENGAJA tanpa fallback ke string polos. Terverifikasi list_models
-        # (spike_grok_vision 2026-08-01): varian DEFAULT composer-2.5 adalah
+        # (spike_grok_vision [date removed]): varian DEFAULT composer-2.5 adalah
         # fast=true — id polos berarti FAST, 6x lebih mahal ($3,00/$15,00 vs
-        # $0,50/$2,50 per juta token) tanpa ketahuan. Keputusan eksplisit Bohan:
+        # $0,50/$2,50 per juta token) tanpa ketahuan. Keputusan eksplisit operator:
         # non-fast SELALU. Kalau bentuk API ModelSelection berubah setelah update
         # SDK, lebih baik sesi gagal dibangun (exception naik -> fallback chain
         # gratis) daripada diam-diam membakar kuota Fast.
@@ -481,7 +502,7 @@ class CursorSession:
             model=model,
             api_key=key,
             # `setting_sources` SENGAJA dihilangkan: tanpa itu rules/plugin proyek tidak
-            # ikut termuat, jadi agen tidak mewarisi konfigurasi Cursor milik Bohan.
+            # ikut termuat, jadi agen tidak mewarisi konfigurasi Cursor milik operator.
             local=sdk.LocalAgentOptions(cwd=scratch),
         )
         self.turn_count = 0
@@ -506,6 +527,13 @@ class CursorSession:
 
         need, why = should_recycle(self.turn_count, self.age_sec, self.dirty, cfg)
         if need:
+            # `why` dulu dihitung lalu DIBUANG. Akibatnya log cuma memperlihatkan
+            # akibatnya ("sesi belum hangat — turn ini lewat Groq") tanpa pernah
+            # menyebut sebabnya, dan tiap pemanasan ulang memakan 13-20 detik di
+            # mana SEMUA giliran jatuh ke Groq. Sesi [date removed]: 29x "belum hangat"
+            # lawan 19 panggilan composer — mayoritas suara yang didengar penonton
+            # ternyata BUKAN composer, dan tidak ada satu baris pun yang menjelaskan.
+            print(f"[Cursor] daur ulang sesi {self.role}: {why}")
             self.close(detach=True)
         try:
             self.ensure()
@@ -603,8 +631,11 @@ class CursorSession:
         )
 
     def mark_dirty(self, reason: str) -> None:
+        # Ikut dicetak: sesi kotor = giliran BERIKUTNYA membayar cold start
+        # 13-20 detik lewat Groq. Tanpa baris ini, sebabnya tidak pernah kelihatan.
         self.dirty = True
         self.dirty_reason = reason
+        print(f"[Cursor] sesi {getattr(self, 'role', '?')} ditandai kotor: {reason}")
 
     def close(self, detach: bool = False) -> None:
         """Tutup sesi. `detach=True` memindahkan teardown ke thread daemon.
@@ -639,6 +670,11 @@ class CursorSession:
 # --------------------------------------------------------------------------- #
 
 _session: CursorSession | None = None
+# Cadangan yang dipanaskan di latar SEBELUM sesi aktif dibuang (tukar panas).
+# Hidup paling lama beberapa menit: dipanaskan saat sesi aktif mendekati batas,
+# lalu langsung naik takhta di giliran berikutnya.
+_standby: CursorSession | None = None
+_standby_warming = False
 _session_lock = threading.Lock()
 _consecutive_failures = 0
 _breaker_open = False
@@ -702,6 +738,29 @@ def prewarm(config: dict) -> bool:
     if not ok:
         return False
     if is_warm():
+        # KEBIJAKAN KEMBAR (operator [date removed], dari log [time removed]: 24 timeout, breaker
+        # 7x, tukar panas 0x): cadangan dipanaskan SELALU, bukan cuma saat
+        # sesi aktif mendekati batas daur ulang — sesi semalam mati MUDA oleh
+        # timeout, jalur kematian yang tidak pernah disiapkan cadangannya.
+        # panaskan_cadangan murah dipanggil berulang (return cepat kalau
+        # cadangan sudah hangat / sedang dipanaskan).
+        panaskan_cadangan(config)
+        return True
+
+    # Sesi aktif TIDAK hangat (kotor karena timeout / belum ada). Sebelum
+    # membayar pemanasan penuh: kalau kembarannya hangat, naikkan takhta
+    # SEKARANG — giliran INI tetap dilayani composer, nol jendela Groq.
+    # (Inilah "tukar menukar antara 2 instance"-nya operator; dulu tukar panas
+    # hanya terpasang di jalur daur ulang terhormat.)
+    ganti = False
+    if _session_lock.acquire(timeout=0.25):
+        try:
+            ganti = tukar_ke_cadangan("sesi aktif mati muda")
+        finally:
+            _session_lock.release()
+    if ganti:
+        # Bangun kembaran baru di latar untuk kematian berikutnya.
+        panaskan_cadangan(config)
         return True
 
     with _session_lock:
@@ -732,6 +791,9 @@ def prewarm(config: dict) -> bool:
             except Exception:  # noqa: BLE001 — pemanasan gagal bukan alasan bisu
                 sess.mark_dirty("prewarm send gagal")
             print(f"[Cursor] sesi hangat dalam {time.monotonic() - t0:.1f}s")
+            # Kebijakan kembar: begitu sesi utama hangat, langsung siapkan
+            # kembarannya — jangan tunggu giliran berikutnya.
+            panaskan_cadangan(config)
         except Exception as exc:  # noqa: BLE001
             print(f"[Cursor] pemanasan gagal: {type(exc).__name__}: {exc}")
         finally:
@@ -740,6 +802,85 @@ def prewarm(config: dict) -> bool:
 
     threading.Thread(target=_warm, daemon=True, name="cursor-prewarm").start()
     return False
+
+
+def _cadangan_hangat() -> bool:
+    """Cadangan siap naik takhta? Pemanggil sudah memegang lock ATAU tidak butuh presisi."""
+    s = _standby
+    return s is not None and s._agent is not None and s.warmed and not s.dirty
+
+
+def panaskan_cadangan(config: dict) -> bool:
+    """Panaskan sesi PENGGANTI di latar, selagi sesi aktif masih melayani.
+
+    TIDAK PERNAH memblokir pemanggil (pola sama dengan `prewarm`). Return True
+    kalau cadangan sudah siap sekarang.
+    """
+    global _standby, _standby_warming
+
+    if not _session_lock.acquire(timeout=0.25):
+        return False
+    try:
+        if _cadangan_hangat():
+            return True
+        if _standby_warming:
+            return False
+        _standby_warming = True
+        cadangan = CursorSession(config)
+        _standby = cadangan
+    finally:
+        _session_lock.release()
+
+    def _warm_cadangan() -> None:
+        global _standby, _standby_warming
+        t0 = time.monotonic()
+        try:
+            cadangan.ensure()
+            # Pesan pemanas yang sama dengan sesi utama: giliran PERTAMA yang mahal,
+            # dan di sinilah tempatnya dibayar — bukan di giliran penonton.
+            run = cadangan._agent.send(
+                f"{TOOL_BAN_HEADER}Balas persis satu kata: siap"
+            )
+            collect_run_messages(run.messages(), timeout_s=60)
+            cadangan.turn_count += 1
+            cadangan.warmed = True
+            print(f"[Cursor] cadangan hangat dalam {time.monotonic() - t0:.1f}s")
+        except Exception as exc:  # noqa: BLE001
+            print(
+                f"[Cursor] pemanasan cadangan gagal: {type(exc).__name__}: {exc}"
+            )
+            with _session_lock:
+                if _standby is cadangan:
+                    _standby = None
+            try:
+                cadangan.close(detach=True)
+            except Exception:  # noqa: BLE001
+                pass
+        finally:
+            with _session_lock:
+                _standby_warming = False
+
+    threading.Thread(
+        target=_warm_cadangan, daemon=True, name="cursor-standby"
+    ).start()
+    return False
+
+
+def tukar_ke_cadangan(alasan: str) -> bool:
+    """Naikkan cadangan jadi sesi aktif. PEMANGGIL WAJIB memegang `_session_lock`.
+
+    Sesi lama ditutup `detach=True` — teardown-nya pindah ke thread daemon supaya
+    tidak menambah satu milidetik pun ke giliran yang sedang berjalan.
+    """
+    global _session, _standby
+    if not _cadangan_hangat():
+        return False
+    lama = _session
+    _session, _standby = _standby, None
+    print(f"[Cursor] tukar panas ({alasan}) — cadangan naik takhta, nol cold start")
+    if lama is not None:
+        lama.close(detach=True)
+    return True
 
 
 def breaker_state() -> dict:
@@ -843,6 +984,15 @@ def send_turn(system_prompt: str, user_content: str, config: dict) -> CursorResu
             _session = CursorSession(config)
         else:
             _session.config = config
+            # Sudah waktunya didaur ulang? Kalau cadangan sudah hangat, tukar di
+            # sini — giliran ini tetap dilayani sesi hangat. Kalau belum ada
+            # cadangan, `send_collect` menempuh jalur lama (tutup lalu ensure
+            # ulang) dan giliran ini membayar cold start seperti dulu.
+            perlu, kenapa = should_recycle(
+                _session.turn_count, _session.age_sec, _session.dirty, config
+            )
+            if perlu:
+                tukar_ke_cadangan(kenapa)
         result = _session.send_collect(system_prompt, user_content)
 
         if result.ok:
@@ -933,7 +1083,7 @@ def send_task(
     if role not in KNOWN_ROLES and role not in _warned_unknown_roles:
         # Typo di config["cursor_role"] dulu jatuh diam-diam ke default
         # composer-2.5 — observer bisa turun kelas tanpa satu pun peringatan
-        # (audit 2026-08-03). Tetap jalan (jangan matikan siaran); peringatan
+        # (audit [date removed]). Tetap jalan (jangan matikan siaran); peringatan
         # SEKALI per role — di cadence scouter, tiap-call = ~60 baris/jam
         # (pelajaran banjir terminal 2/8).
         _warned_unknown_roles.add(role)
@@ -1006,11 +1156,16 @@ def shutdown_session() -> None:
     tests/test_bridge_startup_bugfix.py:781 mem-parse AST body `main_loop` dan mengunci
     urutan pemanggilannya.
     """
-    global _session
+    global _session, _standby
     with _session_lock:
         if _session is not None:
             _session.close(detach=False)
             _session = None
+        # Cadangan juga punya proses agen sendiri — tanpa baris ini dia jadi
+        # yatim saat bridge ditutup.
+        if _standby is not None:
+            _standby.close(detach=False)
+            _standby = None
     with _registry_lock:
         for sess in _role_sessions.values():
             sess.close(detach=False)

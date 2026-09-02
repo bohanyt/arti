@@ -68,6 +68,13 @@ async def prepare_turn_context(
         return await asyncio.to_thread(get_categorized_history)
 
     async def _load_rag(system_base: str) -> str:
+        # Reaksi game: 8 detik RAG di jalur kritis untuk kejadian yang butuh
+        # jawaban SEKARANG (live [date removed] malam, "reaksinya rada delay" —
+        # tiap pukulan zombie menunggu lookup vault). Vault berisi kenangan
+        # dan obrolan; tidak ada isinya soal "kamu baru dipukul zombie".
+        # Prefix yang sama sudah dilewati _load_web_lookup dengan alasan sama.
+        if speech.startswith("[MINECRAFT"):
+            return system_base
         if not (
             config.get("vault_rag_enabled", True)
             and config.get("vault_rag_live_enabled", True)
@@ -175,7 +182,7 @@ async def prepare_turn_context(
             "dan cerdas dalam karakter Arti kepada viewer tersebut."
         )
         # Nama panggilan pendek — TTS jangan baca handle utuh + angka ekornya
-        # ("penontonsetia241"). Post-process bridge jadi jaring pengaman kedua.
+        # ("abdmanlifyou241"). Post-process bridge jadi jaring pengaman kedua.
         handle = arti_reply_policy.extract_viewer_handle(speech)
         nick = arti_reply_policy.viewer_nickname(handle)
         if nick and nick.lower() != handle.lstrip("@").lower():
@@ -194,10 +201,12 @@ async def prepare_turn_context(
             "Jawab panggilan streamer sekarang sebagai Arti. Langsung bicara "
             "dalam karakter Arti kepada streamer (Bohan)."
         )
-        length_line = (
-            "Jawab dalam 2-3 kalimat penuh dalam Bahasa Indonesia. "
-            "Jangan terlalu pendek, jangan yapping."
-        )
+        # DULU hardcoded "2-3 kalimat" — kesalahan yang SAMA PERSIS dengan yang
+        # sudah diperbaiki untuk YouTube di atas, tapi tertinggal di cabang ini.
+        # Padahal cabang inilah yang menangani inisiatif/curious + mic: 31 dari
+        # 44 giliran pada sesi [date removed].
+        plan = arti_reply_policy.resolve_reply_plan(speech, config, quiet=quiet)
+        length_line = arti_reply_policy.format_reply_instruction(plan).strip()
 
     ctx.prompt_content = f"""[CATATAN SEJARAH STREAM:]
 {ctx.formatted_history}
@@ -240,7 +249,10 @@ async def prepare_curious_turn_context(
         ctx.llm_system = base_system
         print("[Curious] Skip Vault RAG (fast path).")
     else:
-        rag_timeout = float(config.get("vault_rag_live_timeout_sec", 1))
+        # Timeout khusus curious: overhead tetap embedding LM Studio ~2,1 dtk
+        # membuat timeout live (1 dtk) selalu gugur — RAG curious akan mati
+        # diam-diam 100% kalau memakai kunci yang sama dengan jalur suara.
+        rag_timeout = float(config.get("vault_rag_curious_timeout_sec", 5.0))
         try:
             ctx.llm_system = await asyncio.wait_for(
                 asyncio.to_thread(
@@ -258,8 +270,8 @@ async def prepare_curious_turn_context(
     full_history = await asyncio.to_thread(get_categorized_history)
     ctx.formatted_history = _trim_history_lines(full_history, max_lines)
 
-    # Persona 2026-08-03: kewajiban "SATU pertanyaan ke streamer" dicabut —
-    # gara-gara ini Arti nanya Bohan MULU tiap turn proaktif ("kayak gapunya
+    # Persona [date removed]: kewajiban "SATU pertanyaan ke streamer" dicabut —
+    # gara-gara ini Arti nanya operator MULU tiap turn proaktif ("kayak gapunya
     # pendirian"). Opini/celetukan bernilai sama; pertanyaan = bumbu opsional.
     if speech.startswith("[Komentar main game]"):
         # Turn proaktif SAAT MAIN GAME: bahannya dunia Minecraft, bukan layar
@@ -271,7 +283,7 @@ async def prepare_curious_turn_context(
             "yang lagi asyik main. Jangan mendeskripsikan layar OBS."
         )
     elif speech.startswith(("[Arti pegang siaran]", "[Bohan balik]")):
-        # Bohan AFK: Arti pembawa acaranya, bukan pengisi keheningan.
+        # operator AFK: Arti pembawa acaranya, bukan pengisi keheningan.
         ctx.target_instruction = (
             "Kamu lagi PEGANG SIARAN sendiri (Bohan AFK). Ikuti sudut yang "
             "diminta di pesan: bicara ke penonton sebagai host — punya bahan, "

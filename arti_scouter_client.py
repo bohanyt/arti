@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 import arti_cloudflare_vision
+import arti_gemini_budget
 import arti_gemini_vision
 import arti_github_vision
 import arti_nvidia_client
@@ -25,17 +26,28 @@ _last_uptime_log_ts = 0.0
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 
+# Urutan dari log 9 jam [date removed]: Gemini murah saat 429, OpenRouter
+# 201/205 (98%). Cloudflare 0/205 karena thinking Gemma menghabiskan output,
+# diperbaiki [date removed] dan probe JSON lulus 2,1 dtk; tetap di belakang incumbent
+# sampai punya sampel live baru. Ollama 4/4, Z.ai 0/4, NVIDIA tetap terakhir.
 DEFAULT_CHAIN = [
-    "nvidia",
-    "cloudflare",
-    "openrouter",
     "google_gemini",
-    "github",
-    "zai",
+    "openrouter",
+    "cloudflare",
     "ollama",
+    "zai",
+    "nvidia",
 ]
 
-# "lihat/liat" POLOS bukan pertanyaan layar. Live 2026-08-02: "aku mau liat
+# GitHub Models pensiun TOTAL 30 Juli 2026 (diumumkan 1 Juli, brownout 16 & 23
+# Juli). Dibuang dari semua rantai [date removed] — sudah dua minggu mati sementara
+# Arti masih memanggilnya. Nama ini ditolak SECARA PAKSA, bukan sekadar dihapus
+# dari default: `config_local.json` tidak dilacak git dan hidup per-mesin, jadi
+# salinan basi bisa menghidupkan kembali provider mati tanpa suara. Lihat
+# docs/MODEL-REGISTRY.md §2.1.
+PROVIDER_PENSIUN = {"github"}
+
+# "lihat/liat" POLOS bukan pertanyaan layar. Live [date removed]: "aku mau liat
 # [mukamu]" membuka vision window -> turn memblokir 80-85 dtk (nvidia timeout
 # + fallback). Verba lihat hanya dihitung kalau ada objek layar di dekatnya
 # atau berbentuk "apa yang kamu liat".
@@ -286,13 +298,20 @@ def _resolve_chain(config: dict) -> list[str]:
             config.get("openrouter_api_key") or os.environ.get("OPENROUTER_API_KEY")
         ):
             continue
-        if name == "google_gemini" and not arti_gemini_vision.resolve_api_key(config):
+        if name == "google_gemini":
+            if not arti_gemini_vision.resolve_api_key(config):
+                continue
+            # Rem kuota ([date removed]): selagi jatah menit habis / istirahat
+            # pasca-429, Gemini dikeluarkan dari rantai giliran ini — TANPA
+            # baris error. Sesi [date removed]: 186x HTTP 429 di terminal karena
+            # rantai menembak provider yang baru saja ditolak.
+            model_scout = config.get("scouter_gemini_model") or config.get(
+                "vision_google_gemini_model"
+            ) or "gemini-3.1-flash-lite"
+            if arti_gemini_budget.sedang_dibatasi(model_scout, config):
+                continue
+        if name in PROVIDER_PENSIUN:
             continue
-        if name == "github":
-            if not config.get("vision_github_enabled", False):
-                continue
-            if not arti_github_vision.resolve_token(config):
-                continue
         if name == "zai" and not arti_zai_vision.resolve_api_key(config):
             continue
         if name == "ollama" and not arti_ollama_vision.resolve_api_key(config):
@@ -340,11 +359,11 @@ def _messages(prompt: str) -> list[dict[str, str]]:
 
 
 def _call_cursor(prompt: str, config: dict) -> tuple[str, int]:
-    """Sesi Cursor per-role: default 'scout' (composer-2.5, revisi Bohan
+    """Sesi Cursor per-role: default 'scout' (composer-2.5, revisi streamer
     2026-08-03 — grok tiap menit kemahalan); observer menimpa via
     config["cursor_role"]="observer" (grok-4.5/high, hanya akhir live).
 
-    Keputusan Bohan 2026-08-01: Cursor jadi provider utama (langganan setahun,
+    Keputusan streamer 2026-08-01: Cursor jadi provider utama (langganan setahun,
     pool Cursor Models), chain API gratis turun jadi fallback. Gagal apa pun ->
     raise, supaya loop chain lanjut ke provider berikutnya seperti biasa.
     """
@@ -357,7 +376,7 @@ def _call_cursor(prompt: str, config: dict) -> tuple[str, int]:
     try:
         import arti_api_telemetry as tel  # noqa: PLC0415
 
-        # Subsystem & model JUJUR (audit 2026-08-03): dulu semua dicatat
+        # Subsystem & model JUJUR (audit [date removed]): dulu semua dicatat
         # subsystem="scouter" — panggilan observer ikut nempel di sana
         # (89 baris dobel hari itu) dan `r.model or role` menaruh nama ROLE
         # di kolom model. Sesudah scouter/observer beda model, salah label
@@ -413,6 +432,15 @@ def _call_cloudflare(prompt: str, config: dict) -> tuple[str, int]:
     )
 
 
+# Probe [date removed] (budget scouter asli 350): TANPA param ini semua Nemotron
+# menghabiskan seluruh budget untuk chain-of-thought — finish=length, JSON tak
+# pernah tertulis, dan incumbent 120B mengembalikan CoT Inggris mentah. Varian
+# effort=low juga DIUJI dan diabaikan provider free (CoT tetap 666-700 token
+# bahkan di budget 700), jadi satu-satunya setelan yang menjaga jawaban utuh
+# di budget ketat adalah mematikan reasoning via param API terpadu OpenRouter.
+OPENROUTER_TANPA_NALAR = {"reasoning": {"enabled": False}}
+
+
 def _call_openrouter(prompt: str, config: dict) -> tuple[str, int]:
     max_tokens, temperature, timeout = _scouter_params(config)
     key = (config.get("openrouter_api_key") or os.environ.get("OPENROUTER_API_KEY") or "").strip()
@@ -420,7 +448,7 @@ def _call_openrouter(prompt: str, config: dict) -> tuple[str, int]:
     if not models:
         models = [
             config.get("openrouter_summarizer_model", "nvidia/nemotron-3-super-120b-a12b:free"),
-            config.get("openrouter_summarizer_fallback", "nvidia/nemotron-3-nano-30b-a3b:free"),
+            config.get("openrouter_summarizer_fallback", "nvidia/nemotron-3.5-lightning:free"),
             "google/gemma-4-26b-a4b-it:free",
         ]
     last_err = ""
@@ -440,6 +468,7 @@ def _call_openrouter(prompt: str, config: dict) -> tuple[str, int]:
                     "HTTP-Referer": "https://github.com/YOUR_USER/YOUR_REPO",
                     "X-Title": "Arti Scouter",
                 },
+                extra_payload=OPENROUTER_TANPA_NALAR,
                 telemetry_subsystem=str(
                     config.get("telemetry_subsystem") or "scouter"
                 ),
@@ -468,6 +497,8 @@ def _call_google_gemini(prompt: str, config: dict) -> tuple[str, int]:
     )
 
 
+# PENSIUN 30 Juli 2026 — sengaja TIDAK didaftarkan di _PROVIDERS. Kodenya
+# disimpan sebagai arsip (docs/MODEL-REGISTRY.md §2.1), bukan untuk dipakai.
 def _call_github(prompt: str, config: dict) -> tuple[str, int]:
     max_tokens, temperature, timeout = _scouter_params(config)
     return arti_github_vision.text_chat(
@@ -507,7 +538,11 @@ _PROVIDERS: dict[str, ProviderFn] = {
     "cloudflare": _call_cloudflare,
     "openrouter": _call_openrouter,
     "google_gemini": _call_google_gemini,
-    "github": _call_github,
+    # "github" SENGAJA TIDAK ADA DI SINI. Membuangnya dari rantai + PROVIDER_PENSIUN
+    # saja TIDAK cukup: arti_observer_client memakai _PROVIDERS.get(name) LANGSUNG
+    # tanpa lewat _resolve_chain, jadi guard di sana terlewat dan observer tetap
+    # memanggil provider mati (dibuktikan dengan menjebak fungsinya, [date removed]).
+    # Pintu dispatch adalah satu-satunya tempat yang menutup SEMUA pemanggil.
     "zai": _call_zai,
     "ollama": _call_ollama,
 }

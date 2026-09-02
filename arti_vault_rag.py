@@ -51,7 +51,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "vault_rag_live_enabled": True,
     "vault_rag_lite_enabled": True,
     "vault_rag_db_path": "data/vault_rag.db",
-    # `docs/handoff/**/*.md` DIKELUARKAN 2026-07-31. Dokumen itu handoff untuk developer,
+    # `docs/handoff/**/*.md` DIKELUARKAN [date removed]. Dokumen itu handoff untuk developer,
     # bukan memori Arti, dan tiga masalah nyata:
     #   1. BASI — FASE-2.md masih menyebut laguna-xs.2, owl-alpha, scout, qwen3-32b;
     #      semuanya sudah 404 atau diganti. Arti akan menjelaskan sistem yang tidak ada lagi.
@@ -64,7 +64,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     #      tidak mungkin terpakai.
     # Penggantinya: `vault/concepts/arti_self_knowledge.md` — jawaban soal cara kerjanya
     # sendiri, ditulis pakai suara Arti di altitude yang penonton peduli.
-    # transcripts/**/*.jsonl DIKELUARKAN 2026-08-01. Sesi 11,5 jam menghasilkan
+    # transcripts/**/*.jsonl DIKELUARKAN [date removed]. Sesi 11,5 jam menghasilkan
     # SATU transkrip 669 chunk = 51% seluruh DB (1316) — chat spam, noise ASR,
     # dan leaderboard bot ikut ter-embed, menenggelamkan memori kurasi. Persis
     # alasan docs/handoff dikeluarkan (di atas), dan melanggar desain vault slim:
@@ -78,12 +78,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "vault_rag_chunk_chars": 420,
     "vault_rag_chunk_overlap": 60,
     "vault_rag_min_chunk_chars": 48,
-    "vault_rag_top_k": 5,
+    "vault_rag_top_k": 2,  # 5 -> 2: diet bahan [date removed] — selaras CONFIG bridge
     # Maksimum potongan dari SATU berkas per query. Tanpa ini, satu berkas bisa memakan
     # 3-4 dari 5 slot dan menenggelamkan memori lain — lihat _select_diverse.
-    # 0 = matikan pembatasan (perilaku sebelum 2026-07-31).
+    # 0 = matikan pembatasan (perilaku sebelum [date removed]).
     "vault_rag_max_per_source": 2,
-    # 2400, naik dari 2200 pada 2026-07-31. Header instruksi RAG tumbuh dari 76 jadi 172
+    # 2400, naik dari 2200 pada [date removed]. Header instruksi RAG tumbuh dari 76 jadi 172
     # char (menambahkan aturan konflik tanggal), dan itu overhead TETAP yang tidak boleh
     # mengambil porsi cuplikan: terukur menggusur hit ke-5 di 2 dari 6 query uji. Selisih
     # ~200 char ≈ 50 token per turn — murah dibanding kehilangan satu cuplikan.
@@ -179,7 +179,7 @@ _DATE_IN_PATH = re.compile(r"(\d{4}-\d{2}-\d{2})")
 # recency boost-nya digandakan supaya memori terbaru menang dari yang lama.
 # "kapan" POLOS sengaja BUKAN marker: "kapan arti debut" itu pertanyaan
 # SEJARAH — boost recency justru menenggelamkan fakta kanon (ketahuan di
-# health check 2026-08-02: probe origin kalah dari chunk sesi score 0.9995).
+# health check [date removed]: probe origin kalah dari chunk sesi score 0.9995).
 # "kapan terakhir ..." tetap tertangkap lewat kata "terakhir".
 _TEMPORAL_QUERY_RE = re.compile(
     r"\b(terakhir|kemarin|tadi|barusan|baru saja|baru-baru|terbaru|paling baru|"
@@ -515,6 +515,34 @@ def embed_texts(
     return vectors
 
 
+def _prewarm_ping(cfg: dict) -> None:
+    """Badan pemanasan — dipisah supaya bisa diuji tanpa thread."""
+    t0 = time.perf_counter()
+    try:
+        embed_texts(["ping pemanasan"], cfg, telemetry_purpose="prewarm")
+        print(f"[Vault RAG] Embedding hangat ({time.perf_counter() - t0:.1f}s)")
+    except Exception as e:  # noqa: BLE001 — pemanasan gagal bukan alasan crash
+        print(
+            f"[Vault RAG] Pemanasan embedding gagal ({type(e).__name__}) — "
+            "panggilan RAG pertama mungkin jatuh ke kata kunci"
+        )
+
+
+def prewarm_embedding(config: dict | None = None) -> None:
+    """Bangunkan model embedding LM Studio di LATAR, jangan tunggu giliran.
+
+    Log 18 Agu 22.31: LM Studio me-load Qwen3 dari nol saat request pertama
+    datang (~10-16 dtk) sementara timeout query cuma 8 dtk — panggilan RAG
+    pertama SELALU timeout dan jatuh ke pencarian kata kunci. Ping ini
+    dipanggil di awal startup wizard: modelnya bangun selagi streamer masih
+    menjawab checklist. Timeout ping dilonggarkan sendiri (cold load memang
+    lama; justru itu yang sedang dibayar di sini)."""
+    cfg = {**DEFAULT_CONFIG, **(config or {}), "lmstudio_embedding_timeout_sec": 90}
+    threading.Thread(
+        target=_prewarm_ping, args=(cfg,), daemon=True, name="rag-embed-prewarm"
+    ).start()
+
+
 def clear_query_embed_cache() -> None:
     """Session-scoped LRU reset (tests)."""
     _QUERY_EMBED_CACHE.clear()
@@ -685,7 +713,7 @@ def reindex_all(
         total = len(pending_embed)
         if verbose:
             print(f"[Vault RAG] Embedding {total} chunk via LM Studio ({model})...")
-        # Batch + progress (permintaan Bohan 2026-08-02): fase ini dulu BISU —
+        # Batch + progress (permintaan operator [date removed]): fase ini dulu BISU —
         # satu panggilan monolitik tanpa kabar, sehingga saat shutdown user tidak
         # tahu masih ada kerja jalan dan keburu menutup terminal. Tiap batch
         # di-commit, jadi interupsi di tengah kehilangan paling banyak 1 batch
@@ -849,6 +877,117 @@ def _fts_scores(conn: sqlite3.Connection, query: str, limit: int = 40) -> dict[i
     return scores
 
 
+# Ambang dedup LINTAS BERKAS dipakai fakta_sudah_ada di bawah — SENGAJA sama persis
+# dengan arti_memory_quality._DUP_SIMILARITY_THRESHOLD ([time removed]). Itu ambang yang sudah
+# divalidasi di data nyata (lihat komentar di arti_memory_quality.py); di sini kita
+# cuma memperluas JANGKAUANnya (lintas vault/sessions lewat FTS) — bukan mengubah
+# kepekaannya.
+_CROSS_FILE_DUP_THRESHOLD = 0.35
+
+# Penanda "akan terjadi" vs "sudah terjadi" — dipakai memveto dedup lintas-berkas supaya
+# fakta yang BEREVOLUSI (mis. "abdmanli MAU lulus SMA" -> "abdmanli SUDAH lulus SMA")
+# tidak ikut ter-skip. Ini celah nyata di gerbang lama: _STOPWORDS di arti_memory_quality
+# membuang "sudah"/"telah" sebelum menghitung Jaccard token (supaya parafrase debut-date
+# terdeteksi), tapi efek sampingnya kedua fakta di atas jadi kelihatan identik (beda satu
+# token yang dibuang) walau maknanya berlawanan. Veto ini bekerja SEBELUM stopword
+# filtering, jadi penanda tense tidak pernah ikut terbuang.
+_TENSE_FUTURE = frozenset({"akan", "mau", "ingin", "belum", "rencana", "nanti", "berencana"})
+_TENSE_DONE = frozenset({"sudah", "telah", "udah", "selesai"})
+
+
+def _tense_evolved(norm_a: str, norm_b: str) -> bool:
+    """True kalau dua fakta ternormalisasi beda TITIK WAKTU (niat vs selesai)."""
+    wa, wb = set(norm_a.split()), set(norm_b.split())
+    a_future, a_done = bool(wa & _TENSE_FUTURE), bool(wa & _TENSE_DONE)
+    b_future, b_done = bool(wb & _TENSE_FUTURE), bool(wb & _TENSE_DONE)
+    return (a_future and b_done) or (a_done and b_future)
+
+
+def fakta_sudah_ada(teks: str, config: dict | None = None) -> bool:
+    """True kalau `teks` sudah cukup terwakili di ``vault/sessions/*`` mana pun.
+
+    KENAPA fungsi ini ada: gerbang lama (``arti_memory_quality.is_duplicate_learning``,
+    dipanggil dari ``should_save_learning``) cuma membanding fakta baru dengan bullet
+    yang ADA DI BERKAS YANG SAMA — ``existing_lines`` datangnya dari
+    ``list_learning_bullets(text)`` di satu file tujuan tulis. Tiap berkas sesi baru
+    mulai dari nol, jadi fakta tahan-lama yang sama (mis. "Arti debut co-host 27 Mei
+    2026") ditulis ulang di puluhan berkas sepanjang musim — persis masalah yang
+    ditemukan di audit vault 19 Agu 2026 (13 berkas punya bullet debut yang sama).
+
+    PENDEKATAN: bukan LLM, bukan embedding per-bullet (mahal, dan aturan proyek
+    melarang jalur composer/embedding di kerja latar/gerbang tulis) — pakai indeks FTS5
+    (bm25) yang SUDAH ada dari `arti_vault_rag` untuk menemukan kandidat murah, lalu
+    skor kemiripan token lexical yang sama pola dengan gerbang single-file
+    (`arti_memory_quality.fact_similarity`), plus veto angka-bentrok dan veto tense
+    supaya fakta yang BEREVOLUSI tidak ikut ter-skip.
+
+    Gagal-terbuka (return False) kalau DB belum ada / kosong / rusak, atau kalau FTS
+    tidak punya kandidat — supaya instalasi baru atau vault kosong TIDAK PERNAH
+    memblokir penulisan fakta pertama kali.
+    """
+    import arti_memory_quality as mq
+
+    text = re.sub(r"^Stream fact:\s*", "", (teks or "").strip(), flags=re.IGNORECASE).strip()
+    if len(text) < 8:
+        return False
+
+    cfg = {**DEFAULT_CONFIG, **(config or {})}
+    db_path = _db_path(cfg)
+    if not db_path.is_file():
+        return False
+
+    norm_new = mq._normalize_fact(text)
+    tokens_new = mq._fact_tokens(norm_new)
+    if not tokens_new:
+        return False
+
+    try:
+        with _rag_search_lock:
+            conn = _connect(cfg)
+            try:
+                scores = _fts_scores(conn, text, limit=15)
+                if not scores:
+                    return False
+                ids = list(scores.keys())
+                placeholders = ",".join("?" * len(ids))
+                rows = conn.execute(
+                    f"SELECT source_path, content FROM chunks WHERE id IN ({placeholders})",
+                    ids,
+                ).fetchall()
+            finally:
+                conn.close()
+    except sqlite3.Error:
+        return False
+
+    for row in rows:
+        src = (row["source_path"] or "").replace("\\", "/")
+        if "vault/sessions/" not in src:
+            continue
+        for raw_line in (row["content"] or "").splitlines():
+            candidate = raw_line.strip()
+            if not candidate:
+                continue
+            m = re.match(r"^-\s*\[\d{4}-\d{2}-\d{2}\]\s*(.+)$", candidate)
+            body = m.group(1) if m else candidate.lstrip("- ").strip()
+            body = re.sub(r"^Stream fact:\s*", "", body, flags=re.IGNORECASE).strip()
+            if len(body) < 8:
+                continue
+            norm_prev = mq._normalize_fact(body)
+            if norm_new == norm_prev:
+                return True
+            if mq._numbers_conflict(norm_new, norm_prev):
+                continue
+            if _tense_evolved(norm_new, norm_prev):
+                continue
+            tokens_prev = mq._fact_tokens(norm_prev)
+            if not tokens_prev:
+                continue
+            sim = len(tokens_new & tokens_prev) / len(tokens_new | tokens_prev)
+            if sim >= _CROSS_FILE_DUP_THRESHOLD:
+                return True
+    return False
+
+
 _MMSS_RE = re.compile(r"\[(\d{1,2}):(\d{2})\]")
 
 
@@ -1003,9 +1142,16 @@ def search(
         try:
             qvec = np.array(embed_query_cached(query, cfg), dtype=np.float32)
         except Exception as e:
+            # JATUH KE LEXICAL, jangan pulang tangan kosong ([date removed]).
+            # Dulu di sini pulang dengan daftar kosong: embedding tak terjangkau
+            # berarti Arti kehilangan
+            # SELURUH ingatan jangka panjangnya, diam-diam, dengan satu baris log —
+            # dia tetap ngobrol, cuma tiba-tiba pikun. LM Studio itu aplikasi
+            # desktop yang dinyalakan manual; lupa membukanya bukan skenario aneh.
+            # Skor FTS-nya sendiri SUDAH dihitung di atas dan tinggal dipakai.
             conn.close()
-            print(f"[Vault RAG] Query embed gagal: {e}")
-            return []
+            print(f"[Vault RAG] Query embed gagal: {e} — jatuh ke pencarian kata kunci")
+            return _hits_lexical_saja(rows, fts, k, cfg, query)
 
         ids = [int(r["id"]) for r in rows]
         matrix = np.vstack([_unpack_vector(r["vector"], int(r["dim"])) for r in rows])
@@ -1029,6 +1175,50 @@ def search(
                     "score": round(score, 4),
                     "semantic": round(s_sem, 4),
                     "keyword": round(s_fts, 4),
+                    "source_path": row["source_path"],
+                    "source_type": row["source_type"],
+                    "folder": row["folder"],
+                    "heading": row["heading"] or "",
+                    "content": row["content"],
+                },
+            )
+        )
+    combined.sort(key=lambda x: x[0], reverse=True)
+    return _select_diverse(combined, k, cfg)
+
+
+def _hits_lexical_saja(
+    rows: list[Any],
+    fts: dict[int, float],
+    k: int,
+    cfg: dict,
+    query: str,
+) -> list[dict[str, Any]]:
+    """Peringkat HANYA dari skor FTS — dipakai saat embedding tak terjangkau.
+
+    Ambang `vault_rag_min_score` sengaja TIDAK dipakai di sini: ambang itu
+    dikalibrasi untuk skor gabungan (0,72 semantik + 0,28 kata kunci), jadi
+    memakainya pada skor kata kunci telanjang akan membuang hampir semua hasil
+    dan mengembalikan kita ke kepikunan yang sama. Ambangnya dipisah lewat
+    `vault_rag_min_score_lexical` (default 0 = ambil apa adanya, urut skor).
+    """
+    min_lex = float(cfg.get("vault_rag_min_score_lexical", 0.0))
+    _rec_mult = recency_multiplier(query, cfg)
+    combined: list[tuple[float, dict[str, Any]]] = []
+    for row in rows:
+        cid = int(row["id"])
+        s_fts = fts.get(cid, 0.0)
+        if s_fts <= min_lex:
+            continue
+        score = s_fts + _recency_score_boost(row["source_path"], cfg) * _rec_mult
+        combined.append(
+            (
+                score,
+                {
+                    "score": round(score, 4),
+                    "semantic": None,      # jujur: tidak ada sisi semantik di sini
+                    "keyword": round(s_fts, 4),
+                    "lexical_fallback": True,
                     "source_path": row["source_path"],
                     "source_type": row["source_type"],
                     "folder": row["folder"],
@@ -1107,7 +1297,7 @@ def format_hits_for_prompt(hits: list[dict[str, Any]], max_chars: int = 2200) ->
         return ""
     # Tanggal + aturan konflik WAJIB ada di sini.
     #
-    # Sebelumnya blok ini cuma menampilkan path dan skor. Akibatnya potongan 27 Mei dan
+    # Sebelumnya blok ini cuma menampilkan path dan skor. Akibatnya potongan [date removed] dan
     # 27 Juli duduk berdampingan tanpa penanda apa pun, dan yang ditonjolkan justru skor
     # — yang malah menyiratkan "makin tinggi makin benar". Arti tidak punya dasar untuk
     # memilih saat dua potongan bertentangan.

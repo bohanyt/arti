@@ -47,11 +47,35 @@ _DEEP_MARKERS = (
     "pendapat",
 )
 
+# DIRAPATKAN [date removed] (permintaan operator: "untuk celetukan santai 1 kalimat
+# sudah cukup; 2-3 kalimat simpan buat penjelasan serius"). Terukur di sesi
+# [date removed]: tts_play p50 15,7 dtk dari total giliran 29,7 dtk — lebih dari
+# separuh giliran habis buat Arti bicara, 37 dari 44 jawaban 2 kalimat.
+# Dulu: brief (1,2) normal (2,3) deep (4,5).
 _SENT_BY_KIND = {
-    "brief": (1, 2),
-    "normal": (2, 3),
-    "deep": (4, 5),
+    "brief": (1, 1),
+    "normal": (2, 2),
+    "deep": (3, 4),
 }
+
+# Penanda giliran inisiatif/curious — Arti membuka topik sendiri, bukan
+# menjawab siapa pun. Ini celetukan, bukan penjelasan.
+_INISIATIF_RE = re.compile(r"^\s*\[\s*inisiatif", re.IGNORECASE)
+
+
+def jenis_giliran(user_speech: str) -> str:
+    """yt | inisiatif | streamer.
+
+    Dipakai supaya kebijakan panjang berlaku di SEMUA jalur, bukan cuma chat
+    YouTube. Di sesi 26 Agu: curious 25, yt_chat 13, mic 6 — jadi 31 dari 44
+    giliran dulu memakai batas datar 5 kalimat tanpa adaptasi sama sekali.
+    """
+    u = user_speech or ""
+    if is_youtube_trigger(u):
+        return "yt"
+    if _INISIATIF_RE.match(u):
+        return "inisiatif"
+    return "streamer"
 _TOKENS_BY_SENT = {1: 110, 2: 150, 3: 200, 4: 260, 5: 320, 6: 380, 7: 440, 8: 500}
 
 
@@ -72,10 +96,10 @@ _HANDLE_IN_WRAPPER_RE = re.compile(r"Viewer\s+(@\S+)")
 def viewer_nickname(handle: str, max_len: int = 8) -> str:
     """Nama panggilan pendek (±2-3 suku kata) dari handle viewer.
 
-    Concern Bohan 2026-08-02: TTS membaca handle utuh termasuk angka ekor —
-    "penontonsetia241" jadi panjang dan kaku. Aturan: buang @, buang angka/
+    Concern streamer 2026-08-02: TTS membaca handle utuh termasuk angka ekor —
+    "abdmanlifyou241" jadi panjang dan kaku. Aturan: buang @, buang angka/
     separator ekor, ambil kata pertama (pecah camelCase & _-.), buang suffix
-    platform (bohanyt -> bohan), potong maksimal `max_len` huruf.
+    platform (streamertest -> bohan), potong maksimal `max_len` huruf.
     """
     h = (handle or "").strip().lstrip("@")
     if not h:
@@ -194,7 +218,7 @@ def resolve_yt_reply_plan(
         mode = "fixed"
     else:
         kind = classify_yt_message(msg)
-        # RANT MODE (permintaan Bohan 2026-08-01): sesekali pertanyaan biasa
+        # RANT MODE (permintaan operator [date removed]): sesekali pertanyaan biasa
         # dijawab panjang banget — tapi HANYA saat chat sepi (`quiet` dari
         # bridge; saat rame antrean sudah drop 213 panggilan di live 11,5 jam,
         # rant cuma memperparah). `deep` dikecualikan — dia sudah punya jatah
@@ -222,7 +246,7 @@ def resolve_yt_reply_plan(
             )
         if kind == "gacha":
             lo = int(config.get("arti_reply_yt_gacha_min_sentences", 1))
-            hi = int(config.get("arti_reply_yt_gacha_max_sentences", 5))
+            hi = int(config.get("arti_reply_yt_gacha_max_sentences", 3))
             sent = _pick_sentences_deterministic(msg, lo, hi, "gacha")
             mode = f"gacha→{sent}kal"
         else:
@@ -242,6 +266,107 @@ def resolve_yt_reply_plan(
         max_tokens=tokens,
         mode=mode,
         message_preview=preview,
+    )
+
+
+def resolve_reply_plan(
+    user_speech: str, config: dict, *, quiet: bool = False
+) -> YtReplyPlan:
+    """Rencana panjang untuk SEMUA jalur, bukan cuma chat YouTube.
+
+    - yt        : ladder adaptif lama (brief/normal/deep/gacha/rant)
+    - inisiatif : celetukan Arti sendiri -> pendek, tetap (bawaan 1 kalimat)
+    - streamer  : ucapan streamer -> ladder yang sama, dinilai dari kalimatnya
+    """
+    jenis = jenis_giliran(user_speech)
+    if jenis == "yt":
+        return resolve_yt_reply_plan(user_speech, config, quiet=quiet)
+
+    if jenis == "inisiatif":
+        sent = max(1, int(config.get("arti_reply_inisiatif_max_sentences", 1)))
+        return YtReplyPlan(
+            sentences=sent,
+            max_chars=min(
+                int(config.get("arti_reply_max_chars_yt_cap", 500)),
+                int(config.get("arti_reply_yt_chars_base", 40))
+                + sent * int(config.get("arti_reply_yt_chars_per_sentence", 95)),
+            ),
+            max_tokens=_TOKENS_BY_SENT.get(sent, 110),
+            mode=f"inisiatif→{sent}kal",
+            message_preview="",
+        )
+
+    # streamer
+    if not config.get("arti_reply_streamer_adaptive", True):
+        sent = int(config.get("arti_reply_max_sentences", 5))
+        mode = "streamer-fixed"
+    else:
+        msg = extract_chat_message(user_speech)
+        kind = classify_yt_message(msg)
+        if kind == "gacha":
+            lo = int(config.get("arti_reply_yt_gacha_min_sentences", 1))
+            hi = int(config.get("arti_reply_yt_gacha_max_sentences", 3))
+            sent = _pick_sentences_deterministic(msg, lo, hi, "gacha")
+        else:
+            smin, smax = _SENT_BY_KIND[kind]
+            sent = _pick_sentences_deterministic(msg, smin, smax, kind)
+        mode = f"streamer-{kind}→{sent}kal"
+    return YtReplyPlan(
+        sentences=sent,
+        max_chars=min(
+            int(config.get("arti_reply_max_chars_yt_cap", 500)),
+            int(config.get("arti_reply_yt_chars_base", 40))
+            + sent * int(config.get("arti_reply_yt_chars_per_sentence", 95)),
+        ),
+        max_tokens=_TOKENS_BY_SENT.get(sent, 200),
+        mode=mode,
+        message_preview=extract_chat_message(user_speech)[:48],
+    )
+
+
+def kelas_dari_mode(mode: str) -> str:
+    """Ambil KELAS dari string mode yang sudah dipakai di log.
+
+    Bentuk yang mungkin: "deep->3kal", "streamer-deep->3kal", "rant->7kal",
+    "gacha->2kal", "inisiatif->1kal", "fixed", "streamer-fixed".
+
+    Kelas sengaja dibaca dari mode, bukan disimpan sebagai field baru di
+    YtReplyPlan: dataclass itu dipakai di banyak jalur dan menambah field
+    berarti menyentuh semuanya. Mode sudah jadi kontrak yang dicetak ke log.
+    """
+    m = (mode or "").strip()
+    if m.startswith("streamer-"):
+        m = m[len("streamer-"):]
+    for pemisah in ("→", "->"):
+        if pemisah in m:
+            return m.split(pemisah, 1)[0].strip()
+    return m
+
+
+def format_reply_instruction(plan: YtReplyPlan) -> str:
+    """Tail prompt panjang jawaban untuk jalur NON-YouTube.
+
+    Jalur ini dulu hardcoded "Jawab dalam 2-3 kalimat" dan MENABRAK plan —
+    kesalahan yang sama persis yang sudah pernah diperbaiki untuk YouTube
+    (komentar di arti_voice_pipeline: 58% jawaban kena potong di live 11,5
+    jam). Sekarang prompt, token, dan filter sepakat di semua jalur.
+    """
+    n = plan.sentences
+    if n <= 1:
+        return (
+            "Balas SATU kalimat saja dalam Bahasa Indonesia — celetukan santai, "
+            "bukan penjelasan. DILARANG: monolog, menjelaskan prompt, "
+            "atau bilang 'sebagai Arti'."
+        )
+    if n <= 2:
+        return (
+            f"Balas max {n} kalimat dalam Bahasa Indonesia, langsung ke point. "
+            "DILARANG: monolog, menjelaskan prompt, atau bilang 'sebagai Arti'."
+        )
+    return (
+        f"Ini pertanyaan yang layak dijawab niat — max {n} kalimat "
+        "(Bahasa Indonesia), berisi tapi tetap natural seperti co-host. "
+        "DILARANG: menjelaskan prompt, meta AI, atau bilang 'sebagai Arti'."
     )
 
 

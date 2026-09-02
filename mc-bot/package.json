@@ -5,7 +5,13 @@
   "description": "Bot Minecraft Arti — mineflayer, dikendalikan bridge Python via NDJSON stdio",
   "main": "bot.js",
   "dependencies": {
+    "compression": "^1.8.1",
+    "express": "^4.22.2",
+    "minecrafthawkeye": "^1.3.9",
     "mineflayer": "4.37.1",
-    "mineflayer-pathfinder": "2.4.5"
+    "mineflayer-collectblock": "^1.6.0",
+    "mineflayer-pathfinder": "2.4.5",
+    "prismarine-viewer": "^1.33.0",
+    "socket.io": "^4.8.3"
   }
 }

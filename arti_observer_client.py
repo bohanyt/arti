@@ -30,7 +30,7 @@ def _parse_json(text: str) -> dict[str, Any]:
     text = (text or "").strip()
     if not text:
         return {}
-    # Parser keras milik scouter (2026-08-04): regex lama "{ pertama .. }
+    # Parser keras milik scouter ([date removed]): regex lama "{ pertama .. }
     # terakhir" pecah oleh dua objek / prosa ber-kurung, lalu fallback di
     # bawah memasukkan TEKS MENTAH sebagai summary (noise_level low) — sampah
     # yang lolos kurasi ke vault tanpa kelihatan gagal.
@@ -49,7 +49,7 @@ def summarize_segment(segment_text: str, config: dict) -> dict[str, Any]:
     chain_key = "observer_provider_chain"
     chain = list(config.get(chain_key) or config.get("scouter_provider_chain") or scouter.DEFAULT_CHAIN)
     # Observer pakai role Cursor sendiri (grok-4.5/high) — scouter sudah turun
-    # ke composer (revisi biaya 2026-08-03), kualitas kurasi tetap dijaga.
+    # ke composer (revisi biaya [date removed]), kualitas kurasi tetap dijaga.
     # telemetry_subsystem mengalir ke SEMUA lapisan provider (audit ronde-3:
     # satu panggilan observer sempat tercatat DUA baris — di sini dan di
     # provider — dan jalur fallback nvidia/openrouter masih berlabel
@@ -57,7 +57,11 @@ def summarize_segment(segment_text: str, config: dict) -> dict[str, Any]:
     cfg = {
         **config,
         "scouter_provider_chain": chain,
-        "cursor_role": "observer",
+        # Default observer (grok-high, kurasi shutdown). Catch-up startup
+        # mengoper "catchup" (composer-2.5) lewat kunci ini — model murah +
+        # sesi sendiri yang di-reuse antar segmen supaya cache Cursor kena
+        # (permintaan operator [date removed]).
+        "cursor_role": str(config.get("observer_cursor_role") or "observer"),
         "telemetry_subsystem": "observer",
     }
 

@@ -6,7 +6,7 @@
 #   venv\Scripts\python -m pip install -r requirements.txt
 #
 # Daftar ini HANYA berisi paket yang benar-benar di-import oleh kode Arti
-# (hasil audit AST seluruh modul, 2026-07-26) — bukan pip freeze environment.
+# (hasil audit AST seluruh modul, [date removed]) — bukan pip freeze environment.
 # TTS Supertone punya venv terpisah: lihat requirements-supertone.txt.
 # -----------------------------------------------------------------------------
 
@@ -37,3 +37,14 @@ tqdm==4.67.3              # progress bar observer pipeline
 pytest==9.0.3
 pytest-timeout==2.4.0     # potong test yang hang (regresi loop tak berujung)
 hypothesis==6.155.0       # property-based tests (subtitle, preprocessor, speak)
+praat-parselmouth==0.4.7  # polesan suara: range intonasi + pitch (arti_voice_dsp)
+
+# Discord bot Fase 1 (arti_discord.py) — [date removed]
+discord.py==2.7.1
+
+# Dubbing game cerita (arti_dubbing.py) — [date removed]
+rapidocr_onnxruntime==1.4.4
+onnxruntime-directml==1.24.4  # GANTI onnxruntime polos: OCR di GPU (DirectML), API kompatibel
+
+# Kolam premium kedua (arti_codex_agent, OPSIONAL — default mati) — [date removed]
+openai-codex==0.147.0     # SDK app-server Codex; butuh login ChatGPT Plus milik operator

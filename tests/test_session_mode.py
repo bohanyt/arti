@@ -14,7 +14,7 @@ CFG = {
     "initiative_quiet_sec": 30.0,
     "minecraft_narration_gap_sec": 20.0,
     "host_narration_gap_sec": 25.0,
-    "owner_yt_handles": ["@BohanYT"],
+    "owner_yt_handles": ["@streamertest"],
 }
 
 
@@ -36,7 +36,7 @@ def test_mode_predicates():
 
 
 def test_dormancy_only_applies_to_duet():
-    """Inti spek Bohan: "sepi = diam" cuma saat dia hadir & tidak ada acara."""
+    """Inti spek streamer: "sepi = diam" cuma saat dia hadir & tidak ada acara."""
     assert sm.mode_policy(sm.DUET, CFG)["dormancy_applies"] is True
     for mode in (sm.DUET_GAME, sm.HOST_CHAT, sm.HOST_GAME):
         assert sm.mode_policy(mode, CFG)["dormancy_applies"] is False, mode
@@ -68,13 +68,13 @@ def test_every_mode_has_own_scene_key():
 
 def test_handle_normalization_tolerates_at_and_case():
     # Chat YT asli TANPA '@', config PAKAI '@' — tanpa normalisasi tak pernah cocok.
-    assert sm.normalize_handle("@BohanYT") == "bohanyt"
-    assert sm.normalize_handle(" bohanyt ") == "bohanyt"
+    assert sm.normalize_handle("@StreamerTest") == "streamertest"
+    assert sm.normalize_handle(" streamertest ") == "streamertest"
     assert sm.normalize_handle("") == ""
 
 
 def test_owner_chat_accepted_in_any_form():
-    for form in ("bohanyt", "@bohanyt", "BohanYT", " @BohanYT "):
+    for form in ("streamertest", "@streamertest", "StreamerTest", " @StreamerTest "):
         assert sm.is_owner_turn("yt_chat", form, CFG) is True, form
 
 
@@ -97,8 +97,8 @@ def test_arti_own_proactive_turns_may_change_session():
 
 
 def test_owner_falls_back_to_yt_default_viewer():
-    cfg = {"yt_default_viewer": "@bohanyt"}
-    assert sm.is_owner_turn("yt_chat", "bohanyt", cfg) is True
+    cfg = {"yt_default_viewer": "@streamertest"}
+    assert sm.is_owner_turn("yt_chat", "streamertest", cfg) is True
     assert sm.is_owner_turn("yt_chat", "orang_lain", cfg) is False
 
 
@@ -139,7 +139,7 @@ def test_mode_tag_parsed_and_stripped():
 
 
 def test_mode_tag_duet():
-    _, cmd = sm.parse_mode_tags("Eh Bohan balik! [MODE: duet]")
+    _, cmd = sm.parse_mode_tags("Eh StreamerTest balik! [MODE: duet]")
     assert cmd == "duet"
 
 

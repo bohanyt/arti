@@ -715,10 +715,10 @@ if __name__ == "__main__":
             ],
             "vision_enabled": True,
             "vision_provider_chain": [
-                "nvidia", "google_gemma", "google_gemini_lite", "cloudflare", "openrouter", "zai", "ollama",
+                "google_gemini_lite", "openrouter", "ollama", "google_gemma", "cloudflare", "zai", "nvidia",
             ],
             "scouter_provider_chain": [
-                "nvidia", "cloudflare", "openrouter", "google_gemini", "zai", "ollama",
+                "google_gemini", "openrouter", "cloudflare", "ollama", "zai", "nvidia",
             ],
         }
 

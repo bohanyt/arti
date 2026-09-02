@@ -61,7 +61,7 @@ def _normalize_fact(fact: str) -> str:
 
 
 # Kata fungsi Bahasa Indonesia — dibuang sebelum membandingkan supaya "Arti debut
-# co-host PADA 27 Mei 2026" dan "debut co-host JATUH pada 27 Mei 2026" dikenali sama.
+# co-host PADA [date removed]" dan "debut co-host JATUH pada [date removed]" dikenali sama.
 _STOPWORDS = frozenset({
     "yang", "di", "ke", "dari", "pada", "adalah", "sedang", "akan", "untuk", "dan",
     "itu", "ada", "dalam", "sebuah", "tentang", "juga", "sudah", "telah", "dengan",
@@ -69,7 +69,7 @@ _STOPWORDS = frozenset({
 })
 
 # Ambang kemiripan token. Dipilih dari data nyata, bukan tebakan:
-# pada 60 entri vault per 2026-07-31, kemiripan TERTINGGI antara dua fakta yang memang
+# pada 60 entri vault per [date removed], kemiripan TERTINGGI antara dua fakta yang memang
 # BERBEDA cuma 0,154 — jadi 0,35 memberi jarak aman 2,3x. Di ambang ini klaster
 # "debut co-host" (6 varian) runtuh jadi 1, dan nol fakta sah yang salah digabung.
 #
@@ -192,8 +192,22 @@ def append_learning(
     fact: str,
     *,
     max_bullets: int = _MAX_LEARNING_BULLETS,
+    config: dict | None = None,
 ) -> bool:
-    """Append learning at end of section; cap total bullets (drop oldest)."""
+    """Append learning at end of section; cap total bullets (drop oldest).
+
+    Dua lapis gerbang duplikat, disengaja beda jangkauan:
+      1. `should_save_learning` di atas — hanya lihat bullet DI BERKAS TUJUAN `path`
+         sendiri (existing_lines datang dari file itu saja).
+      2. `arti_vault_rag.fakta_sudah_ada` di bawah — lihat LINTAS semua berkas
+         `vault/sessions/*` lewat indeks FTS yang sudah ada. Ini gerbang baru
+         (19 Agu 2026) yang menutup celah nyata: gerbang lapis 1 buta kalau fakta
+         yang sama pernah ditulis di berkas LAIN, sehingga "Arti debut co-host 27
+         Mei 2026" bisa ditulis ulang di puluhan sesi karena tiap berkas mulai
+         dari nol. Semua tiga jalur tulis fakta (curator observer, reflection
+         openrouter, save_long_term_memory bridge) funnel lewat sini, jadi satu
+         perbaikan di titik ini menutup celah di ketiganya sekaligus.
+    """
     if not path.is_file():
         return False
     text = path.read_text(encoding="utf-8")
@@ -201,6 +215,22 @@ def append_learning(
     if not should_save_learning(fact, existing):
         print(f"[Memory] Skip learning (quality gate): {fact[:72]}...")
         return False
+
+    # `config is not None` sengaja jadi syarat: pemanggil lama (skrip, tes) yang tidak
+    # tahu-menahu soal gerbang lintas-berkas ini TIDAK diam-diam ikut menoleh ke DB RAG
+    # produksi yang mungkin kebetulan ada di disk (`data/vault_rag.db`) — perilaku
+    # mereka persis seperti sebelum gerbang ini ada. Tiga pemanggil produksi
+    # (arti_curator, arti_openrouter, hermes_vtuber_bridge) semuanya SUDAH diperbarui
+    # untuk mengirim config, jadi jalur nyata tetap terlindungi.
+    if config is not None:
+        try:
+            import arti_vault_rag
+
+            if arti_vault_rag.fakta_sudah_ada(fact, config):
+                print(f"[Vault] fakta duplikat di-skip: {fact[:72]}...")
+                return False
+        except Exception as e:
+            print(f"[Memory] fakta_sudah_ada gagal, lanjut tulis: {e}")
 
     line = f"- [{time.strftime('%Y-%m-%d')}] {fact.strip()}"
     if "## Memori Jangka Panjang" not in text:
