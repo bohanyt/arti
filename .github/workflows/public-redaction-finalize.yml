@@ -1,0 +1,161 @@
+name: Finalize Public Redactions
+
+on:
+  push:
+    branches:
+      - public/refresh-2026-09-02
+
+permissions:
+  contents: write
+
+jobs:
+  redact:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Genericize comments, docstrings, fixtures, and public defaults
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from __future__ import annotations
+          import ast
+          import io
+          import tokenize
+          from pathlib import Path
+
+          root = Path('.')
+
+          def offsets(text: str):
+              starts = [0]
+              for line in text.splitlines(keepends=True):
+                  starts.append(starts[-1] + len(line))
+              return starts
+
+          def pos(starts, lc):
+              line, col = lc
+              return starts[line - 1] + col
+
+          def docstring_spans(text: str):
+              tree = ast.parse(text)
+              spans = set()
+              nodes = [tree] + [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))]
+              for node in nodes:
+                  body = getattr(node, 'body', None) or []
+                  if not body:
+                      continue
+                  first = body[0]
+                  if isinstance(first, ast.Expr) and isinstance(first.value, ast.Constant) and isinstance(first.value.value, str):
+                      spans.add((first.value.lineno, first.value.col_offset, first.value.end_lineno, first.value.end_col_offset))
+              return spans
+
+          def genericize(s: str) -> str:
+              # Historical/operator identifiers only. Runtime prompt strings are
+              # deliberately untouched unless they are docstrings/comments/tests.
+              s = s.replace('@BohanYT', '@streamer_test')
+              s = s.replace('@bohanyt', '@streamer_test')
+              s = s.replace('BohanYT', 'StreamerTest')
+              s = s.replace('bohanyto', 'streamer_test')
+              s = s.replace('bohanyt', 'streamertest')
+              s = s.replace('Bohan', 'streamer')
+              return s
+
+          # Comments and docstrings are publication commentary, not runtime control
+          # flow. Preserve every other token byte-for-byte.
+          for path in list(root.glob('*.py')) + list((root / 'tests').glob('*.py')):
+              text = path.read_text(encoding='utf-8')
+              starts = offsets(text)
+              docs = docstring_spans(text)
+              reps = []
+              for tok in tokenize.generate_tokens(io.StringIO(text).readline):
+                  is_doc = (tok.start[0], tok.start[1], tok.end[0], tok.end[1]) in docs
+                  if tok.type == tokenize.COMMENT or (tok.type == tokenize.STRING and is_doc):
+                      new = genericize(tok.string)
+                      if new != tok.string:
+                          reps.append((pos(starts, tok.start), pos(starts, tok.end), new))
+              # Tests are synthetic fixtures. Any remaining operator identifiers in
+              # test literals are replaced consistently without changing test logic.
+              if 'tests' in path.parts:
+                  for old, new in [
+                      ('@BohanYT', '@streamer_test'), ('@bohanyt', '@streamer_test'),
+                      ('BohanYT', 'StreamerTest'), ('bohanyto', 'streamer_test'),
+                      ('bohanyt', 'streamertest'), ('Bohan', 'StreamerTest'),
+                  ]:
+                      # Applied after token/comment edits below.
+                      pass
+              for a, b, new in sorted(reps, reverse=True):
+                  text = text[:a] + new + text[b:]
+              if 'tests' in path.parts:
+                  for old, new in [
+                      ('@BohanYT', '@streamer_test'), ('@bohanyt', '@streamer_test'),
+                      ('BohanYT', 'StreamerTest'), ('bohanyto', 'streamer_test'),
+                      ('bohanyt', 'streamertest'), ('Bohan', 'StreamerTest'),
+                  ]:
+                      text = text.replace(old, new)
+              compile(text, str(path), 'exec')
+              path.write_text(text, encoding='utf-8', newline='')
+
+          # JavaScript operator-specific historical comments only.
+          for path in (root / 'mc-bot').glob('*.js'):
+              text = path.read_text(encoding='utf-8')
+              lines = []
+              for line in text.splitlines(keepends=True):
+                  if '//' in line:
+                      prefix, comment = line.split('//', 1)
+                      line = prefix + '//' + genericize(comment)
+                  lines.append(line)
+              path.write_text(''.join(lines), encoding='utf-8', newline='')
+
+          # Explicitly authorized neutral public defaults. Existing config_local
+          # override paths remain unchanged.
+          bridge = root / 'hermes_vtuber_bridge.py'
+          text = bridge.read_text(encoding='utf-8')
+          needle = '"minecraft_streamer_name": "Bohan"'
+          if text.count(needle) != 1:
+              raise SystemExit(f'expected one minecraft streamer default, found {text.count(needle)}')
+          text = text.replace(needle, '"minecraft_streamer_name": "Streamer"')
+          bridge.write_text(text, encoding='utf-8', newline='')
+
+          mc = root / 'arti_minecraft.py'
+          text = mc.read_text(encoding='utf-8')
+          needle = 'cfg.get("minecraft_streamer_name", "Bohan")'
+          if text.count(needle) != 1:
+              raise SystemExit(f'expected one minecraft fallback, found {text.count(needle)}')
+          text = text.replace(needle, 'cfg.get("minecraft_streamer_name", "Streamer")')
+          mc.write_text(text, encoding='utf-8', newline='')
+
+          # No real public-release fixture/operational handles may remain.
+          forbidden = ('@bohanyt', 'bohanyto', '@BohanYT', 'BohanYT')
+          offenders = []
+          for path in root.rglob('*'):
+              if not path.is_file() or '.git' in path.parts:
+                  continue
+              if path.suffix.lower() not in {'.py','.js','.md','.txt','.json','.yml','.yaml','.bat'}:
+                  continue
+              try:
+                  t = path.read_text(encoding='utf-8')
+              except UnicodeDecodeError:
+                  continue
+              for value in forbidden:
+                  if value in t:
+                      offenders.append(f'{path}:{value}')
+          if offenders:
+              raise SystemExit('operator handle remains: ' + ', '.join(offenders))
+          PY
+
+          python -m compileall -q .
+          find . -type d -name __pycache__ -prune -exec rm -rf {} +
+          rm -f .github/workflows/public-redaction-finalize.yml
+
+      - name: Commit publication redactions
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --check
+          git commit -m 'publication: redact operator-specific public identifiers'
+          git push origin HEAD:public/refresh-2026-09-02
