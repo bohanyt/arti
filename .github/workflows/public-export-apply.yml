@@ -1,0 +1,85 @@
+name: Apply Sanitized Public Export
+
+on:
+  push:
+    branches:
+      - public/refresh-2026-09-02
+
+permissions:
+  contents: write
+
+jobs:
+  apply-export:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download sanitized frozen candidate
+        shell: bash
+        env:
+          ARTIFACT_URL: "https://sdmntprkoreacentral.oaiusercontent.com/files/00000000-1388-8206-ad19-2690234ace04/raw?se=2026-09-02T04%3A56%3A46Z&sp=r&sv=2026-02-06&sr=b&scid=259622bb-35b3-5c8c-b5b2-22b0b76f596e&skoid=54865dd2-31dc-44cc-a877-635aa4250446&sktid=a48cca56-e6da-484e-a814-9c849652bcb3&skt=2026-09-02T03%3A20%3A52Z&ske=2026-09-03T03%3A20%3A52Z&sks=b&skv=2026-02-06&sig=uT/1Q9YD5Wm9LMgWtP4K9tRz1uHtRZQ%2BOI6eK0aDuMo%3D"
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 2 "$ARTIFACT_URL" -o /tmp/export-artifact.zip
+          mkdir -p /tmp/export-artifact /tmp/export
+          unzip -q /tmp/export-artifact.zip -d /tmp/export-artifact
+          echo 'f7e7d6a997852779ae57442807fa039a96d1dc0cb8e99f6b4dd52b769a95be4c  /tmp/export-artifact/public-export.tar.gz' | sha256sum -c -
+          tar -xzf /tmp/export-artifact/public-export.tar.gz -C /tmp/export
+          test "$(find /tmp/export -type f | wc -l)" -eq 93
+          grep -q 'f61f2e21ca1f66eaa8e73520cf384d9c767a9ae6' /tmp/export-artifact/export-report.json
+
+      - name: Replace frozen product surface
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Root runtime from this release is authoritative. Remove stale arti_*.py
+          # and the known standalone runtime modules before copying the frozen set.
+          rm -f arti_*.py
+          rm -f hermes_vtuber_bridge.py session_transcript.py pipeline_timer.py \
+                bridge_health.py bridge_health_probes.py subtitle_server.py \
+                supertone_engine.py text_preprocessor.py
+          rm -f requirements*.txt start_arti.bat
+
+          # REVIEW surfaces are replaced conservatively rather than inherited from
+          # the August snapshot.
+          rm -rf tests mc-bot data dump vts-backup
+          if [ -d scripts ]; then
+            find scripts -mindepth 1 ! -path 'scripts/public_privacy_scan.py' -delete
+          fi
+
+          # Explicit internal/research cleanup from the publication manifest.
+          rm -rf docs/handoff docs/research docs/plans tasks .cursor
+          rm -f CLAUDE.md GITHUB_PUSH.md docs/CURRENT.md docs/DEVELOPMENT-WORKFLOW.md \
+                docs/LOCAL-LAB-MIGRATION.md docs/IMPLEMENTATION_PLAN.md \
+                docs/CURSOR_HANDOFF_by_Antigravity_x_Hermes.md \
+                docs/API-TELEMETRY-RESEARCH.md docs/AUDIT-memory-vault-2026-06.md \
+                docs/CURSOR-SDK-SPIKE.md
+
+          cp -a /tmp/export/. .
+
+          # One-shot transport helper must not ship in the public candidate.
+          rm -f .github/workflows/public-export-apply.yml
+
+          # Hard publication exclusions must not exist as tracked candidates.
+          for p in .env config_local.json ARTI_SOUL.md ARTI_VIEWERS.md ARTI_MOOD_STATE.json \
+                   vts_token.txt live_session.json PROGRESS.md; do
+            test ! -e "$p" || { echo "hard-excluded path present: $p" >&2; exit 1; }
+          done
+          test ! -e tasks
+          test ! -e docs/handoff
+          test ! -e .cursor
+
+      - name: Commit sanitized frozen product export
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --check
+          git commit -m 'publication: export sanitized frozen product baseline'
+          git push origin HEAD:public/refresh-2026-09-02
