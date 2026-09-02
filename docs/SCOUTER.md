@@ -1,64 +1,72 @@
-# Scouter — Arti v0.6
+# Scouter — screen context helper
 
-Semantic digest of streamer speech + YT chat. Drives mood, context inject, auto-vision window, and Curious hooks.
+Scouter is ARTI's compact screen-understanding path: capture a screen frame, ask a configured vision provider for a concise description, and expose that context to the conversation runtime.
 
-**Groq policy:** Scouter does **not** use Groq. Groq is reserved for Arti voice (PTT / YT / Curious response only).
+The implementation lives in [`arti_scouter_client.py`](../arti_scouter_client.py). Provider availability changes over time, so this document describes the **shipped routing contract**, not a promise that every external provider is currently free or online.
 
-## Chain order (`scouter_provider_chain`)
+## Default provider order
 
-1. **NVIDIA** — DiffusionGemma via NIM (`NVIDIA_API_KEY`)
-2. **Cloudflare** — Workers AI text (`CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`)
-3. **OpenRouter** — Laguna XS → Nemotron nano → owl (`OPENROUTER_API_KEY`)
-4. **Google Gemini** — Flash Lite text (`GEMINI_API_KEY`)
-5. **GitHub** (optional) — `vision_github_enabled` + `GITHUB_TOKEN`
-6. **Z.ai** — GLM-4-Flash text (`ZAI_API_KEY`)
-7. **Ollama Cloud** — last resort (`OLLAMA_API_KEY`)
+The public source currently defines this default Scouter chain:
 
-## JSON output
-
-| Field | Purpose |
-|-------|---------|
-| `summary` | 1–2 kalimat ringkas chat + streamer |
-| `emotion` | Mood overlay → `set_mood()` |
-| `topic` | Inject `[RINGKASAN KONTEKS TERAKHIR]` |
-| `important_facts` | Long-term memory jika panjang |
-| `screen_relevant` | Buka auto-vision ~60s |
-| `screen_hint` | Inject `[LAYAR RELEVAN: …]` |
-| `curious_worthy` | Gate Curious saat auto-window |
-| `curious_hook` | Sudut komentar proaktif |
-
-## Cadence
-
-| Trigger | CONFIG | Default |
-|---------|--------|---------|
-| Setiap N jawaban Arti | `scouter_every_n_triggers` | 5 |
-| Timer jika history baru | `scouter_interval_sec` | 90 |
-| Min gap antar LLM call | `scouter_min_gap_sec` | 30 |
-| Durasi auto-vision | `scouter_auto_vision_sec` | 60 |
-
-Keyword pre-gate (`layar`, `screen`, `lihat`, …) mempercepat timer — tetap panggil LLM chain.
-
-## Vision vs Scouter
-
-| | Vision | Scouter |
-|---|--------|---------|
-| Input | Screenshot JPEG | 15 baris `stream_history` |
-| Output | `scene`, `playback_mmss`, `ocr` | JSON digest |
-| Groq | Tidak di chain default | Tidak pernah |
-| Toggle | Mouse4 manual + scouter auto-window | Always on (`scouter_enabled`) |
-
-Manual vision (`vision_hotkey_key`) dan scouter auto-window (`vision_auto_until`) keduanya mengaktifkan `[LAYAR:]` inject dan Curious.
-
-## Health check
-
-Bridge startup prints **SCOUTER PROVIDERS** when `scouter_enabled: true`.
-
-```bash
-python bridge_health.py
+```text
+google_gemini
+→ openrouter
+→ cloudflare
+→ ollama
+→ zai
+→ nvidia
 ```
 
-## Module map
+A provider is skipped/fails forward when it is not configured, rejects the request, times out, or otherwise cannot return a usable result.
 
-- `arti_scouter_client.py` — chain orchestrator
-- `hermes_vtuber_bridge.py` — `scouter_worker`, `apply_scouter_result`, `is_vision_active()`
-- `arti_curious.py` — `curious_worthy` / `curious_hook` guards
+GitHub Models is intentionally treated as a retired Scouter provider in the current client; do not add it back to local configuration expecting the public default path to use it.
+
+## Credentials
+
+Configure only the providers you intend to use in `.env`. Common variables include:
+
+```text
+GEMINI_API_KEY
+OPENROUTER_API_KEY
+CLOUDFLARE_API_TOKEN
+CLOUDFLARE_ACCOUNT_ID
+ZAI_API_KEY
+NVIDIA_API_KEY
+OLLAMA_API_KEY
+```
+
+Not every provider requires every variable above, and local Ollama-compatible setups may use local endpoints instead of a hosted credential. See [`.env.example`](../.env.example) for the public placeholders actually shipped by the repository.
+
+Never commit the real `.env`.
+
+## Local configuration
+
+Provider order and model choices can be overridden by the runtime configuration. Keep machine/account-specific choices in `config_local.json` rather than editing credentials into source.
+
+The default chain should be understood as a fallback strategy, not a benchmark ranking. Latency, quotas, model names, and free tiers are external service properties and can change without a repository update.
+
+## Output contract
+
+Scouter is designed to return a small piece of context suitable for a live conversation turn rather than a long OCR/vision report. The bridge can then decide whether the result is fresh/relevant enough to inject into ARTI's prompt.
+
+Screen context is untrusted external input. The runtime should treat text visible on screen as observed content, not as privileged system instructions.
+
+## Relationship to the broader vision path
+
+Scouter is not the only vision-related module in ARTI. The main vision path and its model/configuration keys are documented in [`VISION-APIS.md`](VISION-APIS.md).
+
+The two paths may have different provider identifiers/order because they solve different latency/context tasks. Always inspect the corresponding public source before assuming they share a chain.
+
+## Local smoke check
+
+1. Put the credential for one supported provider in `.env`.
+2. Keep the other providers unset if you want to isolate that path.
+3. Start ARTI locally and trigger the feature that requests Scouter context.
+4. Confirm a concise screen description is returned.
+5. Disable/break that provider locally and confirm the chain fails forward rather than crashing the bridge.
+
+Public CI does not send screenshots to external model APIs, so real provider calls remain local verification.
+
+## Privacy
+
+A captured desktop frame may contain private messages, account information, browser tabs, tokens, or personal data. Do not attach real captures or raw Scouter payloads to public issues unless they are intentionally synthetic and safe to publish.
