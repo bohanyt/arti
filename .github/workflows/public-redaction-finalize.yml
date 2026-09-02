@@ -19,6 +19,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # The workflow contains the private identifiers only as search needles;
+          # remove the one-shot helper before scanning the candidate tree.
+          rm -f .github/workflows/public-redaction-finalize.yml
           python - <<'PY'
           from __future__ import annotations
           import ast
@@ -52,8 +55,6 @@ jobs:
               return spans
 
           def genericize(s: str) -> str:
-              # Historical/operator identifiers only. Runtime prompt strings are
-              # deliberately untouched unless they are docstrings/comments/tests.
               s = s.replace('@BohanYT', '@streamer_test')
               s = s.replace('@bohanyt', '@streamer_test')
               s = s.replace('BohanYT', 'StreamerTest')
@@ -75,16 +76,6 @@ jobs:
                       new = genericize(tok.string)
                       if new != tok.string:
                           reps.append((pos(starts, tok.start), pos(starts, tok.end), new))
-              # Tests are synthetic fixtures. Any remaining operator identifiers in
-              # test literals are replaced consistently without changing test logic.
-              if 'tests' in path.parts:
-                  for old, new in [
-                      ('@BohanYT', '@streamer_test'), ('@bohanyt', '@streamer_test'),
-                      ('BohanYT', 'StreamerTest'), ('bohanyto', 'streamer_test'),
-                      ('bohanyt', 'streamertest'), ('Bohan', 'StreamerTest'),
-                  ]:
-                      # Applied after token/comment edits below.
-                      pass
               for a, b, new in sorted(reps, reverse=True):
                   text = text[:a] + new + text[b:]
               if 'tests' in path.parts:
@@ -147,7 +138,6 @@ jobs:
 
           python -m compileall -q .
           find . -type d -name __pycache__ -prune -exec rm -rf {} +
-          rm -f .github/workflows/public-redaction-finalize.yml
 
       - name: Commit publication redactions
         shell: bash
