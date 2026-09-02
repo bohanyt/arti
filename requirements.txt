@@ -16,7 +16,8 @@ python-dotenv==1.2.2
 keyboard==0.13.5
 mouse==0.7.1
 
-# Vision\ nmss==10.2.0
+# Vision
+mss==10.2.0
 pillow==12.2.0
 
 # Progress / tests
