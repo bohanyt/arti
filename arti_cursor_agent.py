@@ -8,7 +8,7 @@ streamer langganan Cursor. Composer 2.5 ditarik dari "Cursor Models pool" yang s
 termasuk langganan (beda dari API pool pihak ketiga, yang kuotanya sudah habis). Jadi
 menjawab chat viewer lewat Composer memakai resource yang sudah dibayar.
 
-FAKTA TERUKUR (spike Tahap 0, 2026-07-31 — lihat docs/CURSOR-SDK-SPIKE.md)
+FAKTA TERUKUR (historical private benchmark; retained here only as tuning context)
   sesi hangat, tanpa turn pertama : p50 2,66 dtk  p95 3,73 dtk
   turn pertama sesi               : 13,11 dtk   <- dibayar di luar siaran (pemanas)
   agen baru tiap turn (dingin)    : p50 4,62 dtk
@@ -1153,7 +1153,7 @@ def shutdown_session() -> None:
     """Tutup semua sesi saat proses berakhir.
 
     Didaftarkan lewat `atexit` DI MODUL INI, bukan dipanggil dari `main_loop`:
-    tests/test_bridge_startup_bugfix.py:781 mem-parse AST body `main_loop` dan mengunci
+    a private regression test mem-parse AST body `main_loop` dan mengunci
     urutan pemanggilannya.
     """
     global _session, _standby

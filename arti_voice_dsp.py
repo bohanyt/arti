@@ -1,7 +1,6 @@
 """Pemoles suara Arti — pelebaran range intonasi + kenaikan pitch berwarna.
 
-Lahir 16 Agu 2026 dari sesi uji dengar streamer (dump/uji_pitch, skrip
-scripts/uji_pitch_suara.py + uji_range_suara.py). Latar: suara F1 Supertone
+Lahir dari rangkaian uji dengar dan kalibrasi internal. Latar: suara F1 Supertone
 "kayak pembawa berita" — datar; penonton bilang robotik. Supertonic TIDAK
 punya parameter pitch/prosodi, dan kenop yang ada (voice/speed/steps) SUDAH
 dites streamer sampai terkunci. Jalan yang tersisa: post-process.

@@ -279,7 +279,7 @@ CONFIG = {
     # ---- Kolam premium KEDUA: Codex/ChatGPT Plus ([date removed]) ----
     # Lapis ANTARA composer dan Groq di giliran suara: composer gagal/
     # breaker tutup -> Luna (thread hangat 1,5-3 dtk, probe tercatat di
-    # private development notes removed]-codex-chatgpt-plus.md) -> baru Groq.
+    # historical private benchmark notes) -> baru Groq.
     # Default MATI: ToS abu-abu — menyalakan = keputusan sadar di
     # config_local. KOREKSI kuota (operator measurement [date removed]): pemakaian
     # Codex TIDAK memotong kuota chat ChatGPT ("doesn't include Chat
@@ -325,7 +325,7 @@ CONFIG = {
     # (digest video, terima kasih donatur), tidak ada yang diburu waktu.
     "cursor_warmup_wait_precious_sec": 45.0,
     # Daur ulang sesi BUKAN soal kecepatan: pembengkakan konteks terukur cuma
-    # 1,05x/20 turn (docs/CURSOR-SDK-SPIKE.md). Alasannya VARIASI — sesi hangat
+    # 1,05x/20 turn (historical private Cursor benchmark). Alasannya VARIASI — sesi hangat
     # menjawab pertanyaan mirip nyaris verbatim. Sejak [date removed] penggantinya
     # dipanaskan lebih dulu (tukar panas), jadi daur ulang tidak lagi berarti
     # 13-20 detik penonton mendengar Groq.
@@ -352,7 +352,7 @@ CONFIG = {
     # semua otak, chain API gratis jadi fallback). Aktif kalau "cursor" ada di
     # scouter/observer/vision_provider_chain — chain shipped SENGAJA tanpa
     # cursor (repo publik; nyalakan lewat config_local). Verifikasi model/param:
-    # scripts/spike_grok_vision.py — grok-4.5 punya effort low/medium/high,
+    # historical vision provider probe — grok-4.5 punya effort low/medium/high,
     # composer-2.5 TIDAK punya effort (jangan diisi), default variant = FAST.
     # Revisi operator [date removed] (CSV usage: grok-high 23,5M token = 49% konsumsi
     # sehari, 671 call scouter): scouter turun ke composer non-fast — "composer
@@ -527,7 +527,7 @@ CONFIG = {
     # sukses NOL kali. Kerja latar belakang tidak boleh merebut jalur yang
     # dipakai penonton. Chain gratis = tetap hemat (bahkan lebih), nol
     # kontensi. Catch-up dengan composer tetap tersedia SAAT BRIDGE MATI
-    # lewat scripts/rangkum_susulan.py (semalam sukses 62 beat).
+    # lewat optional private catch-up helper (semalam sukses 62 beat).
     # "github" DIBUANG [date removed] — GitHub Models pensiun total 30 Juli 2026
     # (HTTP 410 github_models_retirement_brownout, diverifikasi dengan
     # memanggilnya). Rinciannya di docs/MODEL-REGISTRY.md §2.1.
@@ -1201,11 +1201,11 @@ CONFIG = {
     # motion menang, jadi menyalakan ini bersama motion BERKURVA KEPALA
     # justru menelan anggukan dan hasilnya lebih buruk dari sebelumnya.
     # Nyalakan HANYA berbarengan dengan idle_motion_hotkeys yang menunjuk
-    # motion tanpa kurva kepala (scripts/buat_motion_tanpa_kepala.py).
+    # motion tanpa kurva kepala (private motion-cleanup helper).
     "idle_motion_lanjut_saat_bicara": False,
     # Daftar hotkey motion idle. Kosong = pakai IDLE_MOTION_HOTKEYS bawaan.
     # Dibuat bisa diatur [date removed] supaya motion percobaan (mis. salinan
-    # tanpa kurva kepala dari scripts/buat_motion_tanpa_kepala.py) bisa diuji
+    # tanpa kurva kepala dari private motion-cleanup helper) bisa diuji
     # LIVE sambil Arti benar-benar bicara, tanpa mengedit kode dan tanpa
     # menyentuh hotkey produksi. Isi di config_local, hapus lagi sesudah uji.
     "idle_motion_hotkeys": [],
@@ -8501,7 +8501,7 @@ def _idle_ws_ok() -> bool:
         return False
 
 # --- Track 1: Motion Hotkeys (smooth body movement) ---
-# Motion BERSIH (dihasilkan scripts/buat_motion_bersih.py), bukan ArtiIdle
+# Motion BERSIH (dihasilkan private motion-cleanup helper), bukan ArtiIdle
 # mentah. Diganti [date removed] sesudah bukti live: motion mentah menulis 62
 # parameter yang sama dengan berkas ekspresi — termasuk ParamMouthOpenY —
 # sehingga lipsync, lampu, dan titik tiga ditimpa selama motion berputar.
@@ -8640,7 +8640,7 @@ async def _prepare_turn_start(trigger_type: str, viewer_name: str | None) -> Non
         print(
             "[Idle] Motion JALAN TERUS saat bicara "
             "(idle_motion_lanjut_saat_bicara=true). Syarat: motion tanpa "
-            "kurva kepala/mulut — pakai scripts/buat_motion_bersih.py."
+            "kurva kepala/mulut — pakai private motion-cleanup helper."
         )
     if trigger_type == "yt_chat":
         who = viewer_name or "viewer"

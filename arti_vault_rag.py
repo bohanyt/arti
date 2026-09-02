@@ -51,7 +51,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "vault_rag_live_enabled": True,
     "vault_rag_lite_enabled": True,
     "vault_rag_db_path": "data/vault_rag.db",
-    # `docs/handoff/**/*.md` DIKELUARKAN [date removed]. Dokumen itu handoff untuk developer,
+    # `developer handoff documents` DIKELUARKAN [date removed]. Dokumen itu handoff untuk developer,
     # bukan memori Arti, dan tiga masalah nyata:
     #   1. BASI — FASE-2.md masih menyebut laguna-xs.2, owl-alpha, scout, qwen3-32b;
     #      semuanya sudah 404 atau diganti. Arti akan menjelaskan sistem yang tidak ada lagi.
@@ -67,7 +67,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # transcripts/**/*.jsonl DIKELUARKAN [date removed]. Sesi 11,5 jam menghasilkan
     # SATU transkrip 669 chunk = 51% seluruh DB (1316) — chat spam, noise ASR,
     # dan leaderboard bot ikut ter-embed, menenggelamkan memori kurasi. Persis
-    # alasan docs/handoff dikeluarkan (di atas), dan melanggar desain vault slim:
+    # alasan developer handoff documents dikeluarkan (di atas), dan melanggar desain vault slim:
     # dialog mentah diwakili ringkasan + beats, transkrip tetap arsip di disk.
     # Ingat: menghapus glob TIDAK membersihkan chunk lama — hapus DB lalu rebuild.
     "vault_rag_index_globs": [
