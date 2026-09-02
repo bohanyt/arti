@@ -12,7 +12,7 @@ Panduan menghubungkan bridge ARTI ke stack kamu. Dokumentasi public ini tidak me
 - Virtual audio cable (opsional, untuk routing TTS/audio)
 - API key untuk provider yang benar-benar kamu aktifkan; lihat [`.env.example`](../.env.example)
 
-Beberapa integrasi opsional memiliki dependency manifest sendiri, misalnya `requirements-supertone.txt`.
+Beberapa integrasi opsional memiliki dependency manifest sendiri. Supertone memakai environment Python 3.12 terpisah (`venv312`); Cursor SDK, desktop audio, donation integrations, dan video features juga punya manifest masing-masing bila dibutuhkan.
 
 ## 2. Environment (`.env`)
 
@@ -81,9 +81,28 @@ Untuk motion/ekspresi, lihat [`VTS-ANIMATION.md`](VTS-ANIMATION.md) dan [`Expres
 
 ## 6. TTS
 
-Runtime mendukung jalur TTS yang dikonfigurasi oleh bridge dan dependency opsionalnya. Jika memakai Supertone, install dependency dari manifest yang sesuai dan sesuaikan key TTS di konfigurasi lokal/runtime kamu.
+`edge-tts` ada di environment Python 3.11 utama sebagai fallback. Jalur Supertone memakai subprocess Python 3.12 terpisah karena dependency-nya tidak disatukan dengan bridge.
 
-Jangan menganggap preset suara, sample audio, atau hasil tuning milik maintainer sebagai bagian dari distribusi public; materi lokal tersebut sengaja tidak dipublish.
+Setup Supertone dari root repo:
+
+```powershell
+py -3.12 -m venv venv312
+venv312\Scripts\python -m pip install -r requirements-supertone.txt
+```
+
+Detail versi CPU/GPU, CUDA, dan model-download dicatat langsung di [`requirements-supertone.txt`](../requirements-supertone.txt). Jika Supertone tidak tersedia, jangan menganggap cache/preset suara milik maintainer sebagai bagian dari repo; gunakan fallback atau setup voice milikmu sendiri.
+
+### Reflex audio cache
+
+Reflex adalah bunyi/ucapan pendek pre-synthesized supaya event game bisa mendapat reaksi sebelum LLM selesai. Runtime boleh hidup tanpa cache, tetapi reflex audio baru tersedia setelah cache dibuat.
+
+Setelah `venv312` siap, jalankan:
+
+```powershell
+venv\Scripts\python scripts\build_reflex_cache.py
+```
+
+Gunakan `--force` untuk rebuild semua WAV setelah mengganti voice atau daftar reflex. Output masuk ke `data/reflex/` dan tetap runtime-local/untracked.
 
 ## 7. Model/provider
 
@@ -91,6 +110,7 @@ Provider dipilih dari konfigurasi runtime. Isi credential yang diperlukan di `.e
 
 Dokumentasi tambahan:
 
+- [`MODEL-REGISTRY.md`](MODEL-REGISTRY.md)
 - [`OPENROUTER_MODELS.md`](OPENROUTER_MODELS.md)
 - [`VISION-APIS.md`](VISION-APIS.md)
 - [`SCOUTER.md`](SCOUTER.md)
@@ -117,7 +137,7 @@ Setelah data lokal milikmu sendiri terbentuk, reindex dapat dijalankan sesuai ke
 python arti_vault_rag.py --reindex-all
 ```
 
-Pastikan semua output memory tetap berada di path yang sudah di-gitignore.
+Pastikan semua output memory tetap berada di path yang sudah di-gitignore. Jika embedding endpoint lokal belum tersedia, nonaktifkan/konfigurasikan RAG sesuai kebutuhan daripada memasukkan database atau endpoint pribadi ke Git.
 
 ## 10. Minecraft
 
