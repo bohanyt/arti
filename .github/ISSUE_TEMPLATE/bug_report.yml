@@ -1,0 +1,64 @@
+name: Bug report
+description: Report a reproducible problem in the public ARTI repository
+title: "[Bug] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Do not include API keys, tokens, viewer data, private transcripts, real chat/donation payloads, or unredacted local paths.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and what you expected instead.
+      placeholder: ARTI does X when I expect Y.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction steps
+      description: Use the smallest public-safe reproduction you can provide.
+      placeholder: |
+        1. Configure ...
+        2. Run ...
+        3. Trigger ...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Core Python bridge
+        - ASR / audio / TTS
+        - VTube Studio / motion
+        - OBS
+        - Vision / observer / scouter
+        - Memory / RAG
+        - YouTube chat / events
+        - Minecraft
+        - Documentation / setup
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Commit or version
+      description: Prefer a public commit SHA when possible.
+      placeholder: e.g. main @ abc1234
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Public-safe logs or evidence
+      description: Paste only minimized, redacted output. Never paste secrets or private viewer/session content.
+      render: shell
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed credentials, tokens, private viewer/session data, and sensitive local paths from this report.
+          required: true

@@ -1,0 +1,53 @@
+name: Feature request
+description: Suggest a public-facing ARTI improvement
+title: "[Feature] "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Keep requests focused on the public product. Do not paste private development plans, viewer/session data, credentials, or unpublished workspace material.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What public user/contributor problem would this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the smallest useful outcome rather than an internal implementation plan.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Core runtime
+        - Audio / ASR / TTS
+        - VTube Studio / motion
+        - OBS
+        - Vision / observer / scouter
+        - Memory / RAG
+        - YouTube chat / events
+        - Minecraft
+        - Documentation / setup
+        - New optional integration
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints or compatibility notes
+      description: Mention external apps, providers, platforms, or hardware requirements if relevant.
+  - type: checkboxes
+    id: boundary
+    attributes:
+      label: Public-repo boundary
+      options:
+        - label: This request does not require publishing credentials, viewer/session data, private handoffs, or other private workspace material.
+          required: true

@@ -139,7 +139,7 @@ If a fixture cannot be proven synthetic/public-safe, do not publish it.
 
 ## Contributing
 
-See [`AGENTS.md`](AGENTS.md) for repository-safe contributor guidance. Keep new examples synthetic, make optional integrations fail closed, and distinguish unit/cloud evidence from real-world validation.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the normal contributor workflow and [`AGENTS.md`](AGENTS.md) for repository-safe agent guidance. Keep new examples synthetic, make optional integrations fail closed, and distinguish unit/cloud evidence from real-world validation.
 
 ## License
 
