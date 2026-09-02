@@ -22,6 +22,7 @@ def text_chat(
     temperature: float = 0.2,
     timeout: float = 60.0,
     extra_headers: dict[str, str] | None = None,
+    extra_payload: dict[str, Any] | None = None,
     session: requests.Session | None = None,
     telemetry_subsystem: str = "scouter",
 ) -> tuple[str, int]:
@@ -35,6 +36,8 @@ def text_chat(
         "max_tokens": max_tokens,
         "temperature": temperature,
     }
+    if extra_payload:
+        payload.update(extra_payload)
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",

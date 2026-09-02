@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import os
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -15,6 +17,28 @@ PROBE_VISION_PROMPT = (
     "Describe this tiny test image briefly."
 )
 PROBE_TEXT_PROMPT = 'Reply JSON only: {"ping":true,"summary":"ok"}'
+
+
+def _is_json_object(raw: str) -> bool:
+    """Terima JSON polos/fence; tolak HTTP 200 dengan content kosong/prosa."""
+    text = (raw or "").strip()
+    candidates = [text]
+    candidates.extend(
+        match.group(1).strip()
+        for match in re.finditer(
+            r"```(?:json)?\s*(.+?)```", text, re.DOTALL | re.IGNORECASE
+        )
+    )
+    start, end = text.find("{"), text.rfind("}") + 1
+    if start >= 0 and end > start:
+        candidates.append(text[start:end])
+    for candidate in candidates:
+        try:
+            if isinstance(json.loads(candidate), dict):
+                return True
+        except (json.JSONDecodeError, TypeError):
+            continue
+    return False
 
 
 @dataclass
@@ -119,7 +143,7 @@ def text_models_for_provider(config: dict, provider: str) -> list[str]:
         if not models:
             models = [
                 config.get("openrouter_summarizer_model", "nvidia/nemotron-3-super-120b-a12b:free"),
-                config.get("openrouter_summarizer_fallback", "nvidia/nemotron-3-nano-30b-a3b:free"),
+                config.get("openrouter_summarizer_fallback", "nvidia/nemotron-3.5-lightning:free"),
             ]
         return [m for m in models if m][:2]
     if p == "github":
@@ -165,24 +189,24 @@ def probe_vision_model(provider: str, model: str, config: dict, jpeg_b64: str | 
     cfg = {**config, "vision_max_tokens": 64, "vision_temperature": 0.1}
     try:
         if p == "nvidia":
-            _, ms = arti_nvidia_client.vision_chat(
+            raw, ms = arti_nvidia_client.vision_chat(
                 PROBE_VISION_PROMPT, b64, config=cfg, model=model, max_tokens=64, temperature=0.1, timeout=45
             )
         elif p == "google_gemma":
-            _, ms = arti_gemini_vision.vision_generate(
+            raw, ms = arti_gemini_vision.vision_generate(
                 PROBE_VISION_PROMPT, b64, config=cfg, model=model, max_tokens=64, temperature=0.1, timeout=45
             )
         elif p == "google_gemini_lite":
-            _, ms = arti_gemini_vision.vision_generate(
+            raw, ms = arti_gemini_vision.vision_generate(
                 PROBE_VISION_PROMPT, b64, config=cfg, model=model, max_tokens=64, temperature=0.1, timeout=45
             )
         elif p == "cloudflare":
-            _, ms = arti_cloudflare_vision.vision_chat(
+            raw, ms = arti_cloudflare_vision.vision_chat(
                 PROBE_VISION_PROMPT, b64, config=cfg, max_tokens=64, temperature=0.1, timeout=45
             )
         elif p == "openrouter":
             key = (cfg.get("openrouter_api_key") or os.environ.get("OPENROUTER_API_KEY") or "").strip()
-            _, ms = oai.vision_chat(
+            raw, ms = oai.vision_chat(
                 "https://openrouter.ai/api/v1/chat/completions",
                 key,
                 model,
@@ -195,7 +219,7 @@ def probe_vision_model(provider: str, model: str, config: dict, jpeg_b64: str | 
             )
         elif p == "groq":
             key = (cfg.get("groq_api_key") or os.environ.get("GROQ_API_KEY") or "").strip()
-            _, ms = oai.vision_chat(
+            raw, ms = oai.vision_chat(
                 "https://api.groq.com/openai/v1/chat/completions",
                 key,
                 model,
@@ -206,22 +230,24 @@ def probe_vision_model(provider: str, model: str, config: dict, jpeg_b64: str | 
                 timeout=45,
             )
         elif p == "github":
-            _, ms = arti_github_vision.vision_chat(
+            raw, ms = arti_github_vision.vision_chat(
                 PROBE_VISION_PROMPT, b64, config=cfg, max_tokens=64, temperature=0.1, timeout=45
             )
         elif p == "zai":
-            _, ms = arti_zai_vision.vision_chat(
+            raw, ms = arti_zai_vision.vision_chat(
                 PROBE_VISION_PROMPT, b64, config=cfg, max_tokens=64, temperature=0.1, timeout=45
             )
         elif p == "ollama":
-            _, ms = arti_ollama_vision.vision_chat(
+            raw, ms = arti_ollama_vision.vision_chat(
                 PROBE_VISION_PROMPT, b64, config=cfg, max_tokens=64, temperature=0.1, timeout=60
             )
         else:
             row = DeepProbeRow(provider, model, "vision", "SKIP", f"unknown provider {provider}")
             _telemetry_probe(row)
             return row
-        row = DeepProbeRow(provider, model, "vision", "OK", "describe OK", ms)
+        if not _is_json_object(raw):
+            raise ValueError("respons bukan objek JSON")
+        row = DeepProbeRow(provider, model, "vision", "OK", "JSON OK", ms)
         _telemetry_probe(row)
         return row
     except Exception as e:
@@ -245,20 +271,20 @@ def probe_text_model(provider: str, model: str, config: dict) -> DeepProbeRow:
     msgs = [{"role": "user", "content": PROBE_TEXT_PROMPT}]
     try:
         if p == "nvidia":
-            _, ms = arti_nvidia_client.chat_completion(
+            raw, ms = arti_nvidia_client.chat_completion(
                 msgs, config=cfg, model=model, max_tokens=32, temperature=0.1, timeout=45
             )
         elif p in ("google_gemini", "google_gemini_lite"):
-            _, ms = arti_gemini_vision.text_generate(
+            raw, ms = arti_gemini_vision.text_generate(
                 PROBE_TEXT_PROMPT, config=cfg, max_tokens=32, temperature=0.1, timeout=45
             )
         elif p == "cloudflare":
-            _, ms = arti_cloudflare_vision.text_chat(
+            raw, ms = arti_cloudflare_vision.text_chat(
                 msgs, config=cfg, max_tokens=32, temperature=0.1, timeout=45
             )
         elif p == "openrouter":
             key = (cfg.get("openrouter_api_key") or os.environ.get("OPENROUTER_API_KEY") or "").strip()
-            _, ms = text_oai.text_chat(
+            raw, ms = text_oai.text_chat(
                 "https://openrouter.ai/api/v1/chat/completions",
                 key,
                 model,
@@ -269,22 +295,24 @@ def probe_text_model(provider: str, model: str, config: dict) -> DeepProbeRow:
                 extra_headers={"HTTP-Referer": "https://github.com/YOUR_USER/YOUR_REPO", "X-Title": "Arti Health"},
             )
         elif p == "github":
-            _, ms = arti_github_vision.text_chat(
+            raw, ms = arti_github_vision.text_chat(
                 msgs, config=cfg, max_tokens=32, temperature=0.1, timeout=45
             )
         elif p == "zai":
-            _, ms = arti_zai_vision.text_chat(
+            raw, ms = arti_zai_vision.text_chat(
                 msgs, config=cfg, max_tokens=32, temperature=0.1, timeout=45
             )
         elif p == "ollama":
-            _, ms = arti_ollama_vision.text_chat(
+            raw, ms = arti_ollama_vision.text_chat(
                 msgs, config=cfg, max_tokens=32, temperature=0.1, timeout=60
             )
         else:
             row = DeepProbeRow(provider, model, "text", "SKIP", f"unknown provider {provider}")
             _telemetry_probe(row)
             return row
-        row = DeepProbeRow(provider, model, "text", "OK", "text OK", ms)
+        if not _is_json_object(raw):
+            raise ValueError("respons bukan objek JSON")
+        row = DeepProbeRow(provider, model, "text", "OK", "JSON OK", ms)
         _telemetry_probe(row)
         return row
     except Exception as e:

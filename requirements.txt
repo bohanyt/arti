@@ -1,34 +1,50 @@
-# ARTI public runtime dependencies — Python 3.11
+# =============================================================================
+# Arti VTuber Co-Host — bridge dependencies (Python [time removed], venv/)
+# =============================================================================
+# Install:
+#   py -[time removed] -m venv venv
+#   venv\Scripts\python -m pip install -r requirements.txt
+#
+# Daftar ini HANYA berisi paket yang benar-benar di-import oleh kode Arti
+# (hasil audit AST seluruh modul, [date removed]) — bukan pip freeze environment.
+# TTS Supertone punya venv terpisah: lihat requirements-supertone.txt.
+# -----------------------------------------------------------------------------
 
-# Audio pipeline
-sounddevice==0.5.5
-soundfile==0.13.1
-faster-whisper==1.2.1
-edge-tts==7.2.8
+# --- Audio pipeline ---
+sounddevice==0.5.5        # capture mic + playback ke virtual cable
+soundfile==[time removed].1         # baca/tulis WAV
+faster-whisper==1.2.1     # ASR lokal (fallback; utama via Groq Whisper API)
+edge-tts==7.2.8           # TTS fallback (engine utama: Supertone di venv312)
 
-# Core
-numpy==2.4.6
-requests==2.34.2
-websockets==16.0
-python-dotenv==1.2.2
+# --- Core ---
+numpy==2.4.6              # resampling audio + embedding vault RAG
+requests==[time removed].2          # semua HTTP API (Groq, Gemini, OpenRouter, YT innertube)
+websockets==16.0          # VTube Studio API + subtitle server OBS
+python-dotenv==1.2.2      # load .env (opsional — arti_env.py punya fallback manual)
 
-# Input / hotkeys
-keyboard==0.13.5
-mouse==0.7.1
+# --- Input / hotkey ---
+keyboard==[time removed].5          # hotkey keyboard PTT
+mouse==0.7.1              # hotkey tombol samping mouse (PTT + vision toggle)
 
-# Vision
-mss==10.2.0
-pillow==12.2.0
+# --- Vision (screenshot layar untuk konteks) ---
+mss==10.2.0               # capture layar
+pillow==12.2.0            # encode/resize screenshot
 
-# Progress / tests
-tqdm==4.67.3
+# --- Progress display ---
+tqdm==[time removed].3              # progress bar observer pipeline
+
+# --- Tests ---
 pytest==9.0.3
-pytest-timeout==2.4.0
-hypothesis==6.155.0
+pytest-timeout==2.4.0     # potong test yang hang (regresi loop tak berujung)
+hypothesis==6.155.0       # property-based tests (subtitle, preprocessor, speak)
+praat-parselmouth==0.4.7  # polesan suara: range intonasi + pitch (arti_voice_dsp)
 
-# Optional runtime surfaces included in the frozen Sep 2 baseline
-praat-parselmouth==0.4.7
+# Discord bot Fase 1 (arti_discord.py) — [date removed]
 discord.py==2.7.1
+
+# Dubbing game cerita (arti_dubbing.py) — [date removed]
 rapidocr_onnxruntime==1.4.4
-onnxruntime-directml==1.24.4
-openai-codex==0.147.0
+onnxruntime-directml==[time removed].4  # GANTI onnxruntime polos: OCR di GPU (DirectML), API kompatibel
+
+# Kolam premium kedua (arti_codex_agent, OPSIONAL — default mati) — [date removed]
+openai-codex==0.147.0     # SDK app-server Codex; butuh login ChatGPT Plus milik operator

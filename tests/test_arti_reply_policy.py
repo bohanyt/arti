@@ -44,7 +44,7 @@ def test_yt_gacha_range_varies():
 
 
 # --- rant mode: sesekali panjang banget, HANYA saat sepi ----------------------
-# Permintaan Bohan 2026-08-01: "pertanyaan kurang bermutu jawabnya panjang
+# Permintaan operator [date removed]: "pertanyaan kurang bermutu jawabnya panjang
 # banget mungkin, tapi harus jarang, mungkin kalo sepi".
 
 
@@ -118,30 +118,30 @@ def test_bridge_wires_quiet_signal():
     )
 
 
-# --- nickname viewer: 2-3 suku kata, tanpa angka ekor (Bohan 2026-08-02) -------
+# --- nickname viewer: 2-3 suku kata, tanpa angka ekor (operator [date removed]) -------
 
 
 def test_viewer_nickname_strips_trailing_digits_and_suffix():
     cases = {
-        "@penontonsetia241": "penonton",
-        "@Dewi-radio108": "Dewi",
-        "@RiskyTuan": "Risky",
+        "@abdmanlifyou241": "abdmanli",
+        "@Rafi-radio108": "Rafi",
+        "@NickyTuan": "Nicky",
         "@bohanyt": "bohan",
-        "@namayangpanjangnya7169": "namayang",
-        "@Warga_H1889": "Warga",
-        "@budi3Dmodeller": "budi",
-        "@kelap-z": "kelap",
+        "@muhammadfadhilranda7169": "muhammad",
+        "@Agen_H1889": "Agen",
+        "@dipa3Dmodeller": "dipa",
+        "@cupil-z": "cupil",
     }
     for handle, want in cases.items():
         assert policy.viewer_nickname(handle) == want, handle
 
 
 def test_viewer_nickname_keeps_short_handles():
-    assert policy.viewer_nickname("@tamubaru") == "tamubaru"
+    assert policy.viewer_nickname("@miaorei") == "miaorei"
     assert policy.viewer_nickname("") == ""
 
 
 def test_extract_viewer_handle_from_wrapper():
-    w = "[Pesan Live Chat dari Viewer @penontonsetia241 (YouTube)]: halo"
-    assert policy.extract_viewer_handle(w) == "@penontonsetia241"
+    w = "[Pesan Live Chat dari Viewer @abdmanlifyou241 (YouTube)]: halo"
+    assert policy.extract_viewer_handle(w) == "@abdmanlifyou241"
     assert policy.extract_viewer_handle("halo biasa") == ""

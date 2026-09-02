@@ -127,6 +127,7 @@ def openrouter_chat(
     title: str = "Arti VTuber",
     stream: bool = False,
     stream_preview_prefix: str | None = None,
+    extra_payload: dict | None = None,
 ) -> str | None:
     if not api_key:
         return None
@@ -145,15 +146,18 @@ def openrouter_chat(
                 hide_preamble_until_marker=bool(stream_preview_prefix is not None),
             )
 
+        payload = {
+            "model": model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+        if extra_payload:
+            payload.update(extra_payload)
         res = requests.post(
             _OPENROUTER_URL,
             headers=_headers(api_key, title),
-            json={
-                "model": model,
-                "messages": messages,
-                "max_tokens": max_tokens,
-                "temperature": temperature,
-            },
+            json=payload,
             timeout=timeout,
         )
         if res.status_code == 200:
@@ -255,6 +259,11 @@ def openrouter_live_completion(
 
     for model in openrouter_live_model_chain(config):
         print(f"[OpenRouter Live] Trying {model}...")
+        # Reasoning DIMATIKAN di jalur live (probe [date removed]): budget live cuma
+        # 110-380 token dan CoT Nemotron menghabiskannya sebelum jawaban
+        # tertulis. Lebih bahaya lagi: saat content kosong, openrouter_chat
+        # jatuh ke field `reasoning` — tanpa param ini Arti bisa MENGUCAPKAN
+        # chain-of-thought Inggris mentah di siaran.
         text = openrouter_chat(
             key,
             model,
@@ -263,6 +272,7 @@ def openrouter_live_completion(
             temperature=temp,
             timeout=timeout,
             title="Arti Live",
+            extra_payload={"reasoning": {"enabled": False}},
         )
         if text:
             return text, f"openrouter/{model}"
@@ -516,7 +526,7 @@ def _apply_reflection_outputs(data: dict, config: dict) -> None:
 
     for item in data.get("learnings") or []:
         if item and isinstance(item, str):
-            _append_learning(learnings_path, f"Reflection: {item.strip()}")
+            _append_learning(learnings_path, f"Reflection: {item.strip()}", config)
 
     viewers_path = _ROOT / "ARTI_VIEWERS.md"
     for vu in data.get("viewer_updates") or []:
@@ -528,10 +538,10 @@ def _apply_reflection_outputs(data: dict, config: dict) -> None:
             _upsert_viewer_section(viewers_path, name, notes, date_str)
 
 
-def _append_learning(path: Path, fact: str) -> None:
+def _append_learning(path: Path, fact: str, config: dict | None = None) -> None:
     import arti_memory_quality
 
-    arti_memory_quality.append_learning(path, fact)
+    arti_memory_quality.append_learning(path, fact, config=config)
 
 
 def _upsert_viewer_section(path: Path, name: str, notes: str, date_str: str) -> None:

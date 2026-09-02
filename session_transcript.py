@@ -38,10 +38,32 @@ def rotate_session_logs(config: dict) -> None:
     if not log_dir.is_dir():
         return
     logs = sorted(log_dir.glob("*_bridge.log"), key=lambda p: p.stat().st_mtime, reverse=True)
-    if len(logs) <= keep:
+    aktif = str(config.get("session_log_active_path") or "")
+    if aktif:
+        # Log milik proses ini sendiri: Windows menolak memindah berkas yang
+        # sedang dibuka (WinError 32 berisik tiap startup, tes [date removed] [time removed]) —
+        # dan memang tidak boleh disapu; dia baru <20 KB karena BARU LAHIR.
+        logs = [p for p in logs if str(p) != aktif]
+
+    # SADAR-UKURAN (diagnosa [date removed]). Dulu jatah `keep` dihitung dari
+    # SEMUA berkas, padahal tiap bridge yang gagal start / harness / (dulu)
+    # pytest meninggalkan log ~293 byte. Log siaran operator yang 194 KB tersapu
+    # ke arsip dalam hitungan menit, jadi waktu dia buka session_logs/ isinya
+    # cuma cangkang kosong — dan dia berhenti percaya pada log otomatis lalu
+    # menyalin terminal ke notepad secara manual berbulan-bulan.
+    # Sekarang: hanya log substansial yang memakai jatah; sisanya langsung
+    # diarsipkan (dipindah, TIDAK dihapus).
+    min_bytes = int(config.get("session_log_min_bytes", 20000))
+    try:
+        substansial = [p for p in logs if p.stat().st_size >= min_bytes]
+        remeh = [p for p in logs if p.stat().st_size < min_bytes]
+    except OSError:
+        substansial, remeh = logs, []
+    buangan = remeh + substansial[keep:]
+    if not buangan:
         return
     archive_dir.mkdir(parents=True, exist_ok=True)
-    for p in logs[keep:]:
+    for p in buangan:
         dest = archive_dir / p.name
         try:
             shutil.move(str(p), str(dest))

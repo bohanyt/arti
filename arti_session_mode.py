@@ -75,7 +75,7 @@ def _gap_for(mode: str, cfg: dict) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Siapa yang boleh nyuruh (keputusan Bohan 2026-08-04: cuma dia)
+# Siapa yang boleh nyuruh (keputusan operator [date removed]: cuma dia)
 # ---------------------------------------------------------------------------
 
 def normalize_handle(handle: str) -> str:
@@ -100,8 +100,12 @@ def owner_handles(config: dict | None = None) -> set[str]:
 # di sini, kalau tidak dia tak akan pernah bisa menyatakan misinya selesai.
 _SELF_TRIGGERS = frozenset({"curious", "game"})
 # Suara/ketikan streamer. "mic" BUKAN mikrofon — itu ketikan console (jalur
-# suara asli selalu 'ptt'/'wake_word'); dua-duanya sama-sama Bohan.
-_STREAMER_TRIGGERS = frozenset({"ptt", "wake_word", "mic"})
+# suara asli selalu 'ptt'/'wake_word'); dua-duanya sama-sama operator.
+# "mc_chat" = operator mengetik di chat DALAM GAME. Dihitung sebagai giliran
+# streamer karena pengirimnya sudah disaring terhadap
+# `minecraft_streamer_name` sebelum trigger dibuat — jadi memang dia, dan dia
+# harus bisa menyuruh keluar/ganti misi lewat chat sama seperti lewat mic.
+_STREAMER_TRIGGERS = frozenset({"ptt", "wake_word", "mic", "mc_chat"})
 
 
 def is_owner_turn(
@@ -123,7 +127,7 @@ def is_owner_turn(
 
 
 # ---------------------------------------------------------------------------
-# Jaring pengaman: Bohan pamit AFK tapi Arti tidak mengeluarkan tag
+# Jaring pengaman: operator pamit AFK tapi Arti tidak mengeluarkan tag
 # ---------------------------------------------------------------------------
 
 _AFK_PATTERNS = (
@@ -143,7 +147,19 @@ _AFK_PATTERNS = (
 )
 _AFK_RE = re.compile("|".join(_AFK_PATTERNS), re.IGNORECASE)
 # "nanti aku afk" / "kalau aku afk" = RENCANA, bukan pamit sekarang.
-_AFK_NEGATORS = re.compile(r"\b(nanti|kalau|kalo|jangan|belum|habis ini)\b", re.IGNORECASE)
+# Diperluas sesudah audit verifikasi [date removed] (7 dari 12 bukan-pamit lolos):
+# "nggak jadi afk deh" bahkan MEMASANG jaring — persis kalimat pembatalannya.
+_AFK_NEGATORS = re.compile(
+    r"\b(nanti|kalau|kalo|jangan|belum|habis ini|nggak|ngga|gak|enggak|tidak"
+    r"|bukan|kemarin|tadi|besok|sempat)\b",
+    re.IGNORECASE,
+)
+# Negator bisa datang SESUDAH frasanya juga ("aku afk dulu... eh nggak jadi").
+_AFK_NEGATORS_SESUDAH = re.compile(
+    r"\b(nggak jadi|ngga jadi|gak jadi|enggak jadi|batal|becanda|bercanda"
+    r"|belum jadi|jangan|bukan|artinya)\b",
+    re.IGNORECASE,
+)
 
 
 def detect_afk_intent(text: str) -> bool:
@@ -152,11 +168,23 @@ def detect_afk_intent(text: str) -> bool:
     Dipakai sebagai JARING: kalau Arti gagal mengeluarkan [MODE: host] dan
     Bohan benar-benar pergi, stream mati sampai dia balik — konsekuensinya
     terlalu mahal untuk mengandalkan LLM saja.
+
+    Negator dicek HANYA di depan frasa pamitnya. Audit 2026-08-05: dulu
+    dicari di seluruh kalimat, dan kata "nanti"/"kalau" muncul alami di pamit
+    sungguhan — "aku afk dulu ya, nanti aku balik" jadi tidak terdeteksi.
+    7 dari 9 kalimat pamit natural lolos begitu saja.
     """
     t = (text or "").strip()
-    if not t or not _AFK_RE.search(t):
+    if not t:
         return False
-    return not _AFK_NEGATORS.search(t)
+    m = _AFK_RE.search(t)
+    if not m:
+        return False
+    sebelum = t[max(0, m.start() - 30):m.start()]
+    if _AFK_NEGATORS.search(sebelum):
+        return False
+    # "aku afk dulu... eh nggak jadi deng" — pembatalan menyusul di belakang.
+    return not _AFK_NEGATORS_SESUDAH.search(t[m.end():m.end() + 40])
 
 
 # ---------------------------------------------------------------------------
@@ -165,9 +193,67 @@ def detect_afk_intent(text: str) -> bool:
 
 _MODE_TAG_RE = re.compile(r"\[\s*MODE\s*:([^\]]*)\]", re.IGNORECASE)
 _MODE_VERBS = {
-    "host": HOST_CHAT,   # "Bohan AFK, aku pegang" — game-nya urusan tag [MC:]
-    "duet": DUET,        # "Bohan balik"
+    "host": HOST_CHAT,   # "operator AFK, aku pegang" — game-nya urusan tag [MC:]
+    "duet": DUET,        # "operator balik"
 }
+
+
+# ---------------------------------------------------------------------------
+# Perintah Minecraft dari kalimat streamer (jaring deterministik)
+# ---------------------------------------------------------------------------
+# Live [date removed] malam: operator tiga kali menyuruh "arti, coba buka minecraft
+# deh" dan Arti TIDAK PERNAH masuk. Sebabnya bukan bug logika: giliran yang
+# dipicu omongan streamer sengaja dirutekan ke Groq (butuh instan), dan model
+# yang kepilih llama-3.1-8b MENGABAIKAN instruksi tag [MC: join] — dia cuma
+# menjawab ngobrol. Giliran proaktif yang lewat composer memang mengeluarkan
+# tag, tapi perintah langsung tidak boleh bergantung pada model yang kebetulan
+# menang routing. Jadi: perintah eksplisit dideteksi deterministik.
+_MC_JOIN_RE = re.compile(
+    # Akhiran -nya ikut diterima ([date removed]): "minecraftnya"/"gamenya" itu bentuk
+    # yang wajar diucapkan operator, dan tanpa ini perintah aslinya lolos diam2.
+    r"\b(buka|main|mainin|masuk|join|gabung|ikut(?:\s+main)?)\b[^.!?]{0,20}"
+    r"\b(minecraft|game|mc)(?:nya)?\b"
+    r"|\b(minecraft|game)(?:nya)?\b[^.!?]{0,15}\b(yuk|dong|sana|gih)\b",
+    re.IGNORECASE,
+)
+_MC_LEAVE_RE = re.compile(
+    r"\b(keluar|udahan|udah(?:an)?|berhenti|stop|cukup|selesai)\b[^.!?]{0,20}"
+    r"\b(minecraft|game|main|mc)(?:nya)?\b",
+    re.IGNORECASE,
+)
+_MC_NEGATORS = re.compile(
+    r"\b(nanti|jangan|belum|nggak|ngga|gak|enggak|tidak|kalau|kalo|besok"
+    r"|kemarin|tadi|dulu\s+pernah|waktu\s+itu"
+    # Pengandaian/wacana — operator sedang MIKIR, bukan menyuruh. Log [date removed]
+    # [time removed]: "bisa sambil main Minecraft kali ya biar aman" dan "berapa yang
+    # main game nya harus..." menyeret bot masuk game 3x (servernya bahkan
+    # mati). Perintah berbunyi "buka minecraft", bukan "bisa sambil main".
+    r"|bisa|sambil|kayaknya|mungkin|pengen|pengin|enaknya|andai|seandainya"
+    r"|berapa|apakah|semoga|pas\s+lagi)\b",
+    re.IGNORECASE,
+)
+
+
+def detect_minecraft_intent(text: str) -> str | None:
+    """Perintah masuk/keluar Minecraft dari kalimat streamer, atau None.
+
+    Sengaja SEMPIT: cuma join/leave, yang paling sering diucapkan dan paling
+    mahal kalau meleset. Misi tetap lewat `mc goal` / tag.
+    """
+    t = (text or "").strip()
+    if not t:
+        return None
+    for pola, hasil in ((_MC_LEAVE_RE, "leave"), (_MC_JOIN_RE, "join")):
+        m = pola.search(t)
+        if not m:
+            continue
+        # Jendela pengecekan diperlebar 25 -> 40 huruf ([date removed]): "bisa sambil
+        # main Minecraft" lolos karena pengandaiannya duduk lebih jauh dari
+        # kata kerjanya. Pengandaian di MANA PUN sebelum kata kerja = batal.
+        if _MC_NEGATORS.search(t[max(0, m.start() - 40):m.start()]):
+            return None
+        return hasil
+    return None
 
 
 def parse_mode_tags(reply: str) -> tuple[str, str | None]:

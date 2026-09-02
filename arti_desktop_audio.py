@@ -32,8 +32,50 @@ def chunk_rms(audio) -> float:
 
 MAX_CAPTURE_FAILS = 5
 
+
+def pilih_loopback_device(devices, want: str):
+    """Pilih device yang benar saat NAMANYA kembar — loopback selalu menang.
+
+    Bug 14 Agu 2026: `soundcard.get_microphone(nama, include_loopback=True)`
+    mengembalikan device PERTAMA yang namanya cocok. Di mesin Bohan nama
+    "Headset (EarPods)" dipakai DUA device sekaligus:
+
+        loopback=True   ch=2   <- loopback speaker, yang kita mau
+        loopback=False  ch=1   <- mikrofon headset-nya, yang kepilih
+
+    Merekam loopback dari device mikrofon meledak di dalam soundcard:
+
+        soundcard/mediafoundation.py:516
+        assert ppMixFormat[0][0].Format.wFormatTag == 0xFFFE
+
+    AssertionError-nya kosong (bare assert), jadi log cuma menampilkan
+    "(AssertionError: )" tanpa petunjuk apa pun. Akibatnya telinga desktop
+    Arti MATI TOTAL sepanjang sesi 14 Agu: 5x gagal -> rehat 120 detik ->
+    gagal lagi, berulang. Dia tuli terhadap game, video, dan musik.
+
+    Kenapa ini menggigit justru di device default: `desktop_audio_device`
+    kosong berarti "ikut speaker default Windows" — dan headset justru jenis
+    device yang paling mungkin punya output DAN input bernama sama.
+
+    Mengembalikan None kalau tidak ada yang cocok; pemanggil yang memutuskan.
+    """
+    if not devices or not want:
+        return None
+    want_l = str(want).lower()
+    persis = [d for d in devices if str(getattr(d, "name", "")) == want]
+    bagian = [d for d in devices if want_l in str(getattr(d, "name", "")).lower()]
+    for kandidat in (persis, bagian):
+        loopback = [d for d in kandidat if getattr(d, "isloopback", False)]
+        if loopback:
+            return loopback[0]
+        if kandidat:
+            # Tidak ada loopback bernama itu — kembalikan apa adanya supaya
+            # perilaku lama terjaga; pemanggil yang memberi peringatan.
+            return kandidat[0]
+    return None
+
 # Halusinasi Whisper di atas musik/sunyi dengan bahasa auto-detect: kredit
-# subtitler, ajakan subscribe, "bersambung". Live seharian 2026-08-03:
+# subtitler, ajakan subscribe, "bersambung". Live seharian [date removed]:
 # 516/679 baris [Dengar] junk; "Продолжение следует..." sampai dikomentari
 # Arti on-stream seolah teksnya TERLIHAT di layar. Frasa di sini tidak pernah
 # jadi dialog bernilai konteks.
@@ -82,10 +124,16 @@ def make_loopback_record_chunk(
       di-cache) -> "Error 0x100000001" + AttributeError __del__ tiap 5 dtk.
     - `open_recorder(want, samplerate)` -> (obj_dengan_.record, close_fn):
       titik injeksi test; default = soundcard asli.
-    - Deadman: MAX_CAPTURE_FAILS gagal beruntun = MENYERAH diam-diam
-      (return None cepat), bukan spam error tiap 5 detik selamanya.
+    - Deadman + kebangkitan: MAX_CAPTURE_FAILS gagal beruntun = telinga
+      REHAT `desktop_audio_revival_sec` detik lalu coba bangun SENDIRI —
+      bukan mati permanen. Log 2026-08-09 22.31: device kaget sebentar saat
+      Bohan buka instance Prism, 5 gagal x 5 dtk = cuma 25 detik toleransi,
+      lalu Arti budek sepanjang sisa sesi live. Sesudah rehat, percobaan
+      bangunnya SEKALI per siklus (gagal = langsung rehat lagi) supaya
+      terminal tidak dibanjiri. revival_sec <= 0 = perilaku lama (permanen).
     """
-    state: dict = {"rec": None, "close": None, "name": None, "fails": 0, "dead": False}
+    state: dict = {"rec": None, "close": None, "name": None, "fails": 0,
+                   "tidur_sampai": 0.0, "pernah_mati": False}
     sr = DEFAULT_SAMPLERATE
     chunk_sec = float(config.get("desktop_audio_chunk_sec", 5.0))
     configured = (config.get("desktop_audio_device") or "").strip()
@@ -97,12 +145,23 @@ def make_loopback_record_chunk(
 
         # "data discontinuity in recording" = jeda buffer kecil tiap worker
         # sibuk mentranskrip antar-chunk — jinak untuk konteks 5-detikan,
-        # tapi spam-nya membanjiri terminal (live pagi 2026-08-03).
+        # tapi spam-nya membanjiri terminal (live pagi [date removed]).
         warnings.filterwarnings("ignore", message="data discontinuity in recording")
-        mic = sc.get_microphone(want, include_loopback=True)
+        # JANGAN pakai sc.get_microphone() langsung — dia mengambil nama-cocok
+        # PERTAMA dan bisa memberi device mikrofon alih-alih loopback speaker
+        # waktu namanya kembar. Lihat pilih_loopback_device().
+        mic = pilih_loopback_device(sc.all_microphones(include_loopback=True), want)
+        if mic is None:
+            mic = sc.get_microphone(want, include_loopback=True)
+        if not getattr(mic, "isloopback", False):
+            print(
+                f"[Desktop Audio] PERINGATAN: '{mic.name}' bukan device loopback — "
+                "capture kemungkinan gagal. Isi `desktop_audio_device` dengan "
+                "nama speaker yang benar."
+            )
         ctx = mic.recorder(samplerate=samplerate, channels=1)
         rec = ctx.__enter__()
-        print(f"[Desktop Audio] Capture: {mic.name}")
+        print(f"[Desktop Audio] Capture: {mic.name} (loopback={getattr(mic,'isloopback','?')})")
         return rec, lambda: ctx.__exit__(None, None, None)
 
     opener = open_recorder or _open_real
@@ -123,7 +182,7 @@ def make_loopback_record_chunk(
         state["rec"] = state["close"] = state["name"] = None
 
     def _record():
-        if state["dead"]:
+        if state["tidur_sampai"] > time.time():
             time.sleep(2.0)
             return None
         try:
@@ -136,17 +195,36 @@ def make_loopback_record_chunk(
                 state["name"] = want
             data = state["rec"].record(numframes=int(chunk_sec * sr))
             state["fails"] = 0
+            if state["pernah_mati"]:
+                state["pernah_mati"] = False
+                print("[Desktop Audio] Telinga BANGUN lagi — capture pulih sendiri")
             return np.asarray(data, dtype="float32").reshape(-1)
         except Exception as e:  # noqa: BLE001
             _close()
             state["fails"] += 1
-            if state["fails"] >= MAX_CAPTURE_FAILS:
-                state["dead"] = True
-                print(
-                    f"[Desktop Audio] Capture MENYERAH setelah {state['fails']} "
-                    f"gagal beruntun ({type(e).__name__}: {e}) — telinga idle. "
-                    "Cek device / restart bridge."
-                )
+            # Sesudah pernah mati, satu kegagalan = langsung rehat lagi —
+            # tangga 5-percobaan cuma untuk kematian pertama.
+            batas = 1 if state["pernah_mati"] else MAX_CAPTURE_FAILS
+            if state["fails"] >= batas:
+                rehat = float(config.get("desktop_audio_revival_sec", 120.0) or 0.0)
+                state["fails"] = 0
+                if rehat <= 0:
+                    state["tidur_sampai"] = float("inf")
+                    print(
+                        f"[Desktop Audio] Capture MENYERAH permanen "
+                        f"({type(e).__name__}: {e}) — revival dimatikan. "
+                        "Cek device / restart bridge."
+                    )
+                    return None
+                pertama = not state["pernah_mati"]
+                state["pernah_mati"] = True
+                state["tidur_sampai"] = time.time() + rehat
+                if pertama:
+                    print(
+                        f"[Desktop Audio] Capture gagal beruntun "
+                        f"({type(e).__name__}: {e}) — telinga rehat "
+                        f"{rehat:.0f} dtk lalu coba bangun sendiri."
+                    )
                 return None
             print(
                 f"[Desktop Audio] Capture error ({type(e).__name__}: {e}) — "
@@ -317,6 +395,7 @@ def desktop_audio_worker(
     transcribe_chunk: Callable[[object], str | None] | None = None,
     filter_text: Callable[[str], str | None] | None = None,
     is_listening: Callable[[], bool] | None = None,
+    is_speech: Callable[[object], bool | None] | None = None,
     sleep_sec: float = 0.5,
 ) -> None:
     """Background thread entry — telinga selalu nyala saat live.
@@ -357,6 +436,15 @@ def desktop_audio_worker(
                 continue
             if chunk_rms(audio) < min_rms:
                 continue  # sunyi/musik pelan — nol biaya transkrip
+            if is_speech is not None and is_speech(audio) is False:
+                # VAD bilang bukan ucapan (musik/derau) — nol biaya Whisper.
+                # None = VAD tak tersedia -> fail-open, tetap dikirim.
+                # (Lagu bervokal tetap lolos — trade yang diterima operator.)
+                _vad_skip = getattr(desktop_audio_worker, "_vad_skip", 0) + 1
+                desktop_audio_worker._vad_skip = _vad_skip
+                if _vad_skip == 1 or _vad_skip % 24 == 0:
+                    print(f"[Desktop Audio] VAD skip musik/derau (x{_vad_skip})")
+                continue
             text = transcribe_chunk(audio)
             if text and filter_text is not None:
                 text = filter_text(text)
@@ -378,7 +466,7 @@ def desktop_audio_worker(
                 if accepted:
                     last_accepted = text.strip()
                     # Satu baris ringkas per baris yang MASUK ring — supaya
-                    # Bohan lihat apa yang Arti dengar (pengganti spam
+                    # operator lihat apa yang Arti dengar (pengganti spam
                     # "Sukses mentranskrip!" tanpa isi).
                     print(f"[Dengar] {text[:90]}")
         except Exception as e:  # noqa: BLE001

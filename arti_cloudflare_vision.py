@@ -7,6 +7,13 @@ import os
 import arti_vision_openai as oai
 
 
+def _structured_task_payload(model_id: str) -> dict | None:
+    """Gemma 4 thinking menghabiskan budget kecil sebelum jawaban JSON keluar."""
+    if "/gemma-4-" in model_id:
+        return {"chat_template_kwargs": {"enable_thinking": False}}
+    return None
+
+
 def resolve_token(config: dict | None = None) -> str:
     cfg = config or {}
     return (
@@ -52,6 +59,7 @@ def vision_chat(
         max_tokens=max_tokens,
         temperature=temperature,
         timeout=timeout,
+        extra_payload=_structured_task_payload(model_id),
     )
 
 
@@ -85,4 +93,5 @@ def text_chat(
         max_tokens=max_tokens,
         temperature=temperature,
         timeout=timeout,
+        extra_payload=_structured_task_payload(model_id),
     )

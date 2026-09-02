@@ -56,7 +56,7 @@ _TAG_RE = re.compile(r"(<[^<>]+>)")
 # Used by the residual-digit safety net so no digit can survive preprocessing
 # even when a spelling helper raises or rejects an out-of-range token.
 #
-# re.ASCII WAJIB di kedua pola (hypothesis 2026-08-04): tanpa itu `\d` Python
+# re.ASCII WAJIB di kedua pola (hypothesis [date removed]): tanpa itu `\d` Python
 # cocok dengan SEMUA digit Unicode (mis. Ol Chiki '᱐' U+1C50) padahal kamus
 # _INDONESIAN_DIGITS cuma 0-9 ASCII -> KeyError di _spell_residual_digits;
 # jalur cardinal/decimal juga kena kelas bug yang sama (int()/.isdigit()

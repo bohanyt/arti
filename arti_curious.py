@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import time
 
+import arti_benang
+import arti_renungan
 import arti_screen_context as sc
 import arti_vision_client
 
@@ -25,10 +27,84 @@ _init_last_fire_ts = 0.0
 _init_streak = 0
 
 # Bahan inisiatif yang SUDAH dipakai sesi ini — anti "arti looping" (live sore3
-# 2026-08-02: topik aviasi Rafi diangkat 2x dalam 8 menit karena bullet acak
+# [date removed]: topik aviasi Rafi diangkat 2x dalam 8 menit karena bullet acak
 # tidak dilacak). Ring kecil: setelah 12 topik lain, bahan lama boleh muncul lagi.
 _used_init_materials: list[str] = []
 _MAX_USED_INIT_MATERIALS = 12
+
+# ---- GERAKAN DIALOG ([date removed]) --------------------------------------------
+# Diagnosa 94 giliran curious sesi live [date removed]: 68% dibuka "operator ...", 45%
+# laporan keadaan, "deg-degan" di 29% — karena prompt cuma mengenal dua gerakan
+# (beropini, bertanya), semua giliran jatuh ke satu template reporter. Manusia
+# ngobrol pakai banyak gerakan. Satu gerakan disuntikkan per giliran, dirotasi
+# acak tanpa ulang sampai satu siklus habis (pola yang sama dengan fallback
+# in-character yang sudah terbukti menghapus pengulangan).
+#
+# Daftar & larangannya PARAMETER, bukan hardcode (permintaan operator [date removed]):
+# timpa `curious_gerakan_dialog` / `curious_larangan` dari config_local.json —
+# tanpa menyentuh kode. List kosong = fitur mati (kill switch).
+# Gerakan mengubah BENTUK omongan; topiknya tetap dari momen (layar/hook/
+# obrolan barusan), dan tiap suntikan diberi pintu keluar "momen menang".
+DEFAULT_GERAKAN_DIALOG: list[str] = [
+    "Godain/ledek ringan yang nyambung sama momen barusan — pedas tapi sayang.",
+    "Ambil posisi BERLAWANAN dari omongan/kejadian terakhir dan bela argumenmu.",
+    "Ungkit satu hal dari obrolan tadi atau sesi sebelumnya yang nyambung — tunjukkan kamu ingat.",
+    "Bagikan pengalaman/koleksi momenmu sendiri yang nyambung — bukan tentang streamer.",
+    "Balas langsung SATU chat penonton spesifik pakai namanya — bukan ke 'chat' rame-rame.",
+    "Lempar teori/spekulasi liar soal yang lagi terjadi, pancing orang buat bantah.",
+    "Tagih: pertanyaanmu yang belum dijawab, janji yang belum ditepati, atau cerita yang menggantung.",
+]
+DEFAULT_LARANGAN: str = (
+    "Jangan merangkum aktivitas streamer — semua orang sudah melihatnya; "
+    "langsung timpali, ledek, atau sambungkan.\n"
+    "Jangan membuka kalimat dengan nama streamer terus-terusan.\n"
+    "Jangan mengklaim emosi pakai kata kaleng (deg-degan, penasaran) — "
+    "tunjukkan lewat isi omonganmu. Helaan napas 'hhh' justru BOLEH — "
+    "itu bagian suaramu."
+)
+_gerakan_sisa: list[str] = []
+
+
+def _butuh_penonton(gerakan: str) -> bool:
+    """Gerakan yang menyapa chat tidak boleh keluar saat penonton nol —
+    bug ngoceh-ke-hantu (9/12 balasan live 14 Agu) jangan balik lewat pintu lain."""
+    g = gerakan.lower()
+    return "chat" in g or "penonton" in g
+
+
+def gerakan_dialog(rng=None, ada_penonton: bool = True, config: dict | None = None) -> str:
+    """Satu instruksi gerakan untuk giliran ini; acak tanpa ulang per siklus.
+
+    TEPAT SATU tarikan `rng()` per panggilan. Versi pertama memakai shuffle
+    (6 tarikan tiap awal siklus) dan itu meledakkan tes lama yang menyodorkan
+    iterator rng berjatah pas — StopIteration di test_initiative.
+    Return "" kalau daftarnya dikosongkan (fitur dimatikan dari config).
+    """
+    global _gerakan_sisa
+    import random as _random
+    if rng is None:
+        rng = _random.random
+    # CONFIG produksi menaruh kuncinya = None ("pakai default") — .get() dengan
+    # default TIDAK menolong karena kuncinya ADA. Aturan proyek no. 7: uji
+    # terhadap CONFIG produksi, bukan dict kosong — inilah kenapa.
+    moves = (config or {}).get("curious_gerakan_dialog")
+    if moves is None:
+        moves = DEFAULT_GERAKAN_DIALOG
+    if not moves:
+        return ""
+    if not _gerakan_sisa:
+        _gerakan_sisa = [str(m) for m in moves]
+    kandidat = [
+        i for i, g in enumerate(_gerakan_sisa)
+        if ada_penonton or not _butuh_penonton(g)
+    ]
+    if not kandidat:
+        _gerakan_sisa = [str(m) for m in moves if not _butuh_penonton(str(m))]
+        if not _gerakan_sisa:
+            return ""
+        kandidat = list(range(len(_gerakan_sisa)))
+    pilih = kandidat[int(rng() * len(kandidat)) % len(kandidat)]
+    return _gerakan_sisa.pop(pilih)
 
 
 def reset_session() -> None:
@@ -40,6 +116,9 @@ def reset_session() -> None:
     _init_last_fire_ts = 0.0
     _init_streak = 0
     _used_init_materials.clear()
+    _gerakan_sisa.clear()
+    arti_benang.reset_session()
+    arti_renungan.reset_session()
 
 
 def _vision_effective(config: dict) -> bool:
@@ -116,7 +195,7 @@ def should_fire(
     if hook and _is_generic_hook(hook):
         return False
 
-    # Hook yang mengutip log bridge sendiri = backstage (live 2026-08-02:
+    # Hook yang mengutip log bridge sendiri = backstage (live [date removed]:
     # "cursor screen relevant False" jadi seed dan Arti narasi dapurnya).
     if hook and sc.looks_like_bridge_log(hook):
         return False
@@ -194,7 +273,7 @@ def is_dormant(
 
 
 # Layar yang isinya "tidak ada apa-apa" — bukan bahan obrolan. Live seharian
-# 3/8: Bohan sengaja kasih background hitam + mute mic (harusnya Arti kalem),
+# 3/8: operator sengaja kasih background hitam + mute mic (harusnya Arti kalem),
 # malah layar gelapnya sendiri yang dibahas berulang-ulang.
 _BORING_SCREEN_MARKERS = (
     "layar gelap", "layar hitam", "layar kosong", "layar hanya",
@@ -250,7 +329,7 @@ def should_fire_initiative(
         return False
     if tts_playing or brain_busy or ptt_active:
         return False
-    # Rehat pasca semua-provider-gagal (live seharian 2026-08-03: Groq 429 +
+    # Rehat pasca semua-provider-gagal (live seharian [date removed]: Groq 429 +
     # Cursor tutup -> 80x tembakan sia-sia tiap 30 dtk memperparah kuota).
     if now < float(provider_fail_until or 0.0):
         return False
@@ -268,7 +347,7 @@ def should_fire_initiative(
         return False
     if _init_last_fire_ts and last_streamer_ts > _init_last_fire_ts:
         _init_streak = 0
-    # Rem darurat (regresi live 2026-08-02 sore): kalau turn inisiatif MATI
+    # Rem darurat (regresi live [date removed] sore): kalau turn inisiatif MATI
     # (exception/skip) Arti tidak pernah bicara -> last_arti_ts beku -> gate
     # quiet_sec lolos terus -> 180 tembakan dalam 5 menit. Cadence flat tetap
     # wajib berjarak quiet_sec dari TEMBAKAN terakhir, apapun nasib turn-nya.
@@ -293,8 +372,8 @@ def mark_initiative_fired(now: float | None = None) -> None:
 
 # Bullet learning yang MENCERITAKAN sistem sendiri ("Sistem mendorong inisiatif
 # mengangkat fakta X") — kalau jadi bahan inisiatif, Arti buka topik meta yang
-# bikin penonton bingung (live sore2 2026-08-02: "tiba-tiba bahas obsession").
-# Marker sengaja sempit: fakta stream normal ("Bohan kena copyright") aman.
+# bikin penonton bingung (live sore2 [date removed]: "tiba-tiba bahas obsession").
+# Marker sengaja sempit: fakta stream normal ("operator kena copyright") aman.
 _META_BULLET_MARKERS = (
     "sistem mendorong",
     "inisiatif",
@@ -305,7 +384,7 @@ _META_BULLET_MARKERS = (
     "provider",
     "fallback",
     "vault rag",
-    # 2026-08-03: kurator sempat menyimpan "noise Whisper ASR" & "bridge
+    # [date removed]: kurator sempat menyimpan "noise Whisper ASR" & "bridge
     # session terbuka dua kali" sebagai stream fact — dapur bridge bukan ilmu.
     "whisper",
     "bridge session",
@@ -454,6 +533,20 @@ def build_host_prompt(
     )
 
 
+# Dipakai saat semua bahan habis/terblokir. Sengaja beberapa dan bervariasi —
+# satu kalimat tunggal terbukti bikin Arti mengulang hal yang sama berpuluh kali.
+_FALLBACK_MATERIALS = (
+    "Bebas: ceritakan satu hal kecil yang bikin kamu penasaran akhir-akhir ini.",
+    "Bebas: tanya kabar siapa pun yang lagi nonton, dan pancing mereka cerita.",
+    "Bebas: celetukin sesuatu yang lagi kamu pikirin barusan, sependek apa pun.",
+    "Bebas: ajak penonton main tebak-tebakan atau pilih-pilihan singkat.",
+    "Bebas: ceritakan satu hal yang menurutmu overrated atau underrated.",
+    "Bebas: bikin pengakuan receh soal kebiasaan atau kesukaanmu.",
+    "Bebas: tanya penonton lagi ngapain sekarang, lalu tanggapi dengan pendapatmu.",
+    "Bebas: bahas satu hal kecil yang bikin kamu kesal belakangan ini.",
+)
+
+
 def build_initiative_prompt(
     config: dict,
     *,
@@ -466,6 +559,8 @@ def build_initiative_prompt(
     minecraft_goal: str = "",
     mode: str = "duet",
     vault_topic: str = "",
+    streamer_baru_bicara: bool = False,
+    ada_penonton: bool = True,
     heard_note: str = "",
     web_topic: str = "",
     rng=None,
@@ -497,7 +592,7 @@ def build_initiative_prompt(
     if viewer_join_note in _used_init_materials:
         viewer_join_note = ""  # event yang sama jangan disapa dua kali
 
-    # LAGI MAIN GAME = mode komentator (spek Bohan 2026-08-04 "like a
+    # LAGI MAIN GAME = mode komentator (spek operator [date removed] "like a
     # streamer"). Bahan lain (memori sesi lama, hook layar OBS, ringkasan
     # scouter) SENGAJA tidak ikut: penonton lagi nonton dia main, bukan dengar
     # dia melamun soal kemarin. Sapaan penonton baru tetap menang sekali —
@@ -511,6 +606,32 @@ def build_initiative_prompt(
                 minecraft_note, goal=minecraft_goal, greet_note=viewer_join_note
             )
         return build_minecraft_narration_prompt(minecraft_note, goal=minecraft_goal)
+
+    # RENUNGAN (operator [date removed]): busur mikir multi-giliran numpang slot
+    # inisiatif. Momen menang tetap nomor satu — penonton baru masuk atau
+    # streamer baru bicara = renungan ngalah giliran ini, disambung nanti.
+    # Seed dipilih DETERMINISTIK (bullet pertama yang lolos filter, bukan
+    # tarikan rng) — tarikan rng ekstra meledakkan tes lama yang menyodorkan
+    # iterator berjatah pas (pelajaran gerakan_dialog, StopIteration).
+    if not viewer_join_note and not streamer_baru_bicara:
+        seed_renungan = ""
+        if memory_bullets:
+            seed_renungan = memory_bullets[0].lstrip("- ").strip()
+        elif screen_hook:
+            seed_renungan = screen_hook
+        elif scouter_summary:
+            seed_renungan = scouter_summary
+        prompt_renungan = arti_renungan.giliran_renungan(
+            config or {}, mode=mode, ada_penonton=ada_penonton,
+            seed=seed_renungan,
+        )
+        if prompt_renungan:
+            if seed_renungan:
+                # Seed yang jadi busur jangan diangkat lagi sebagai celetukan.
+                _used_init_materials.append(seed_renungan)
+                if len(_used_init_materials) > _MAX_USED_INIT_MATERIALS:
+                    _used_init_materials.pop(0)
+            return prompt_renungan
 
     # (bobot, teks prompt, kunci anti-ulang — "" = tidak dilacak)
     candidates: list[tuple[float, str, str]] = []
@@ -562,10 +683,22 @@ def build_initiative_prompt(
             ), web_topic))
 
     if not candidates:
-        material = (
-            "Bebas: ceritakan satu hal kecil yang bikin kamu penasaran akhir-akhir "
-            "ini, atau tanya kabar siapa pun yang lagi nonton."
-        )
+        # Audit [date removed]: dulu satu kalimat generik yang IDENTIK, dan karena
+        # tidak pernah dicatat ke ring, `_same_topic_as_used` memblokir semua
+        # bahan tersisa selamanya — 109 dari 120 giliran memakai kalimat yang
+        # persis sama (≈50 menit mengulang satu kalimat tiap 25 dtk).
+        # Sekarang: ring dikosongkan dulu (beri kesempatan bahan lama berputar
+        # lagi), dan fallback-nya bervariasi + ikut dicatat.
+        # JANGAN clear() total. Audit verifikasi [date removed]: itu ikut menghapus
+        # jejak bahan NYATA yang barusan dipakai, jadi potongan vault yang sama
+        # diangkat lagi tiap ~50 detik (ring seharusnya menahan 12 giliran,
+        # nyatanya cuma 2). Cukup lepaskan separuh tertua supaya bahan lama
+        # perlahan boleh berputar lagi.
+        del _used_init_materials[: max(1, len(_used_init_materials) // 2)]
+        material = _FALLBACK_MATERIALS[
+            int(rng() * len(_FALLBACK_MATERIALS)) % len(_FALLBACK_MATERIALS)
+        ]
+        _used_init_materials.append(material)
     else:
         total = sum(w for w, _, _ in candidates)
         r = rng() * total
@@ -582,33 +715,88 @@ def build_initiative_prompt(
                 _used_init_materials.pop(0)
 
     if mode == "host_chat":
-        # Bohan AFK: bungkusnya "kamu pembawa acara", bukan "isi keheningan".
+        # operator AFK: bungkusnya "kamu pembawa acara", bukan "isi keheningan".
         return build_host_prompt(material)
 
+    # Pembukaan JUJUR terhadap keadaan. Live [date removed]: pagar anti-motong cuma
+    # 5 detik, jadi operator yang baru selesai bicara tetap dapat kalimat
+    # "tidak ada omongan streamer ... bukan menjawab siapa pun" — padahal
+    # omongannya ADA di history dan Arti mengutipnya. Dia melihat operator
+    # tapi dilarang menjawabnya, lalu keluar monolog yang menyebut-nyebut
+    # dia tanpa berdialog ("kamu kayak ngerespon doang bukannya berdialog").
+    if streamer_baru_bicara:
+        pembuka = (
+            "[Inisiatif — nyambung obrolan]\n"
+            "Streamer BARU SAJA bicara. Tanggapi dulu yang dia bilang "
+            "(lihat riwayat), baru lanjutkan dengan pendapatmu sendiri. "
+            "Jangan membuka topik baru yang tidak nyambung.\n"
+        )
+    else:
+        pembuka = (
+            "[Inisiatif — buka topik sendiri]\n"
+            "Stream lagi hening — tidak ada chat maupun omongan streamer. "
+            "Kamu MEMULAI obrolan, bukan menjawab siapa pun.\n"
+        )
+    # Menyuruh melempar ke "penonton" saat penontonnya NOL bikin Arti
+    # mengoceh ke ruangan kosong — 9 dari 12 balasan live [date removed] diakhiri
+    # "Penonton, lo ..." padahal siaran offline.
+    if ada_penonton:
+        sasaran = (
+            "Pertanyaan penutup OPSIONAL; kalau pakai, lebih sering "
+            "lempar ke penonton daripada ke streamer. "
+        )
+    else:
+        sasaran = (
+            "TIDAK ADA penonton yang menyimak — jangan menyapa atau "
+            "melempar pertanyaan ke 'penonton'. Ngobrol saja dengan "
+            "streamer, atau bergumam sendiri. "
+        )
+    gerakan = gerakan_dialog(rng, ada_penonton, config)
+    baris_gerakan = (
+        # "Momen menang": gerakan cuma bentuk — kekhawatiran operator [date removed],
+        # jangan sampai Arti sibuk pamer koleksi pas ada kejadian di stream.
+        f"Gerakan giliran ini (SKIP kalau nggak nyambung sama momen yang lagi "
+        f"terjadi — momen selalu menang): {gerakan}\n"
+        if gerakan else ""
+    )
+    benang = arti_benang.blok_prompt()
     return (
-        "[Inisiatif — buka topik sendiri]\n"
-        "Stream lagi hening — tidak ada chat maupun omongan streamer. "
-        "Kamu MEMULAI obrolan, bukan menjawab siapa pun.\n"
-        f"Bahan: {material}\n"
-        # Persona 2026-08-03 (Bohan: "nanya bohan mulu, kayak gapunya
+        pembuka
+        + (f"{benang}\n" if benang else "")
+        + f"Bahan: {material}\n"
+        + baris_gerakan
+        # Persona [date removed] (operator: "nanya bohan mulu, kayak gapunya
         # pendirian"): kewajiban 1-pertanyaan dicabut — opini dulu.
-        "Buka topik itu dengan gaya kamu: maksimal 3 kalimat berisi OPINI/"
-        "celetukan kamu sendiri — kamu punya pendirian, bukan asisten yang "
-        "minta arahan. Pertanyaan penutup OPSIONAL; kalau pakai, lebih sering "
-        "lempar ke penonton daripada ke streamer. Bahasa Indonesia. "
+        + "Maksimal 3 kalimat berisi OPINI/celetukan kamu sendiri — kamu "
+        "punya pendirian, bukan asisten yang minta arahan. "
+        # SATU PIKIRAN (paket kohesi [date removed], baseline: 3 kalimat = 3 topik
+        # terpisah di 84% giliran): satu giliran = satu benang, bukan daftar.
+        + "SATU PIKIRAN saja: dari semua bahan pilih SATU dan dalami — sisanya "
+        "abaikan, masih ada giliran berikutnya. Kalimat berikutnya harus "
+        "MELANJUTKAN kalimat sebelumnya, bukan ganti topik. "
+        + sasaran
+        + "Bahasa Indonesia. "
         "Jangan menyebut sistem, memori, log, atau keheningan secara teknis."
     )
 
 
 def build_curious_system_addon(config: dict) -> str:
     """System prompt block khusus turn proaktif."""
-    _ = config
+    # Larangan (negative prompt) = PARAMETER: timpa `curious_larangan` dari
+    # config_local.json tanpa menyentuh kode. Default-nya anti-reporter,
+    # dari diagnosa 94 giliran live [date removed] (68% dibuka "operator ...",
+    # "deg-degan" kaleng di 29%). String kosong = tanpa larangan.
+    larangan = config.get("curious_larangan")
+    if larangan is None:  # None = pakai default; "" = sengaja tanpa larangan
+        larangan = DEFAULT_LARANGAN
+    larangan = str(larangan).strip()
     return (
         "\n\n[MODE PENASARAN — PROAKTIF]\n"
         "Kamu memulai obrolan karena penasaran, bukan karena dipanggil.\n"
         "Reaksi pada satu detail konkret dengan opini/pendirian kamu sendiri; "
         "pertanyaan boleh tapi TIDAK wajib — jangan tiap giliran nanya streamer.\n"
         "Hindari deskripsi generik layar atau mengulang hook scouter kata per kata."
+        + (f"\n{larangan}" if larangan else "")
     )
 
 
@@ -631,9 +819,23 @@ def build_prompt(config: dict) -> str:
     parts.append(f"Layar saat ini: {scene}")
     if playback:
         parts.append(f"Posisi video: {playback}")
+    benang = arti_benang.blok_prompt()
+    if benang:
+        parts.append(benang)
+    gerakan = gerakan_dialog(config=config)
+    if gerakan:
+        parts.append(
+            "Gerakan giliran ini (SKIP kalau nggak nyambung sama momen yang "
+            f"lagi terjadi — momen selalu menang): {gerakan}"
+        )
+    # Larangan anti-reporter TIDAK diulang di sini — dia hidup di
+    # build_curious_system_addon (kunci config `curious_larangan`), satu pintu
+    # supaya operator bisa menimpanya tanpa berburu duplikat.
     parts.append(
         "Tunjuk 1 detail spesifik yang menarik perhatianmu, hubungkan ke konteks stream singkat, "
         "dan kasih komentar/opini khas kamu — kamu punya pendirian sendiri. "
+        "SATU PIKIRAN saja: satu giliran = satu benang — kalimat berikutnya "
+        "MELANJUTKAN kalimat sebelumnya, bukan buka topik baru. "
         "Maksimal 3 kalimat; pertanyaan penutup opsional (kalau ada, variasikan "
         "targetnya — penonton juga, bukan streamer melulu). "
         "Bahasa Indonesia. Jangan deskripsi generik."

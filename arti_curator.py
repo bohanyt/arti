@@ -84,7 +84,7 @@ def curate_beats(beats: list[Any], config: dict) -> CuratorResult:
                         profile = config.get("active_profile", "default").lower()
                         suffix = "" if profile == "default" else f"_{profile}"
                         vault_path = _ROOT / "vault" / "concepts" / f"arti_live_learnings{suffix}.md"
-                        mq.append_learning(vault_path, wrapped)
+                        mq.append_learning(vault_path, wrapped, config=config)
                         result.learnings_written += 1
                     except Exception as e:
                         print(f"[Curator] learning skip: {e}")

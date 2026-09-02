@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import Any, Callable
 
 import arti_cloudflare_vision
+import arti_gemini_budget
 import arti_gemini_vision
 import arti_github_vision
 import arti_nvidia_client
@@ -24,17 +25,25 @@ _last_uptime_log_ts = 0.0
 GROQ_VISION_URL = "https://api.groq.com/openai/v1/chat/completions"
 OPENROUTER_VISION_URL = "https://openrouter.ai/api/v1/chat/completions"
 
+# Urutan dari log 9 jam [date removed]: Gemini Lite 160/167 (95%), OpenRouter
+# 6/9, Ollama 3/3. Google Gemma (3/13) dan Cloudflare (1/10) gagal karena
+# thinking memakan budget; keduanya diperbaiki [date removed] dan lulus probe JSON
+# sintetis, tetapi tetap di belakang incumbent sampai ada sampel live baru.
 DEFAULT_CHAIN = [
-    "nvidia",
-    "google_gemma",
     "google_gemini_lite",
-    "cloudflare",
     "openrouter",
-    "groq",
-    "github",
-    "zai",
     "ollama",
+    "google_gemma",
+    "cloudflare",
+    "groq",
+    "zai",
+    "nvidia",
 ]
+
+# GitHub Models pensiun total 30 Juli 2026 — ditolak paksa, bukan cuma dihapus
+# dari default. Alasan lengkap di arti_scouter_client.PROVIDER_PENSIUN dan
+# docs/MODEL-REGISTRY.md §2.1.
+PROVIDER_PENSIUN = {"github"}
 
 
 @dataclass
@@ -70,8 +79,29 @@ def _resolve_chain(config: dict) -> list[str]:
                     continue
             except Exception:  # noqa: BLE001
                 continue
-        if name == "github" and not config.get("vision_github_enabled", False):
+        if name in PROVIDER_PENSIUN:
             continue
+        # Rem kuota Gemini ([date removed]) — sama seperti rantai scouter:
+        # selagi jatah menit habis / istirahat pasca-429, nama Gemini keluar
+        # dari rantai giliran ini tanpa baris error. google_gemma hanya
+        # dilewati kalau model utama DAN cadangannya sama-sama tertahan
+        # (kuota Google per model, cadangan bisa saja masih segar).
+        if name == "google_gemini_lite":
+            m = config.get("vision_google_gemini_model") or "gemini-3.1-flash-lite"
+            if arti_gemini_budget.sedang_dibatasi(m, config):
+                continue
+        if name == "google_gemma":
+            # Default model utama & cadangan HARUS sama dengan
+            # _call_google_gemma — beda default = resolver menilai kuota
+            # model yang tidak akan pernah ditembak.
+            kandidat = [config.get("vision_google_gemma_model") or "gemma-4-26b-a4b-it"]
+            cadangan = config.get("vision_google_gemma_fallback_model", "gemma-4-31b-it")
+            if cadangan and cadangan != kandidat[0]:
+                kandidat.append(cadangan)
+            if all(
+                arti_gemini_budget.sedang_dibatasi(k, config) for k in kandidat
+            ):
+                continue
         if name == "zai" and not (
             config.get("zai_api_key") or os.environ.get("ZAI_API_KEY") or os.environ.get("ZHIPU_API_KEY")
         ):
@@ -232,7 +262,7 @@ def _call_groq(prompt: str, jpeg_b64: str, config: dict) -> tuple[str, int]:
     if "qwen" in model.lower():
         # qwen3.6 MENGABAIKAN trik prompt "/no_think". Tanpa param API ini, CoT-nya
         # menghabiskan max_tokens (256 di jalur vision) dan content balik kosong.
-        # Terverifikasi probe 2026-07-31: tanpa ini keluarannya diawali "<think>".
+        # Terverifikasi probe [date removed]: tanpa ini keluarannya diawali "<think>".
         extra = {"reasoning_effort": "none"}
     return oai.vision_chat(
         GROQ_VISION_URL,
@@ -275,10 +305,85 @@ _PROVIDERS: dict[str, ProviderFn] = {
     "cloudflare": _call_cloudflare,
     "openrouter": _call_openrouter,
     "groq": _call_groq,
-    "github": _call_github,
+    # "github" sengaja tidak didaftarkan — pensiun 30 Juli 2026. Lihat catatan
+    # di arti_scouter_client._PROVIDERS: pintu dispatch adalah satu-satunya
+    # tempat yang menutup semua pemanggil, termasuk yang melewati _resolve_chain.
     "zai": _call_zai,
     "ollama": _call_ollama,
 }
+
+
+# --------------------------------------------------------------------------- #
+# GERBANG LAYAR-DIAM ([date removed], permintaan operator)
+#
+# Arti menonton dirinya sendiri: layar nyaris tidak berubah, tapi vision tetap
+# dipanggil tiap giliran dan hasilnya disuntik ke prompt -> "komentarin itu
+# mulu" (log [time removed]: auto-vision 157x, 49/211 jawaban menyebut layar).
+# Gerbang ini memutus di HULU: kalau beda piksel < ambang, provider TIDAK
+# dipanggil sama sekali (hemat kuota Gemini juga) dan deskripsi lama dipakai.
+# `layar_diam_beruntun` dibaca bridge untuk berhenti menyuntik [LAYAR:].
+# --------------------------------------------------------------------------- #
+
+_sidik_terakhir: bytes | None = None
+layar_diam_beruntun = 0
+_diam_log_terakhir = 0.0
+
+
+def _tangkap_bergerbang(config: dict) -> tuple[str | None, bytes | None]:
+    """Tangkap layar; None kalau tidak layak dikirim ke provider."""
+    global _sidik_terakhir, layar_diam_beruntun, _diam_log_terakhir
+    try:
+        b64, _jpeg, sidik = arti_vision_capture.capture_dengan_sidik(config)
+    except Exception:  # noqa: BLE001 — capture gagal: jalur lama, jangan mati
+        b64, _ = arti_vision_capture.capture_jpeg_b64(config)
+        return b64, None
+
+    gelap = arti_vision_capture.layar_gelap(
+        sidik,
+        float(config.get("vision_gelap_luma_max", 12.0)),
+        float(config.get("vision_gelap_sebar_min", 6.0)),
+    )
+    # DUA metrik, gerbang buka kalau salah satu lolos:
+    # - sel_berubah (UTAMA): menangkap perubahan LOKAL (subtitle, popup) yang
+    #   nyaris tak menggeser rata-rata. Ukur nyata [date removed] di layar operator:
+    #   derau layar diam 0,0-0,9% vs subtitle 1 baris 5,2%, popup kecil 3,1%.
+    # - beda rata-rata (cadangan): menangkap perubahan GLOBAL (ganti scene,
+    #   fade) yang bisa merata tanpa banyak sel melewati delta.
+    sel = arti_vision_capture.sel_berubah_persen(_sidik_terakhir, sidik)
+    beda = arti_vision_capture.beda_persen(_sidik_terakhir, sidik)
+    ambang_sel = float(config.get("vision_sel_berubah_min_persen", 2.0))
+    ambang = float(config.get("vision_beda_min_persen", 6.0))
+    diam = sel < ambang_sel and beda < ambang
+
+    if gelap or diam:
+        layar_diam_beruntun += 1
+        now = time.time()
+        if now - _diam_log_terakhir > 60.0:  # anti-spam log (pola VAD)
+            alasan = ("gelap/kosong" if gelap else
+                      f"sel {sel:.1f}%<{ambang_sel:.1f}% & beda {beda:.1f}%<{ambang:.0f}%")
+            print(f"[Vision] Layar diam ({alasan}) — provider dilewati "
+                  f"(x{layar_diam_beruntun})")
+            _diam_log_terakhir = now
+        return None, sidik
+
+    layar_diam_beruntun = 0
+    _sidik_terakhir = sidik
+    return b64, sidik
+
+
+def layar_sedang_diam(config: dict | None = None) -> bool:
+    """True kalau layar sudah beberapa kali berturut-turut tidak berubah —
+    bridge memakai ini untuk berhenti menyuntik [LAYAR:] ke prompt."""
+    cfg = config or {}
+    batas = int(cfg.get("vision_diam_stop_inject", 2))
+    return batas > 0 and layar_diam_beruntun >= batas
+
+
+def reset_gerbang_layar() -> None:
+    """Dipanggil saat sesi baru / vision di-toggle manual."""
+    global _sidik_terakhir, layar_diam_beruntun
+    _sidik_terakhir = None
+    layar_diam_beruntun = 0
 
 
 def describe_with_chain(
@@ -297,7 +402,15 @@ def describe_with_chain(
 
     user_prompt = prompt or sc.build_vision_prompt()
     if jpeg_b64 is None:
-        jpeg_b64, _ = arti_vision_capture.capture_jpeg_b64(config)
+        jpeg_b64, _sidik = _tangkap_bergerbang(config)
+        if jpeg_b64 is None:
+            # Layar diam/gelap: JANGAN kembalikan snapshot lama. Dua pemanggil
+            # (screen_watcher_worker & scouter auto-vision) langsung mendorong
+            # apa pun yang balik ke ring lalu mencetak "Vision refresh via ..."
+            # — itu mendorong ulang snapshot yang sama (ring terisi duplikat)
+            # dan mengumumkan penyegaran yang TIDAK terjadi (aturan #3).
+            # None = tidak ada bahan baru; ring lama tetap utuh di tempatnya.
+            return None, "diam"
 
     chain = _resolve_chain(config)
     last_err = ""

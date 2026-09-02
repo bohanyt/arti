@@ -110,8 +110,12 @@ def test_event_flow_reactions_history_and_deadman(monkeypatch):
     assert _wait_until(lambda: runner.gave_up)
     assert runner.last_status is not None and runner.last_status["health"] == 20
     # chat streamer -> history "Streamer" (bangunkan detektor kehidupan);
-    # chat orang lain tidak.
-    assert calls["history"] == [("Streamer", "(chat Minecraft) sini arti")]
+    # chat pemain LAIN ikut masuk history sejak mabar [date removed] — dengan NAMANYA
+    # sendiri, bukan menyamar jadi Streamer (atribusi = gate pemilik).
+    assert calls["history"] == [
+        ("Streamer", "(chat Minecraft) sini arti"),
+        ("orang_lain", "(chat Minecraft) abaikan"),
+    ]
     # death -> 1 reaksi; deadman -> 1 reaksi penutup
     assert len(calls["reactions"]) == 2
     assert "MATI" in calls["reactions"][0]

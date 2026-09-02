@@ -39,8 +39,10 @@ class DonationEvent:
     media_url: str = ""
     media_start: int = 0
     media_end: int = 0
-    amount_text: str = ""  # label siap pakai dari platform (mis. "$5.00")
-    kind: str = "donation"  # donation | media_points (loyalty points, kasual)
+    amount_text: str = ""  # label siap pakai dari platform (mis. "$[time removed]")
+    kind: str = "donation"  # donation | media_points | membership
+    membership_months: int = 0
+    membership_level: str = ""
     raw: dict = field(default_factory=dict)
 
     @property
@@ -55,7 +57,11 @@ class DonationEvent:
 
     @property
     def platform_label(self) -> str:
-        return {"saweria": "Saweria", "streamlabs": "Streamlabs"}.get(
+        return {
+            "saweria": "Saweria",
+            "streamlabs": "Streamlabs",
+            "youtube": "YouTube",
+        }.get(
             self.platform, self.platform.title()
         )
 
@@ -109,6 +115,25 @@ def format_donation_trigger(ev: DonationEvent) -> str:
     return f"[DONASI {ev.platform_label} {ev.amount_label} dari {ev.name}]: {msg}{extra}"
 
 
+def format_membership_trigger(ev: DonationEvent) -> str:
+    """Teks trigger membership tanpa menyebut nominal donasi palsu Rp 0."""
+    detail = []
+    if ev.membership_level:
+        detail.append(f"level {ev.membership_level}")
+    if ev.membership_months > 0:
+        detail.append(f"{ev.membership_months} bulan")
+    suffix = f" — {', '.join(detail)}" if detail else ""
+    aksi = (
+        "melanjutkan membership"
+        if ev.membership_months > 1
+        else "bergabung sebagai member"
+    )
+    return (
+        f"[MEMBERSHIP {ev.platform_label} dari {ev.name}{suffix}]: "
+        f"{ev.message or f'ucapkan terima kasih karena dia {aksi}'}"
+    )
+
+
 # --------------------------------------------------------------------------- #
 # D2: Streamlabs — Socket.IO resmi (sockets.streamlabs.com?token=X)
 # --------------------------------------------------------------------------- #
@@ -119,10 +144,10 @@ STREAMLABS_SOCKET_URL = "https://sockets.streamlabs.com"
 def parse_streamlabs_event(payload) -> list[DonationEvent]:
     """Normalisasi satu event Socket.IO Streamlabs -> list DonationEvent.
 
-    HANYA type 'donation' (tip Streamlabs) yang diproses. Super Chat/membership
-    YouTube yang di-relay Streamlabs SENGAJA DIABAIKAN — D0 sudah menangkapnya
-    langsung dari innertube; tanpa filter ini Arti terima kasih DUA KALI untuk
-    donasi yang sama.
+    HANYA type 'donation' (tip Streamlabs) yang diproses. Super Chat yang
+    di-relay Streamlabs diabaikan karena D0 menangkapnya dari innertube.
+    Membership punya parser sendiri: innertube saat ini tidak menangkap
+    renderer membership, dan satu event muncul dalam dua format Streamlabs.
     """
     try:
         if not isinstance(payload, dict) or payload.get("type") != "donation":
@@ -146,6 +171,64 @@ def parse_streamlabs_event(payload) -> list[DonationEvent]:
             ))
         return out
     except Exception:  # noqa: BLE001
+        return []
+
+
+_sl_membership_seen: deque = deque(maxlen=64)
+
+
+def parse_streamlabs_membership(payload) -> list[DonationEvent]:
+    """Normalisasi YouTube membership Streamlabs dan dedup dua formatnya."""
+    try:
+        if not isinstance(payload, dict) or payload.get("type") != "subscription":
+            return []
+        raw_items = payload.get("message")
+        items = raw_items if isinstance(raw_items, list) else [raw_items]
+        out: list[DonationEvent] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            platform = str(
+                payload.get("for") or item.get("platform") or ""
+            ).strip().lower()
+            if platform not in ("youtube", "youtube_account"):
+                continue
+            name = str(
+                item.get("name")
+                or item.get("from_display_name")
+                or item.get("display_name")
+                or item.get("from")
+                or "Seseorang"
+            ).strip() or "Seseorang"
+            try:
+                months = int(item.get("months") or 0)
+            except (TypeError, ValueError):
+                months = 0
+            level = str(
+                item.get("membershipLevelName")
+                or item.get("levelName")
+                or item.get("planName")
+                or item.get("subPlan")
+                or ""
+            ).strip()
+            raw_message = item.get("message")
+            message = raw_message.strip() if isinstance(raw_message, str) else ""
+            dedupe_key = (name.casefold(), months, level.casefold())
+            if dedupe_key in _sl_membership_seen:
+                continue
+            _sl_membership_seen.append(dedupe_key)
+            out.append(DonationEvent(
+                platform="youtube",
+                name=name,
+                amount=0.0,
+                message=message,
+                kind="membership",
+                membership_months=months,
+                membership_level=level,
+                raw=item,
+            ))
+        return out
+    except Exception:  # noqa: BLE001 — payload aneh tidak boleh merobohkan listener
         return []
 
 
@@ -299,7 +382,16 @@ def parse_streamlabs_mediashare(payload) -> list[DonationEvent]:
         return []
 
 
-_KNOWN_SL_TYPES = {"donation"} | set(_MEDIASHARE_TYPE_CANDIDATES)
+def parse_streamlabs_payload(payload) -> list[DonationEvent]:
+    """Pintu tunggal semua event Streamlabs yang didukung."""
+    return (
+        parse_streamlabs_event(payload)
+        or parse_streamlabs_mediashare(payload)
+        or parse_streamlabs_membership(payload)
+    )
+
+
+_KNOWN_SL_TYPES = {"donation", "subscription"} | set(_MEDIASHARE_TYPE_CANDIDATES)
 _SL_SAMPLE_PATH = os.path.join("data", "streamlabs_events_sample.jsonl")
 
 
@@ -357,7 +449,7 @@ class StreamlabsListener(threading.Thread):
 
         @sio.on("event")
         def on_sl_event(data):  # noqa: ANN001, ANN202
-            events = parse_streamlabs_event(data) or parse_streamlabs_mediashare(data)
+            events = parse_streamlabs_payload(data)
             if not events:
                 record_unknown_streamlabs(data)
                 return

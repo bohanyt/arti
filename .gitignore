@@ -6,6 +6,10 @@ __pycache__/
 dist/
 build/
 
+# .NET / SMAPI build outputs
+stardew-mod/**/bin/
+stardew-mod/**/obj/
+
 # IDE
 .vscode/
 .idea/
@@ -55,6 +59,17 @@ data/vault_rag.db
 data/vault_rag.db-*
 data/observer_rag.db
 data/observer_rag.db-*
+# Pola, bukan nama harfiah (audit 20 Agu): DB embedding baru
+# `vault_rag_qwen3.db` lolos karena aturan lama menyebut nama persis —
+# padahal isinya potongan vault, 127 kemunculan nama satu penonton.
+# Ganti model embedding = nama DB baru = celah yang sama terbuka lagi.
+data/*_rag*.db
+data/*_rag*.db-*
+# Laporan/keluaran yang MENYALIN isi vault atau dialog (aturan #6)
+data/dedup_vault_*.md
+data/dub_log.jsonl
+data/momen/
+data/panen/
 data/telemetry/
 
 # Test baselines yang di-generate ulang per mesin (bisa berisi nilai CONFIG lokal)
@@ -66,3 +81,32 @@ vendor/agent-skills/
 # Sampel payload Streamlabs (berisi nama viewer/channel) — diagnostik lokal
 data/streamlabs_events_sample.jsonl
 mc-bot/node_modules/
+
+# Cache suara refleks — hasil sintesis, dibangun ulang dengan
+# scripts/build_reflex_cache.py (voice per-mesin, biner, ~3MB)
+data/reflex/
+
+# Alat ukur harness Minecraft (perintah.txt/status.json/tas.json)
+tmp/
+
+# Bahan mentah yang dilempar Bohan buat dianalisis (screenshot, potongan
+# terminal, hasil tes) — bisa memuat nama penonton. Hanya README yang di-commit.
+dump/*
+!dump/README.md
+
+# rekaman suara kucing (bisa besar, tidak perlu di git)
+data/kucing/rekaman/
+data/kucing/catatan_kucing.jsonl
+
+# token plugin VTS kucing (kelas rahasia, seperti .env)
+data/vts_kucing_token.txt
+data/latihan/
+
+# Kunci HMAC + artefak mentah pipeline kurasi fine-tune. Hanya hasil turunan
+# yang sudah disanitasi di finetune/curation/ yang boleh masuk git.
+data/finetune/
+
+# Telemetri Stardew mentah (10 Hz) — data runtime, bukan sumber.
+# Dipisah sejak awal supaya raw tidak pernah tercampur dengan pengalaman
+# semantik yang nanti punya provenance. Raw 10Hz BUKAN data fine-tune.
+data/stardew/

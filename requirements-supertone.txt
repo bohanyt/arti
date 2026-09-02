@@ -1,43 +1,43 @@
 # =============================================================================
-# Supertone 3 TTS — Python 3.12 subprocess dependencies (venv312)
+# Supertone 3 TTS — Python [time removed] subprocess dependencies (venv312)
 # =============================================================================
 #
-# This file targets the SEPARATE Python 3.12 virtual environment (`venv312`)
+# This file targets the SEPARATE Python [time removed] virtual environment (`venv312`)
 # that runs `supertone_engine.py` as a persistent synthesis subprocess.
 #
 # It is INTENTIONALLY DISTINCT from the bridge's `requirements.txt`, which
-# pins the Python 3.11 environment that runs `hermes_vtuber_bridge.py`.
-# The `supertonic` library requires Python 3.12+, so it cannot live in the
-# 3.11 bridge env — keep these two dependency sets isolated.
+# pins the Python [time removed] environment that runs `hermes_vtuber_bridge.py`.
+# The `supertonic` library requires Python [time removed]+, so it cannot live in the
+# [time removed] bridge env — keep these two dependency sets isolated.
 #
 # Install (from the repo root) into venv312, e.g.:
-#   py -3.12 -m venv venv312
+#   py -[time removed] -m venv venv312
 #   venv312\Scripts\python -m pip install -r requirements-supertone.txt
 #
 # First run downloads the Supertonic-3 model (~400MB) from HuggingFace into
 # ~/.cache/supertonic3/ (handled by `huggingface-hub` at synthesis startup).
 # -----------------------------------------------------------------------------
 
-# Core synthesis engine (pinned). Supports Python 3.9–3.13.
+# Core synthesis engine (pinned). Supports Python 3.9–[time removed].
 supertonic==1.3.1
 
 # Transitive dependencies of supertonic==1.3.1 (pinned explicitly for
 # reproducible venv312 builds). Versions chosen to satisfy supertonic's
-# declared ranges and to support Python 3.12:
+# declared ranges and to support Python [time removed]:
 #   supertonic 1.3.1 requires:
-#     onnxruntime>=1.19.0 (python_version < "3.13")
-#     numpy>=1.21.0
-#     soundfile>=0.10.0
-#     huggingface-hub>=0.10.0
+#     onnxruntime>=[time removed].0 (python_version < "[time removed]")
+#     numpy>=[time removed].0
+#     soundfile>=[time removed].0
+#     huggingface-hub>=[time removed].0
 numpy==2.4.3
-soundfile==0.13.1
-huggingface-hub==0.36.2
+soundfile==[time removed].1
+huggingface-hub==[time removed].2
 
 # -----------------------------------------------------------------------------
 # GPU (opsional tapi SANGAT disarankan) — CONFIG `supertonic_use_cuda: true`
 # -----------------------------------------------------------------------------
 #
-# Terukur 2026-07-31 di RTX 4050 Laptop (6 GB), lewat protokol NDJSON asli:
+# Terukur [date removed] di NVIDIA GPU (6 GB), lewat protokol NDJSON asli:
 #
 #     CPU  : p50 26,25 detik per kalimat   (audio 4,4 detik -> 6,5x LEBIH LAMBAT dari realtime)
 #     CUDA : p50  0,28 detik per kalimat   (audio yang sama -> 16x lebih cepat dari realtime)
@@ -46,10 +46,10 @@ huggingface-hub==0.36.2
 # dan Arti terasa nge-lag.
 #
 # CATATAN VERSI — jangan asal `pip install onnxruntime-gpu` (yang terbaru):
-#   onnxruntime-gpu 1.28 butuh CUDA 13 + cuDNN 9. Di Windows, `nvidia-cublas-cu13` dan
+#   onnxruntime-gpu [time removed] butuh CUDA 13 + cuDNN 9. Di Windows, `nvidia-cublas-cu13` dan
 #   `nvidia-cuda-runtime-cu13` TIDAK punya wheel (gagal build dari source), jadi
 #   runtime-nya tidak bisa didapat lewat pip. Varian cu12 lengkap, makanya dipin ke
-#   1.23.2 yang menargetkan CUDA 12.
+#   [time removed].2 yang menargetkan CUDA 12.
 #
 # Pasang (di venv312, ganti onnxruntime CPU di atas):
 #     pip uninstall -y onnxruntime
@@ -58,11 +58,11 @@ huggingface-hub==0.36.2
 # Kalau CUDA tidak tersedia saat runtime, supertonic/loader.py memfilter provider dan
 # jatuh ke CPU dengan warning — Arti tetap bersuara, cuma lambat. Terverifikasi.
 #
-# Untuk instalasi CPU-only, hapus blok ini dan pakai: onnxruntime==1.26.0
+# Untuk instalasi CPU-only, hapus blok ini dan pakai: onnxruntime==[time removed].0
 
-onnxruntime-gpu==1.23.2
-nvidia-cudnn-cu12==9.24.0.43
-nvidia-cublas-cu12==12.9.2.10
-nvidia-cuda-runtime-cu12==12.9.79
+onnxruntime-gpu==[time removed].2
+nvidia-cudnn-cu12==[time removed].[time removed]
+nvidia-cublas-cu12==12.9.[time removed]
+nvidia-cuda-runtime-cu12==12.[time removed]
 nvidia-cufft-cu12==11.4.1.4
-nvidia-curand-cu12==10.3.10.19
+nvidia-curand-cu12==10.[time removed].19
