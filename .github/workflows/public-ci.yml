@@ -4,10 +4,15 @@ on:
   pull_request:
   push:
     branches:
-      - public/refresh-2026-09-02
+      - main
+  workflow_dispatch:
 
 permissions:
   contents: read
+
+concurrency:
+  group: public-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   privacy-and-python:
@@ -39,6 +44,8 @@ jobs:
           PY
       - name: Scan tracked public tree
         run: python scripts/public_privacy_scan.py
+      - name: Validate public references
+        run: python scripts/public_reference_check.py
       - name: Compile Python source
         run: |
           python -m compileall -q -x '(^|/)(venv|\.git|dump|vts-backup)/' .
