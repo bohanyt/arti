@@ -2,8 +2,9 @@
 """Fail CI when the tracked public tree contains excluded/private artifacts.
 
 The scan intentionally operates on ``git ls-files`` so ignored local files do not
-create false alarms. Content checks are conservative and target credential forms
-and known operational identifiers that should never exist in the public tree.
+create false alarms. Content checks are conservative and target credential forms,
+private paths, and maintainer-specific runtime literals that should not leak into
+the reusable public distribution.
 """
 from __future__ import annotations
 
@@ -68,14 +69,19 @@ PRIVATE_PATHS = [
     re.compile("/" + r"home/[^/\r\n]+/"),
 ]
 
-# Known real operational values from the private frozen baseline. They are built
-# in pieces so the scanner itself does not contain the complete forbidden value.
+# Known real operational values from the private source. They are built in
+# pieces so this scanner does not contain the complete forbidden value itself.
+# The bare maintainer display name is included because the public distribution
+# must be reusable: character prompts/defaults/docs should say streamer/operator
+# instead of silently binding a fresh clone to the maintainer's identity.
 KNOWN_PRIVATE_LITERALS = (
     "HuWZx" + "-APkAM",          # historical live/video id
     "MSI" + " Thin 15",          # one-machine identifier
     "@bohan" + "yt",             # operator handle
     "bohan" + "yto",             # historical fixture/operator identifier
     "@Bohan" + "YT",             # case variant
+    "Bo" + "han",                # maintainer display name in runtime/docs
+    "Antigravity" + "Developer", # private-era VTS developer identifier
 )
 
 TEXT_SUFFIXES = {
@@ -90,7 +96,9 @@ def tracked_files() -> list[str]:
 
 
 def is_text_candidate(path: Path) -> bool:
-    return path.suffix.lower() in TEXT_SUFFIXES or path.name in {"Dockerfile", "Makefile", ".gitignore", ".gitattributes"}
+    return path.suffix.lower() in TEXT_SUFFIXES or path.name in {
+        "Dockerfile", "Makefile", ".gitignore", ".gitattributes"
+    }
 
 
 def main() -> int:
