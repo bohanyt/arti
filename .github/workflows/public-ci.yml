@@ -1,0 +1,56 @@
+name: Public CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - public/refresh-2026-09-02
+
+permissions:
+  contents: read
+
+jobs:
+  privacy-and-python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install cloud-safe test dependencies
+        run: python -m pip install --upgrade pip pytest pytest-timeout hypothesis numpy requests websockets python-dotenv
+      - name: Scan tracked public tree
+        run: python scripts/public_privacy_scan.py
+      - name: Compile Python source
+        run: |
+          python -m compileall -q -x '(^|/)(venv|\.git|dump|vts-backup)/' .
+      - name: Run deterministic public Python tests
+        run: |
+          python -m pytest -q \
+            tests/test_arti_nod.py \
+            tests/test_arti_reply_policy.py \
+            tests/test_arti_wake.py \
+            tests/test_curator.py \
+            tests/test_session_mode.py \
+            tests/test_minecraft_events.py \
+            tests/test_minecraft_runner.py
+
+  minecraft-node:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: mc-bot/package-lock.json
+      - name: Install Minecraft dependencies
+        working-directory: mc-bot
+        run: npm ci
+      - name: Syntax-check Minecraft JavaScript
+        run: |
+          node --check mc-bot/bot.js
+          if [ -f mc-bot/pov.js ]; then node --check mc-bot/pov.js; fi
+
+# Hardware/application validation (OBS, VTube Studio, Steam/Stardew, audio,
+# GPU, live Minecraft worlds) is intentionally outside public cloud CI.
