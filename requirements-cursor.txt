@@ -2,7 +2,7 @@
 # Cursor SDK — dependensi OPSIONAL untuk jalur brain Composer 2.5
 # =============================================================================
 #
-# File ini menargetkan venv utama (`venv`, Python [time removed]) yang menjalankan
+# File ini menargetkan venv utama (`venv`, Python 3.11) yang menjalankan
 # `hermes_vtuber_bridge.py` — beda dari `requirements-supertone.txt` yang
 # menargetkan `venv312`.
 #
@@ -22,7 +22,7 @@
 # terminal yang tidak berhubungan sama sekali. Yang benar `cursor-sdk`
 # (nama modulnya `cursor_sdk`).
 #
-# Butuh Python >= [time removed]. `venv` saat ini [time removed].9 — memenuhi.
+# Butuh Python >= 3.10. `venv` saat ini 3.11.9 — memenuhi.
 # =============================================================================
 
-cursor-sdk>=1.[time removed]
+cursor-sdk>=1.0.26

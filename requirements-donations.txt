@@ -1,1 +1,1 @@
-python-socketio[client]==[time removed].1
+python-socketio[client]==5.14.1
