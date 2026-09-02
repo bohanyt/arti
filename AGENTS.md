@@ -1,79 +1,39 @@
-# AGENTS.md — Hermes VTuber Host (Arti)
+# AGENTS.md — public ARTI contributor guide
 
-Instructions for AI coding agents working in this repository.
+This repository is ARTI's curated public product tree. Treat it as a distributable software repository, not as a mirror of the private development workspace.
 
-## First read
+## Scope
 
-1. **`.cursor/skills/arti-vtuber-guardrails/SKILL.md`** — hard rules (idle, rollback, scope)
-2. **`tasks/plan.md`** — current implementation plan
-3. **`tasks/todo.md`** — task status for build auto
+Work on product/runtime code, public-safe tests, configuration examples, and user-facing documentation. Do not reconstruct or import private development history.
 
-## Stable rollback
+## Privacy boundary
 
-```powershell
-git reset --hard v0.6.4-stable
-```
+Never commit secrets or private runtime data. This includes `.env`, real `config_local.json`, API/VTS tokens, viewer profiles, private soul/mood state, transcripts, vault/RAG databases, telemetry/log captures, screenshots/dumps, local backup paths, raw donation/chat payloads, or private fine-tuning data.
 
-Tag `v0.6.4-stable` = titik yang **terverifikasi live** (2026-08-02 subuh, checklist penuh): Cursor backbone (composer voice + grok-4.5 high scouter + vision fallback), ekspresi + reconnect VTS, catch-up reindex, shutdown tunggu-tuntas + banner, blacklist bot, rant mode, fix vision budget 15 dtk.
+Fixtures and examples must be synthetic. If you cannot prove a value is synthetic/public-safe, do not add it.
 
-Rollback lebih lama: `v0.6.3-stable` (2026-08-01, pra-fitur-cursor-backbone) dan `v0.6.2-stable` (2026-07-27, pra-Cursor/CUDA).
+## Internal-development material
 
-> **`git reset --hard` saja TIDAK cukup untuk kembali utuh.** Berkas berikut ada di `.gitignore`, jadi git tidak menyimpannya sama sekali: `.env`, `config_local.json`, `vts_token.txt`, `ARTI_SOUL.md`, `ARTI_VIEWERS.md`, `ARTI_MOOD_STATE.json`, `vault/`, `PROGRESS.md`, dan DB RAG di `data/`. Tanpa berkas ini Arti hidup tapi kehilangan kepribadian, path VTS, dan API key.
->
-> Salinannya ada di `..\ARTI-backups\2026-08-02_v0.6.4-stable\` (yang lama: `2026-08-01_pasca-live-11jam`, `2026-08-01_v0.6.3-stable`, `2026-07-31_v0.6.2-stable`):
-> ```powershell
-> git reset --hard v0.6.4-stable
-> copy "..\ARTI-backups\2026-08-02_v0.6.4-stable\untracked\*" .
-> ```
-> Salinan `.exp3.json` model VTS (folder di luar repo) ada di `..\ARTI-backups\2026-08-01_v0.6.3-stable\vts-model-expressions\` — belum berubah sejak itu.
-> Kalau folder repo hilang total: `git clone <backup>\arti-full-history.bundle "ARTI v0.6.1"`.
+Do not add private handoffs, Control Tower notes, task queues, raw research archives, raw planning archives, or local-lab choreography. Public documentation should explain the product, setup, architecture, behavior, and verification status directly.
 
-**Tag lama tidak ikut pindah.** Repo ini hasil `git init` baru saat pindahan 2026-07-26, jadi `v0.6.1-stable`, `v0.6.0-stable`, `v0.5.8-stable`, `v0.5.6-stable`, dan `v0.5.2-stable` **tidak ada di sini** — semuanya tertinggal di repo arsip `hermes-vtuber-host`. Jangan pakai nama-nama itu di repo ini; perintahnya akan gagal.
+## Verification language
 
-## Build workflow
+Use evidence precisely:
 
-| Intent | Invoke |
-|--------|--------|
-| Implement all pending tasks | Skill `arti-build-auto` — say **"build auto"** after approving `tasks/plan.md` |
-| Implement next task only | Say **"build"** or **"next task"** |
-| Pick right process | Skill `using-agent-skills` |
+- deterministic/unit/cloud-safe tests: `UNIT_TESTED` / `CLOUD_VERIFIED`;
+- real local application/hardware evidence: only claim `LOCAL_VERIFIED` / `VERIFIED LIVE` when that exact scope has separate evidence.
 
-Before **build auto**: working tree must be clean (or only `tasks/` / docs changes).
+Passing CI does not prove VTube Studio, OBS, Steam/Stardew, audio hardware, GPU behavior, or a live Minecraft world.
 
-## Tests
+## Code changes
 
-```powershell
-pytest tests/
-```
+- Keep optional integrations gated and fail-safe.
+- Avoid adding new network/provider dependencies without documenting them.
+- Keep secrets in environment/local configuration, never source literals.
+- Add or update public-safe tests with behavior changes.
+- Prefer deterministic tests over tests that require external services.
+- Preserve the distinction between Python orchestration and external integrations such as `mc-bot/`.
 
-Every code task: failing test first (RED), then implement (GREEN).
+## Before opening a PR
 
-## Project layout
-
-| Path | Purpose |
-|------|---------|
-| `hermes_vtuber_bridge.py` | Main orchestrator (~3800 lines) — minimal edits |
-| `arti_vault_rag.py` | Hybrid RAG |
-| `session_transcript.py` | JSONL transcripts |
-| `tests/` | pytest suite |
-| `.cursor/skills/` | Agent skills (addyosmani pack + Arti custom) |
-| `vendor/agent-skills/` | Upstream clone (gitignored) |
-
-## Active roadmap (high level)
-
-1. **Fase 0** — false trigger `berarti` filter
-2. **Emotion + nodding** — `arti_expression_runtime.py` (CONFIG off by default)
-3. **Latency** — PipelineTimer, async, streaming TTS
-4. **Co-watch** — screen + desktop audio → watch party
-
-Do not skip Fase 0 before emotion work.
-
-## Skills in `.cursor/skills/`
-
-**Arti custom:** `arti-vtuber-guardrails`, `arti-build-auto`
-
-**From [addyosmani/agent-skills](https://github.com/addyosmani/agent-skills):** `using-agent-skills`, `planning-and-task-breakdown`, `incremental-implementation`, `test-driven-development`, `debugging-and-error-recovery`, `git-workflow-and-versioning`, `doubt-driven-development`, `observability-and-instrumentation`, `performance-optimization`, `api-and-interface-design`, `code-review-and-quality`, `code-simplification`
-
-## License note
-
-Skills copied from addyosmani/agent-skills are MIT licensed. See `vendor/agent-skills/LICENSE`.
+Run the strongest public-safe checks available, inspect the tracked tree for secrets/private artifacts, and make sure docs do not make stronger verification claims than the evidence supports.
