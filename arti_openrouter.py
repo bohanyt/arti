@@ -194,8 +194,14 @@ def openrouter_live_model_chain(config: dict) -> list[str]:
     2026-07-31; keduanya juga model yang tidak cocok untuk budget token live
     yang ketat. Lihat komentar CONFIG di hermes_vtuber_bridge.py.
     """
-    primary = config.get("openrouter_live_model", "nvidia/nemotron-3-super-120b-a12b:free")
-    last_resort = config.get("openrouter_live_last_resort", "google/gemma-4-26b-a4b-it:free")
+    primary = (
+        config.get("openrouter_live_model")
+        or "nvidia/nemotron-3-super-120b-a12b:free"
+    )
+    last_resort = (
+        config.get("openrouter_live_last_resort")
+        or "google/gemma-4-26b-a4b-it:free"
+    )
 
     if config.get("openrouter_live_fast_only", True):
         chain = [primary, last_resort]
