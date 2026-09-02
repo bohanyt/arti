@@ -14,7 +14,7 @@ CFG = {
     "initiative_quiet_sec": 30.0,
     "minecraft_narration_gap_sec": 20.0,
     "host_narration_gap_sec": 25.0,
-    "owner_yt_handles": ["@streamer_test"],
+    "owner_yt_handles": ["@streamertest"],
 }
 
 
@@ -68,13 +68,13 @@ def test_every_mode_has_own_scene_key():
 
 def test_handle_normalization_tolerates_at_and_case():
     # Chat YT asli TANPA '@', config PAKAI '@' — tanpa normalisasi tak pernah cocok.
-    assert sm.normalize_handle("@streamer_test") == "streamertest"
+    assert sm.normalize_handle("@StreamerTest") == "streamertest"
     assert sm.normalize_handle(" streamertest ") == "streamertest"
     assert sm.normalize_handle("") == ""
 
 
 def test_owner_chat_accepted_in_any_form():
-    for form in ("streamertest", "@streamer_test", "StreamerTest", " @streamer_test "):
+    for form in ("streamertest", "@streamertest", "StreamerTest", " @StreamerTest "):
         assert sm.is_owner_turn("yt_chat", form, CFG) is True, form
 
 
@@ -97,7 +97,7 @@ def test_arti_own_proactive_turns_may_change_session():
 
 
 def test_owner_falls_back_to_yt_default_viewer():
-    cfg = {"yt_default_viewer": "@streamer_test"}
+    cfg = {"yt_default_viewer": "@streamertest"}
     assert sm.is_owner_turn("yt_chat", "streamertest", cfg) is True
     assert sm.is_owner_turn("yt_chat", "orang_lain", cfg) is False
 
