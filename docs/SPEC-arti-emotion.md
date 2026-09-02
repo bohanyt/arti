@@ -1,40 +1,54 @@
-# SPEC — Arti Emotion + False Trigger Fix
+# SPEC — ARTI wake matching and emotion behavior
 
-Acceptance criteria for `arti-build-auto`. Baseline: `v0.5.2-stable`.
+This document defines the public behavioral contract for wake-word matching and CONFIG-gated expression/emotion behavior.
 
-## Fase 0 — `berarti` false trigger
+## Wake-word matching
 
-### Requirements
+`is_arti_wake_call(text)` is the public source of truth for deciding whether a message explicitly calls ARTI.
 
-1. `is_arti_wake_call(text)` is the single source of truth for "did someone call Arti?"
-2. Word-boundary match for `arti` / `eh arti` — not substring inside `berarti`, `artinya`, `mengartikan`, etc.
-3. YouTube chat uses helper instead of `"arti" in msg`
-4. Duplicate wake-word loop in bridge removed
-5. Unit tests cover proven false positives from session `2026-06-14-default`
+Requirements:
 
-### Evidence
+1. Match `arti` as a word/call, not as an arbitrary substring.
+2. Words such as `berarti`, `artinya`, and `mengartikan` must not trigger ARTI merely because they contain the letters `arti`.
+3. YouTube/chat routing should call the helper rather than duplicate substring logic.
+4. A passive sentence such as `berarti hasilnya bagus` must not be queued as an explicit ARTI wake call.
 
-- `pytest tests/test_arti_wake.py` — all green
-- Manual: chat message `berarti bang bohan ganteng` does not queue trigger
+Public deterministic evidence:
 
-## Emotion system (CONFIG off by default)
+```bash
+python -m pytest -q tests/test_arti_wake.py
+```
 
-### Requirements
+## Emotion system
 
-1. `expression_emotion_enabled: False` in CONFIG
-2. `expression_nod_enabled: False` in CONFIG
-3. LLM may emit `[EMOTION:senang|sedih|marah|bingung|neutral]` — never spoken
-4. Mood files overlay on `bicara`, not replace
-5. Idle uses `stop_idle` / `start_idle` only
+Emotion and nod behavior are optional and CONFIG-gated.
 
-### Evidence
+The response model may append one hidden tag:
 
-- Unit tests for `parse_reply_emotion`
-- `pytest tests/` full suite green
-- `docs/SMOKE-TEST-emotion.md` checklist before enabling CONFIG in production
+```text
+[EMOTION:senang|sedih|marah|bingung|neutral]
+```
 
-## Non-goals
+Requirements:
 
-- Auto-enable features in CONFIG
-- Refactor entire bridge in one task
-- `pause_idle` / `resume_idle`
+1. the tag is removed before TTS/output;
+2. unknown tags fail to `neutral` rather than becoming arbitrary model-file names;
+3. an explicit face request from the user can override a conflicting model-selected mood;
+4. mood expressions overlay the speaking lifecycle instead of replacing the entire conversation state machine;
+5. nod behavior remains independently gated by `expression_nod_enabled`;
+6. missing optional local model assets must not be represented as cloud verification.
+
+Public deterministic evidence:
+
+```bash
+python -m pytest -q tests/test_expression_runtime.py tests/test_arti_nod.py
+```
+
+## Safety / publication constraints
+
+- Do not auto-enable model/application-specific expression features for a fresh clone.
+- Do not publish VTube Studio tokens, private model paths, device IDs, or captured session text as test fixtures.
+- Keep fixtures synthetic.
+- Do not equate passing unit tests with successful local VTube Studio animation.
+
+For local application validation, follow [`SMOKE-TEST-emotion.md`](SMOKE-TEST-emotion.md).
