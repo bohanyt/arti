@@ -1,0 +1,35 @@
+name: One-shot public reference cleanup
+
+on:
+  push:
+    branches:
+      - publication/deep-scrub-2026-09-02
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: publication/deep-scrub-2026-09-02
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Apply exact-string cleanup
+        run: python scripts/_publication_ref_cleanup_once.py
+      - name: Commit cleanup
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add arti_cursor_agent.py arti_voice_dsp.py arti_vault_rag.py hermes_vtuber_bridge.py
+          if git diff --cached --quiet; then
+            echo 'No changes to commit.'
+          else
+            git commit -m 'publication: remove dead internal references'
+            git push origin HEAD:publication/deep-scrub-2026-09-02
+          fi
