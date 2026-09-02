@@ -12,10 +12,8 @@ import subprocess
 from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[1]
-
 TEXT_SUFFIXES = {".md", ".py", ".js", ".json", ".yml", ".yaml", ".txt"}
 
-# Construct private-only prefixes in pieces so this checker does not flag itself.
 PRIVATE_REF_PREFIXES = (
     ".cur" + "sor/",
     "tas" + "ks/",
@@ -24,27 +22,20 @@ PRIVATE_REF_PREFIXES = (
     "docs/pla" + "ns/",
 )
 
-# Runtime-local targets are intentionally absent from Git and may be documented.
 LOCAL_ONLY_PREFIXES = (
-    "vault/",
-    "session_logs/",
-    "transcripts/",
-    "data/",
-    "tmp/",
-    "dump/",
+    "vault/", "session_logs/", "transcripts/", "data/", "tmp/", "dump/",
 )
 LOCAL_ONLY_EXACT = {
-    ".env",
-    "config_local.json",
-    "ARTI_SOUL.md",
-    "ARTI_VIEWERS.md",
-    "ARTI_MOOD_STATE.json",
-    "vts_token.txt",
-    "live_session.json",
+    ".env", "config_local.json", "ARTI_SOUL.md", "ARTI_VIEWERS.md",
+    "ARTI_MOOD_STATE.json", "vts_token.txt", "live_session.json",
 }
 
 MARKDOWN_LINK_RE = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
 BACKTICK_RE = re.compile(r"`([^`\n]+)`")
+# Bare repo paths often appear in code comments without Markdown/backticks.
+BARE_PATH_RE = re.compile(
+    r"(?<![A-Za-z0-9_.-])((?:docs|scripts|tests|mc-bot)/[A-Za-z0-9_./-]+\.(?:md|py|js|json|html))"
+)
 PATHLIKE_RE = re.compile(
     r"^(?:\.?\.?/)?(?:docs|scripts|tests|mc-bot)/[^\s]+$"
     r"|^(?:\.?\.?/)?(?:arti_[A-Za-z0-9_.-]+\.py|hermes_vtuber_bridge\.py|"
@@ -58,13 +49,12 @@ def tracked_files() -> list[str]:
 
 
 def normalize_candidate(raw: str) -> str | None:
-    s = raw.strip().strip("'\"")
+    s = raw.strip().strip("'\".,:;)")
     if not s or s.startswith(("http://", "https://", "mailto:", "#")):
         return None
     s = s.split("#", 1)[0].split("?", 1)[0].strip()
     if not s or any(ch in s for ch in "*{}<>|"):
         return None
-    # Commands/arguments and prose inside backticks are not file references.
     if " " in s or "=" in s:
         return None
     return s.replace("\\", "/")
@@ -73,6 +63,9 @@ def normalize_candidate(raw: str) -> str | None:
 def resolve_relative(source: str, candidate: str) -> str:
     if candidate.startswith("/"):
         candidate = candidate.lstrip("/")
+    # Bare paths that begin with a top-level public directory are repo-root refs.
+    if candidate.startswith(("docs/", "scripts/", "tests/", "mc-bot/")):
+        return candidate
     source_dir = PurePosixPath(source).parent
     parts: list[str] = []
     for part in (source_dir / candidate).parts:
@@ -105,8 +98,6 @@ def main() -> int:
         except (OSError, UnicodeDecodeError):
             continue
 
-        # Private workspace references should never be part of the public UX,
-        # even in prose/comments: they are dead links and leak internal workflow.
         for prefix in PRIVATE_REF_PREFIXES:
             if prefix in text:
                 failures.add(f"private/internal reference in {source}: {prefix}")
@@ -115,8 +106,14 @@ def main() -> int:
         if path.suffix.lower() == ".md":
             candidates.extend(("markdown", m.group(1)) for m in MARKDOWN_LINK_RE.finditer(text))
         candidates.extend(("backtick", m.group(1)) for m in BACKTICK_RE.finditer(text))
+        candidates.extend(("bare", m.group(1)) for m in BARE_PATH_RE.finditer(text))
 
+        seen: set[tuple[str, str]] = set()
         for kind, raw in candidates:
+            key = (kind, raw)
+            if key in seen:
+                continue
+            seen.add(key)
             cand = normalize_candidate(raw)
             if not cand:
                 continue
@@ -126,8 +123,6 @@ def main() -> int:
             if is_intentionally_local(resolved) or is_intentionally_local(cand):
                 continue
             if resolved not in tracked:
-                # A Markdown link may target a directory. Git does not track
-                # directories, so accept it if at least one tracked child exists.
                 prefix = resolved.rstrip("/") + "/"
                 if any(p.startswith(prefix) for p in tracked):
                     continue
