@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Validate public documentation/source references against the tracked tree.
+"""Validate public-facing repository references against the tracked tree.
 
-This catches a recurring publication failure mode: a curated file survives the
-export but still tells users to open an internal plan, private handoff, or helper
-script/test that was intentionally not published.
+The checker is intentionally conservative: it validates Markdown links plus
+path-shaped references in source comments/docs, while ignoring its own guard
+configuration and intentionally local runtime files.
 """
 from __future__ import annotations
 
@@ -13,6 +13,11 @@ from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[1]
 TEXT_SUFFIXES = {".md", ".py", ".js", ".json", ".yml", ".yaml", ".txt"}
+SKIP_SOURCES = {
+    ".gitignore",
+    "scripts/public_privacy_scan.py",
+    "scripts/public_reference_check.py",
+}
 
 PRIVATE_REF_PREFIXES = (
     ".cur" + "sor/",
@@ -32,13 +37,16 @@ LOCAL_ONLY_EXACT = {
 
 MARKDOWN_LINK_RE = re.compile(r"\[[^\]]+\]\(([^)]+)\)")
 BACKTICK_RE = re.compile(r"`([^`\n]+)`")
-# Bare repo paths often appear in code comments without Markdown/backticks.
+# Put longer extensions first and require a token boundary, otherwise `.json`
+# can be truncated to `.js` by the alternation.
 BARE_PATH_RE = re.compile(
-    r"(?<![A-Za-z0-9_.-])((?:docs|scripts|tests|mc-bot)/[A-Za-z0-9_./-]+\.(?:md|py|js|json|html))"
+    r"(?<![A-Za-z0-9_.-])((?:docs|scripts|tests|mc-bot)/"
+    r"[A-Za-z0-9_./-]+\.(?:json|html|md|py|js))(?![A-Za-z0-9_.-])"
 )
 PATHLIKE_RE = re.compile(
     r"^(?:\.?\.?/)?(?:docs|scripts|tests|mc-bot)/[^\s]+$"
-    r"|^(?:\.?\.?/)?(?:arti_[A-Za-z0-9_.-]+\.py|hermes_vtuber_bridge\.py|"
+    r"|^(?:\.?\.?/)?(?:\.env\.example|config_local\.json\.example|"
+    r"arti_[A-Za-z0-9_.-]+\.py|hermes_vtuber_bridge\.py|pipeline_timer\.py|"
     r"bridge_health\.py|subtitle_server\.py|subtitle\.html)$"
 )
 
@@ -60,15 +68,9 @@ def normalize_candidate(raw: str) -> str | None:
     return s.replace("\\", "/")
 
 
-def resolve_relative(source: str, candidate: str) -> str:
-    if candidate.startswith("/"):
-        candidate = candidate.lstrip("/")
-    # Bare paths that begin with a top-level public directory are repo-root refs.
-    if candidate.startswith(("docs/", "scripts/", "tests/", "mc-bot/")):
-        return candidate
-    source_dir = PurePosixPath(source).parent
+def collapse(path: PurePosixPath) -> str:
     parts: list[str] = []
-    for part in (source_dir / candidate).parts:
+    for part in path.parts:
         if part in ("", "."):
             continue
         if part == "..":
@@ -77,6 +79,17 @@ def resolve_relative(source: str, candidate: str) -> str:
             continue
         parts.append(part)
     return "/".join(parts)
+
+
+def resolve_candidate(source: str, candidate: str, tracked: set[str]) -> str:
+    candidate = candidate.lstrip("/")
+    # Explicit top-level directories are repo-root references.
+    if candidate.startswith(("docs/", "scripts/", "tests/", "mc-bot/")):
+        return collapse(PurePosixPath(candidate))
+    # If a bare filename exists at repo root, prefer that over source-relative.
+    if "/" not in candidate and candidate in tracked:
+        return candidate
+    return collapse(PurePosixPath(source).parent / candidate)
 
 
 def is_intentionally_local(path: str) -> bool:
@@ -88,10 +101,10 @@ def main() -> int:
     failures: set[str] = set()
 
     for source in sorted(tracked):
+        if source in SKIP_SOURCES:
+            continue
         path = ROOT / source
-        if path.suffix.lower() not in TEXT_SUFFIXES and path.name not in {
-            ".gitattributes", ".gitignore"
-        }:
+        if path.suffix.lower() not in TEXT_SUFFIXES and path.name != ".gitattributes":
             continue
         try:
             text = path.read_text(encoding="utf-8")
@@ -119,7 +132,7 @@ def main() -> int:
                 continue
             if kind == "backtick" and not PATHLIKE_RE.match(cand):
                 continue
-            resolved = resolve_relative(source, cand)
+            resolved = resolve_candidate(source, cand, tracked)
             if is_intentionally_local(resolved) or is_intentionally_local(cand):
                 continue
             if resolved not in tracked:
