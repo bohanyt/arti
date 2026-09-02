@@ -60,11 +60,12 @@ SECRET_PATTERNS = [
     re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
     re.compile(r"(?i)(?:api[_-]?key|access[_-]?token|bearer|password)\s*[:=]\s*['\"][A-Za-z0-9_./+\-=]{16,}['\"]"),
 ]
+# Build path markers in pieces too, otherwise the scanner's own regex source is
+# itself a literal example of the private path shape it is meant to reject.
 PRIVATE_PATHS = [
-    # Accept spaces in Windows user names; stop only at the next backslash/newline.
-    re.compile(r"(?i)[A-Z]:\\Users\\[^\\\r\n]+\\"),
-    re.compile(r"/Users/[^/\r\n]+/"),
-    re.compile(r"/home/[^/\r\n]+/"),
+    re.compile(r"(?i)[A-Z]:\\" + r"Users\\[^\\\r\n]+\\"),
+    re.compile("/" + r"Users/[^/\r\n]+/"),
+    re.compile("/" + r"home/[^/\r\n]+/"),
 ]
 
 # Known real operational values from the private frozen baseline. They are built
