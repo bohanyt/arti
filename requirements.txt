@@ -36,7 +36,7 @@ tqdm==4.67.3              # progress bar observer pipeline
 # --- Tests ---
 pytest==9.0.3
 pytest-timeout==2.4.0     # potong test yang hang (regresi loop tak berujung)
-hypothesis==6.155.0       # property-based tests (subtitle, preprocessor, speak)
+hypothesis==6.167.0       # property-based tests (subtitle, preprocessor, speak)
 praat-parselmouth==0.4.7  # polesan suara: range intonasi + pitch (arti_voice_dsp)
 
 # Discord bot Fase 1 (arti_discord.py) — [date removed]
