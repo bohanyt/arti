@@ -1,0 +1,12 @@
+# Public ARTI ownership
+#
+# CODEOWNERS is advisory until repository branch/ruleset settings require review.
+# Keep the public tree reviewed by the repository owner, especially changes to
+# runtime, CI, privacy boundaries, examples, and public documentation.
+
+* @bohanyt
+
+/.github/ @bohanyt
+/docs/ @bohanyt
+/mc-bot/ @bohanyt
+*.py @bohanyt
