@@ -507,7 +507,7 @@ def map_event_to_reaction(
         limiter.roam_announced = True
         if ev.get("reason") == "streamer_absent":
             return (
-                "[MINECRAFT] Bohan lagi nggak ada di dunia game — kamu jalan "
+                "[MINECRAFT] streamer lagi nggak ada di dunia game — kamu jalan "
                 "sendirian sekarang. Umumkan kamu mau ngapain."
             )
         return "[MINECRAFT] Kamu mulai jelajah sendiri. Umumkan rencanamu."
@@ -722,7 +722,7 @@ def map_event_to_reaction(
             return (
                 "[MINECRAFT] Kamu mau melakukan itu tapi INGAT: kamu lagi jadi "
                 "TAMU di dunia orang — jangan menambang/membangun/mengubah "
-                "apa pun. Ikut Bohan aja dan ngobrol. Komentari singkat."
+                "apa pun. Ikut streamer aja dan ngobrol. Komentari singkat."
             )
         if str(ev.get("reason")) != "stuck_timeout":
             return None
@@ -782,14 +782,14 @@ _TASK_LABEL = {
     "renang": "lagi berusaha keluar dari air",
     "roam": "jelajah sendiri",
     "wait_streamer": "baru masuk, nunggu dunia termuat",
-    "follow": "ngikutin Bohan",
-    "come": "lagi nyamperin Bohan",
+    "follow": "ngikutin streamer",
+    "come": "lagi nyamperin streamer",
     "idle": "diam di tempat",
     "stop": "berhenti di tempat",
 }
 _REASON_LABEL = {
     "stuck_timeout": "kejeblos/nyangkut, nggak bisa lewat",
-    "streamer_not_visible": "Bohan nggak kelihatan dari sini",
+    "streamer_not_visible": "streamer nggak kelihatan dari sini",
     "unreachable": "nggak ada jalan ke sana",
     # Tangan bot memang belum bisa nambang/naruh blok (Phase 2). Labelnya harus
     # jujur supaya dia bercerita "belum bisa", bukan mengaku sudah membangun.
@@ -1084,10 +1084,10 @@ def _summarize_event(ev: dict) -> str:
     if kind == "spawned":
         return "kamu masuk dunia"
     if kind == "roam_start":
-        return ("mulai jelajah sendiri (Bohan tak ada di dunia)"
+        return ("mulai jelajah sendiri (streamer tak ada di dunia)"
                 if ev.get("reason") == "streamer_absent" else "mulai jelajah sendiri")
     if kind == "roam_end":
-        return "Bohan muncul lagi — balik nemenin"
+        return "streamer muncul lagi — balik nemenin"
     if kind == "roam_leg":
         p = ev.get("pos") or {}
         return f"sampai di titik jelajah ({p.get('x')}, {p.get('y')}, {p.get('z')})"
@@ -1932,7 +1932,7 @@ def nasihat(status: dict | None, maks: int = 2) -> list[str]:
     # Satu-satunya nasihat yang pantas untuk tamu: ingatkan perannya.
     if status.get("tamu"):
         return ["Kamu TAMU di dunia orang: jangan mengubah apa pun — "
-                "temani Bohan, ngobrol, dan nikmati jalan-jalannya."]
+                "temani streamer, ngobrol, dan nikmati jalan-jalannya."]
     tangga = tangga_aman(status)
     darurat = [t for t in tangga
                if "DARAHMU" in t or "NAPAS" in t.upper()[:20]]

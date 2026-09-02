@@ -2,8 +2,9 @@
 """Fail CI when the tracked public tree contains excluded/private artifacts.
 
 The scan intentionally operates on ``git ls-files`` so ignored local files do not
-create false alarms. Content checks are conservative and target credential forms
-and known operational identifiers that should never exist in the public tree.
+create false alarms. Content checks are conservative and target credential forms,
+private paths, and maintainer-specific runtime literals that should not leak into
+the reusable public distribution.
 """
 from __future__ import annotations
 
@@ -51,8 +52,6 @@ EXCLUDED_SUFFIXES = (
     ".dmp",
 )
 
-# Construct high-signal secret markers in pieces so this scanner does not match
-# its own source merely by containing the literal token prefix.
 SECRET_PATTERNS = [
     re.compile("gh" + r"p_[A-Za-z0-9]{30,}"),
     re.compile("github_pat" + r"_[A-Za-z0-9_]{20,}"),
@@ -60,22 +59,21 @@ SECRET_PATTERNS = [
     re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
     re.compile(r"(?i)(?:api[_-]?key|access[_-]?token|bearer|password)\s*[:=]\s*['\"][A-Za-z0-9_./+\-=]{16,}['\"]"),
 ]
-# Build path markers in pieces too, otherwise the scanner's own regex source is
-# itself a literal example of the private path shape it is meant to reject.
 PRIVATE_PATHS = [
     re.compile(r"(?i)[A-Z]:\\" + r"Users\\[^\\\r\n]+\\"),
     re.compile("/" + r"Users/[^/\r\n]+/"),
     re.compile("/" + r"home/[^/\r\n]+/"),
 ]
 
-# Known real operational values from the private frozen baseline. They are built
-# in pieces so the scanner itself does not contain the complete forbidden value.
+# Build every sensitive identity in pieces so this file cannot match itself.
 KNOWN_PRIVATE_LITERALS = (
-    "HuWZx" + "-APkAM",          # historical live/video id
-    "MSI" + " Thin 15",          # one-machine identifier
-    "@bohan" + "yt",             # operator handle
-    "bohan" + "yto",             # historical fixture/operator identifier
-    "@Bohan" + "YT",             # case variant
+    "HuWZx" + "-APkAM",
+    "MSI" + " Thin 15",
+    "@bohan" + "yt",
+    "bohan" + "yto",
+    "@Bo" + "hanYT",
+    "Bo" + "han",
+    "Antigravity" + "Developer",
 )
 
 TEXT_SUFFIXES = {
@@ -90,7 +88,9 @@ def tracked_files() -> list[str]:
 
 
 def is_text_candidate(path: Path) -> bool:
-    return path.suffix.lower() in TEXT_SUFFIXES or path.name in {"Dockerfile", "Makefile", ".gitignore", ".gitattributes"}
+    return path.suffix.lower() in TEXT_SUFFIXES or path.name in {
+        "Dockerfile", "Makefile", ".gitignore", ".gitattributes"
+    }
 
 
 def main() -> int:

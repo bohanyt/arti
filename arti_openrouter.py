@@ -194,8 +194,14 @@ def openrouter_live_model_chain(config: dict) -> list[str]:
     2026-07-31; keduanya juga model yang tidak cocok untuk budget token live
     yang ketat. Lihat komentar CONFIG di hermes_vtuber_bridge.py.
     """
-    primary = config.get("openrouter_live_model", "nvidia/nemotron-3-super-120b-a12b:free")
-    last_resort = config.get("openrouter_live_last_resort", "google/gemma-4-26b-a4b-it:free")
+    primary = (
+        config.get("openrouter_live_model")
+        or "nvidia/nemotron-3-super-120b-a12b:free"
+    )
+    last_resort = (
+        config.get("openrouter_live_last_resort")
+        or "google/gemma-4-26b-a4b-it:free"
+    )
 
     if config.get("openrouter_live_fast_only", True):
         chain = [primary, last_resort]
@@ -218,8 +224,11 @@ def openrouter_live_model_chain(config: dict) -> list[str]:
         if m and m not in chain:
             chain.append(m)
     if not chain:
-        chain = [laguna, owl]
-    return chain
+        # Empty explicit overrides must still yield the shipped, defined defaults.
+        # The old fallback referenced retired local names (`laguna`, `owl`) that
+        # no longer existed and raised NameError when fast_only was disabled.
+        chain = [primary, last_resort]
+    return [m for m in chain if m]
 
 
 def openrouter_live_completion(
@@ -247,7 +256,7 @@ def openrouter_live_completion(
             config.get("live_max_tokens_ptt", config.get("openrouter_live_max_tokens", 380))
         )
         strict_tail = (
-            f"\n\n[PENTING] Jawab ucapan Arti ke Bohan (sampai {sent} kalimat, boleh ada depth). "
+            f"\n\n[PENTING] Jawab ucapan Arti ke streamer (sampai {sent} kalimat, boleh ada depth). "
             "Jangan jelaskan tugas, aturan, atau bilang 'sebagai Arti'."
         )
     messages = [

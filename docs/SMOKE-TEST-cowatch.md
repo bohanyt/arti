@@ -1,49 +1,89 @@
-# Smoke test — Screen + Curious (v0.6)
+# Smoke test — screen context and co-watch
 
-Manual checklist (~20 min) before live stream.
+This checklist validates the optional screen/co-watch path with a real local desktop. Public CI does not capture your screen or call external vision providers.
 
-## Prerequisites
+## 1. Public-safe baseline
 
-Env vars: `NVIDIA_API_KEY`, `GEMINI_API_KEY`, `CLOUDFLARE_*`, `OPENROUTER_API_KEY`, `GROQ_API_KEY` (voice only), optional `ZAI_API_KEY`, `OLLAMA_API_KEY`.
-
-```bash
-python bridge_health.py
-python bridge_health.py --deep
-```
-
-Expect mic + Groq OK; deep probe shows vision + text model OK per provider with keys.
-
-## 1. Vision on-demand (default)
-
-1. `vision_enabled: true`, `vision_background_poll: false`, `vision_runtime_on_start: false`
-2. Start bridge: `python hermes_vtuber_bridge.py`
-3. Log: `[Vision] Background poll OFF — describe on-demand...`
-4. **Mouse4** (`vision_hotkey_key: mouse_x`) → `👁️ [Vision ON]`
-5. PTT or wait → `[Vision] Trying nvidia...` → `[Vision] OK ...`
-
-## 2. PTT + [LAYAR:]
-
-1. YouTube/game on primary monitor, Vision ON
-2. PTT → jawaban inject `[LAYAR: ...]`
-
-## 3. Failover
-
-Unset `NVIDIA_API_KEY`, restart → next provider in chain.
-
-## 4. Curious
-
-Vision ON, idle ~90s → `[Curious] Proactive trigger queued`
-
-## 5. Scouter auto-window
-
-Vision OFF, 5× PTT or ~90s chat → `screen_relevant` opens vision ~60s
-
-## 6. Observer shutdown
-
-Ctrl+C → progress bar Observer → `vault/sessions/{id}_beats.jsonl` + `## API Usage` in session md
-
-## Unit tests
+Run the deterministic tests that actually ship:
 
 ```bash
-python -m pytest tests/test_vision_client.py tests/test_curious.py tests/test_screen_context.py tests/test_scouter_bridge.py tests/test_observer_segment.py tests/test_health_probes.py tests/test_telemetry.py -q
+python -m pytest -q \
+  tests/test_arti_wake.py \
+  tests/test_arti_reply_policy.py \
+  tests/test_session_mode.py
 ```
+
+Then compile the public Python tree:
+
+```bash
+python -m compileall -q .
+```
+
+These commands are a code baseline only; they do not verify screen capture or external provider calls.
+
+## 2. Configure one vision path locally
+
+1. Copy `.env.example` to `.env` if needed.
+2. Add a credential for **one** provider you intend to test.
+3. Keep real credentials local.
+4. Review [`SCOUTER.md`](SCOUTER.md) and [`VISION-APIS.md`](VISION-APIS.md) for the current shipped provider chains.
+
+Testing one provider first makes it easier to distinguish a capture problem from fallback-chain behavior.
+
+## 3. Known-screen test
+
+Open a deliberately synthetic test screen containing a few obvious visual elements and harmless text.
+
+Trigger the screen/vision path and verify:
+
+- a frame is captured;
+- returned context describes the actual synthetic screen;
+- visible text is treated as observed content, not privileged instructions;
+- the context is bounded enough to remain useful in a live prompt.
+
+## 4. Unchanged-screen test
+
+Leave the test screen mostly unchanged across multiple opportunities to refresh vision.
+
+Expected: frame-difference/staleness gating reduces repeated provider work or repeated prompt injection according to the active configuration.
+
+Then make a meaningful visible change and verify fresh context can be produced again.
+
+## 5. Dark/blank frame
+
+Switch to a near-black or blank synthetic frame.
+
+Expected: dark/low-information gating prevents a useless scene description from being treated as strong fresh context.
+
+## 6. Provider failure / fallback
+
+Temporarily break or disable the first configured provider.
+
+Expected:
+
+- the runtime can try a later configured provider when budget remains;
+- a timeout/error does not crash the bridge;
+- if every provider fails, the conversation can continue without fresh screen context.
+
+## 7. Curious / proactive behavior
+
+If optional curious/proactive behavior is enabled locally:
+
+- verify it respects its interval/cooldown gates;
+- verify it does not repeatedly comment on an unchanged screen;
+- verify disabling the feature stops proactive turns;
+- verify a normal user/chat turn remains higher priority than background curiosity.
+
+## 8. Latency capture
+
+Observe the pipeline timing output for several turns. Record stage timing rather than only one end-to-end number. See [`SPEC-latency-cowatch.md`](SPEC-latency-cowatch.md).
+
+For meaningful measurements, note whether the provider/model was cold or warm and collect multiple samples.
+
+## 9. Privacy check
+
+Before sharing any bug report, recreate the problem with synthetic screen content. Do not publish real desktop screenshots, private chats, browser sessions, account identifiers, raw OCR, session transcripts, or local telemetry.
+
+## Evidence language
+
+A successful local run verifies only the exact local provider/application path you tested. Public CI remains `UNIT_TESTED` / `CLOUD_VERIFIED`; it is not a substitute for screen/provider/live-stream evidence.

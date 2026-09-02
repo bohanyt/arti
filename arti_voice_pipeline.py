@@ -199,7 +199,7 @@ async def prepare_turn_context(
     else:
         ctx.target_instruction = (
             "Jawab panggilan streamer sekarang sebagai Arti. Langsung bicara "
-            "dalam karakter Arti kepada streamer (Bohan)."
+            "dalam karakter Arti kepada streamer (streamer)."
         )
         # DULU hardcoded "2-3 kalimat" — kesalahan yang SAMA PERSIS dengan yang
         # sudah diperbaiki untuk YouTube di atas, tapi tertinggal di cabang ini.
@@ -282,13 +282,13 @@ async def prepare_curious_turn_context(
             "komentari kejadian/aksi/rencanamu di dalam game seperti streamer "
             "yang lagi asyik main. Jangan mendeskripsikan layar OBS."
         )
-    elif speech.startswith(("[Arti pegang siaran]", "[Bohan balik]")):
+    elif speech.startswith(("[Arti pegang siaran]", "[streamer balik]")):
         # operator AFK: Arti pembawa acaranya, bukan pengisi keheningan.
         ctx.target_instruction = (
-            "Kamu lagi PEGANG SIARAN sendiri (Bohan AFK). Ikuti sudut yang "
+            "Kamu lagi PEGANG SIARAN sendiri (streamer AFK). Ikuti sudut yang "
             "diminta di pesan: bicara ke penonton sebagai host — punya bahan, "
             "punya pendapat, ajak mereka ngobrol. Jangan mengeluh sepi, jangan "
-            "nunggu Bohan, jangan mengarang seolah dia menjawab."
+            "nunggu streamer, jangan mengarang seolah dia menjawab."
         )
     else:
         ctx.target_instruction = (

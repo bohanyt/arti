@@ -1,6 +1,6 @@
 """Arti dubbing v1 — mode cerita: baca dialog game dari layar, suarakan (19 Agu 2026).
 
-Desain lengkap: docs/research/2026-08-19-game-cerita-dubbing.md.
+Desain lengkap: private development notes
 Proses MANDIRI seperti arti_discord (bridge tidak disentuh; integrasi mode
 cerita ke bridge = fase berikutnya). Jalur ini TANPA LLM — nol token:
 

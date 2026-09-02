@@ -1,2 +1,2 @@
-# subtitle.html dipakai OBS + diverifikasi sha256 oleh tests — jangan diubah line-endingnya
+# Keep the OBS subtitle asset's bytes/line endings stable across checkouts.
 subtitle.html -text
