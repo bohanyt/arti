@@ -57,6 +57,7 @@ jobs:
             tests/test_arti_wake.py \
             tests/test_curator.py \
             tests/test_expression_runtime.py \
+            tests/test_openrouter_chain.py \
             tests/test_session_mode.py \
             tests/test_minecraft_events.py \
             tests/test_minecraft_runner.py
