@@ -3,36 +3,45 @@
 
 The scan intentionally operates on ``git ls-files`` so ignored local files do not
 create false alarms. Content checks are conservative and target credential forms
-that should never exist in a public source tree.
+and known operational identifiers that should never exist in the public tree.
 """
 from __future__ import annotations
 
 import re
 import subprocess
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
 EXCLUDED_PREFIXES = (
+    ".cursor/",
     "docs/handoff/",
     "docs/research/",
     "docs/plans/",
     "tasks/",
+    "vault/",
+    "session_logs/",
+    "transcripts/",
     "dump/",
     "vts-backup/",
+    "data/telemetry/",
+    "data/stardew/",
+    "data/finetune/",
     "finetune/curation/input/",
     "finetune/curation/reviewed/",
 )
 EXCLUDED_EXACT = {
     ".env",
     "CLAUDE.md",
+    "GITHUB_PUSH.md",
     "docs/CURRENT.md",
     "config_local.json",
     "ARTI_SOUL.md",
     "ARTI_VIEWERS.md",
     "ARTI_MOOD_STATE.json",
     "vts_token.txt",
+    "live_session.json",
+    "PROGRESS.md",
 }
 EXCLUDED_SUFFIXES = (
     ".db",
@@ -52,10 +61,21 @@ SECRET_PATTERNS = [
     re.compile(r"(?i)(?:api[_-]?key|access[_-]?token|bearer|password)\s*[:=]\s*['\"][A-Za-z0-9_./+\-=]{16,}['\"]"),
 ]
 PRIVATE_PATHS = [
-    re.compile(r"(?i)[A-Z]:\\Users\\[^\\\s]+\\"),
-    re.compile(r"/Users/[^/\s]+/"),
-    re.compile(r"/home/[^/\s]+/"),
+    # Accept spaces in Windows user names; stop only at the next backslash/newline.
+    re.compile(r"(?i)[A-Z]:\\Users\\[^\\\r\n]+\\"),
+    re.compile(r"/Users/[^/\r\n]+/"),
+    re.compile(r"/home/[^/\r\n]+/"),
 ]
+
+# Known real operational values from the private frozen baseline. They are built
+# in pieces so the scanner itself does not contain the complete forbidden value.
+KNOWN_PRIVATE_LITERALS = (
+    "HuWZx" + "-APkAM",          # historical live/video id
+    "MSI" + " Thin 15",          # one-machine identifier
+    "@bohan" + "yt",             # operator handle
+    "bohan" + "yto",             # historical fixture/operator identifier
+    "@Bohan" + "YT",             # case variant
+)
 
 TEXT_SUFFIXES = {
     ".py", ".js", ".ts", ".json", ".jsonl", ".md", ".txt", ".yml", ".yaml",
@@ -69,7 +89,7 @@ def tracked_files() -> list[str]:
 
 
 def is_text_candidate(path: Path) -> bool:
-    return path.suffix.lower() in TEXT_SUFFIXES or path.name in {"Dockerfile", "Makefile"}
+    return path.suffix.lower() in TEXT_SUFFIXES or path.name in {"Dockerfile", "Makefile", ".gitignore", ".gitattributes"}
 
 
 def main() -> int:
@@ -96,6 +116,10 @@ def main() -> int:
         for pat in PRIVATE_PATHS:
             if pat.search(text):
                 failures.append(f"private absolute path: {norm}")
+                break
+        for value in KNOWN_PRIVATE_LITERALS:
+            if value in text:
+                failures.append(f"known private operational value: {norm}")
                 break
 
     if failures:
