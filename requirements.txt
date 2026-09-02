@@ -31,7 +31,7 @@ mss==10.2.0               # capture layar
 pillow==12.2.0            # encode/resize screenshot
 
 # --- Progress display ---
-tqdm==4.67.3              # progress bar observer pipeline
+tqdm==4.70.0              # progress bar observer pipeline
 
 # --- Tests ---
 pytest==9.0.3
