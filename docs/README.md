@@ -6,17 +6,18 @@ This directory contains the documentation intentionally shipped with the public 
 
 | Guide | What it covers |
 |---|---|
-| [`WIRING.md`](WIRING.md) | Connect the bridge to providers, VTube Studio, YouTube chat, TTS, and local memory. |
+| [`WIRING.md`](WIRING.md) | Connect the bridge to providers, VTube Studio, YouTube chat, TTS, local memory, and optional reflex audio. |
 | [`MINECRAFT-SETUP.md`](MINECRAFT-SETUP.md) | Install and run the Mineflayer-based Minecraft integration. |
 
-## Runtime and vision
+## Runtime and providers
 
 | Guide | What it covers |
 |---|---|
+| [`MODEL-REGISTRY.md`](MODEL-REGISTRY.md) | Public source-of-truth for provider/model roles and retirement behavior. |
+| [`OPENROUTER_MODELS.md`](OPENROUTER_MODELS.md) | OpenRouter-specific live/fallback notes. |
 | [`OBSERVER.md`](OBSERVER.md) | Observer/runtime context pipeline. |
 | [`SCOUTER.md`](SCOUTER.md) | Screen/context scouting behavior. |
 | [`VISION-APIS.md`](VISION-APIS.md) | Supported vision-provider wiring. |
-| [`OPENROUTER_MODELS.md`](OPENROUTER_MODELS.md) | OpenRouter model notes used by the public runtime. |
 
 ## Avatar, motion, and conversation behavior
 
