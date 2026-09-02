@@ -218,8 +218,11 @@ def openrouter_live_model_chain(config: dict) -> list[str]:
         if m and m not in chain:
             chain.append(m)
     if not chain:
-        chain = [laguna, owl]
-    return chain
+        # Empty explicit overrides must still yield the shipped, defined defaults.
+        # The old fallback referenced retired local names (`laguna`, `owl`) that
+        # no longer existed and raised NameError when fast_only was disabled.
+        chain = [primary, last_resort]
+    return [m for m in chain if m]
 
 
 def openrouter_live_completion(
