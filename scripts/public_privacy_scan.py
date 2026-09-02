@@ -52,8 +52,6 @@ EXCLUDED_SUFFIXES = (
     ".dmp",
 )
 
-# Construct high-signal secret markers in pieces so this scanner does not match
-# its own source merely by containing the literal token prefix.
 SECRET_PATTERNS = [
     re.compile("gh" + r"p_[A-Za-z0-9]{30,}"),
     re.compile("github_pat" + r"_[A-Za-z0-9_]{20,}"),
@@ -61,27 +59,21 @@ SECRET_PATTERNS = [
     re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"),
     re.compile(r"(?i)(?:api[_-]?key|access[_-]?token|bearer|password)\s*[:=]\s*['\"][A-Za-z0-9_./+\-=]{16,}['\"]"),
 ]
-# Build path markers in pieces too, otherwise the scanner's own regex source is
-# itself a literal example of the private path shape it is meant to reject.
 PRIVATE_PATHS = [
     re.compile(r"(?i)[A-Z]:\\" + r"Users\\[^\\\r\n]+\\"),
     re.compile("/" + r"Users/[^/\r\n]+/"),
     re.compile("/" + r"home/[^/\r\n]+/"),
 ]
 
-# Known real operational values from the private source. They are built in
-# pieces so this scanner does not contain the complete forbidden value itself.
-# The bare maintainer display name is included because the public distribution
-# must be reusable: character prompts/defaults/docs should say streamer/operator
-# instead of silently binding a fresh clone to the maintainer's identity.
+# Build every sensitive identity in pieces so this file cannot match itself.
 KNOWN_PRIVATE_LITERALS = (
-    "HuWZx" + "-APkAM",          # historical live/video id
-    "MSI" + " Thin 15",          # one-machine identifier
-    "@bohan" + "yt",             # operator handle
-    "bohan" + "yto",             # historical fixture/operator identifier
-    "@Bohan" + "YT",             # case variant
-    "Bo" + "han",                # maintainer display name in runtime/docs
-    "Antigravity" + "Developer", # private-era VTS developer identifier
+    "HuWZx" + "-APkAM",
+    "MSI" + " Thin 15",
+    "@bohan" + "yt",
+    "bohan" + "yto",
+    "@Bo" + "hanYT",
+    "Bo" + "han",
+    "Antigravity" + "Developer",
 )
 
 TEXT_SUFFIXES = {
