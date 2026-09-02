@@ -46,6 +46,8 @@ jobs:
         run: python scripts/public_privacy_scan.py
       - name: Validate public references
         run: python scripts/public_reference_check.py
+      - name: Validate local imports
+        run: python scripts/public_import_check.py
       - name: Compile Python source
         run: |
           python -m compileall -q -x '(^|/)(venv|\.git|dump|vts-backup)/' .
