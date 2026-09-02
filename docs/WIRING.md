@@ -53,7 +53,7 @@ Bridge membaca `ARTI_SOUL.md` saat runtime. Mulai dari template public:
 copy ARTI_SOUL.example.md ARTI_SOUL.md
 ```
 
-Edit nama co-host, gaya bicara, panggilan streamer, dan aturan bahasa sesuai karakter kamu. File runtime asli digitignore.
+Edit nama co-host, gaya bicara, panggilan streamer, dan aturan bahasa sesuai karakter kamu. File runtime asli di-gitignore.
 
 Opsional:
 
@@ -67,7 +67,7 @@ copy ARTI_MOOD_STATE.example.json ARTI_MOOD_STATE.json
 1. Buka VTube Studio → Settings → API → allow plugins.
 2. Jalankan `python hermes_vtuber_bridge.py`.
 3. Saat diminta VTS, izinkan plugin ARTI.
-4. Token lokal disimpan di file yang digitignore.
+4. Token lokal disimpan di file yang di-gitignore.
 
 Port VTS dapat dioverride lewat `config_local.json`:
 
@@ -117,7 +117,7 @@ Setelah data lokal milikmu sendiri terbentuk, reindex dapat dijalankan sesuai ke
 python arti_vault_rag.py --reindex-all
 ```
 
-Pastikan semua output memory tetap berada di path yang sudah digitignore.
+Pastikan semua output memory tetap berada di path yang sudah di-gitignore.
 
 ## 10. Minecraft
 
