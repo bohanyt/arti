@@ -15,11 +15,11 @@ Jalankan:
     ./venv/Scripts/python.exe arti_dubbing.py --demo-gambar dump --tanpa-suara
 
 Aturan yang dijaga:
-- Privasi v1: OCR HANYA saat window game di depan (foreground). Bohan suka
+- Privasi v1: OCR HANYA saat window game di depan (foreground). streamer suka
   alt-tab — begitu game tidak fokus, mata dubbing MERAM (tidak membaca
   browser/DM). True background-capture (WGC) = v2.
 - Suara dasar Arti yang TERKUNCI tidak disentuh: preset dub = overlay
-  config voice_dsp KHUSUS lajur ini (netral/cowok/cewek — keputusan Bohan:
+  config voice_dsp KHUSUS lajur ini (netral/cowok/cewek — keputusan streamer:
   "cowo direndahin, cewe ditinggiin").
 - Telat lebih buruk daripada skip: antrian ucap maks 2, yang tua dibuang.
 - Tiap baris yang diucap dicatat ke data/dub_log.jsonl — kelak disuapkan

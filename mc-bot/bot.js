@@ -160,7 +160,7 @@ let streamerSeenAt = 0
 function player(name) {
   // bot.players bisa undefined di jendela sempit sebelum spawn / sesudah
   // koneksi putus — terlihat live [date removed]: `error (cmd:follow): Cannot
-  // read properties of undefined (reading 'bohanyto')`.
+  // read properties of undefined (reading 'streamer_test')`.
   const e = bot.players && bot.players[name] && bot.players[name].entity
   if (!e) return null
   // ENTITY HANTU. Audit verifikasi [date removed]: mineflayer TIDAK membersihkan

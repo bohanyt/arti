@@ -54,7 +54,7 @@ async def _nod_smooth(
 ) -> int:
     """Angguk sinus, TAPI hanya selama audio benar-benar berbunyi.
 
-    PELAJARAN 25 Agu 2026 (keluhan Bohan: "pas dia diem ga ada suara, dia
+    PELAJARAN 25 Agu 2026 (keluhan streamer: "pas dia diem ga ada suara, dia
     tetep nodding, jadi keliatan robot banget"). Dulu gerbangnya cuma
     `is_articulating`, yang bernilai benar untuk SELURUH giliran — padahal
     `tts_jeda_antar_kalimat_sec` di config produksi 2,0 detik, jadi kepala

@@ -66,7 +66,7 @@ def sel_berubah_persen(a: bytes | None, b: bytes | None, delta: int = 12) -> flo
     """Persen SEL yang berubah lebih dari `delta` level (0-100).
 
     Metrik UTAMA gerbang. Beda rata-rata saja terbukti salah alat: diukur di
-    layar live Bohan 20 Agu, subtitle satu baris cuma menggeser rata-rata 2,0%
+    layar live streamer 20 Agu, subtitle satu baris cuma menggeser rata-rata 2,0%
     (di bawah ambang 6% yang sempat kupakai — teks penting akan DIBUNGKAM),
     sedangkan sel-berubahnya 5,2% — jauh di atas derau layar diam (0,0-0,9%).
     Perubahan kecil-tapi-berarti itu LOKAL: sedikit sel, tapi berubah tajam.

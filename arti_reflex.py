@@ -4,7 +4,7 @@ MASALAH YANG DIPECAHKAN (terukur di live 2026-08-05): dari dipukul sampai ada
 bunyi apa pun keluar butuh MINIMAL ~6 detik (LLM 5,6-8,9 dtk + sintesis
 0,6-1,3 dtk), dan lebih lama lagi kalau antrean sibuk. Reaksi yang datang 8
 detik sesudah kejadian otomatis terdengar seperti LAPORAN, bukan reaksi —
-sebanyak apa pun prompt-nya diperbaiki. Keluhan Bohan: "terlalu matter of
+sebanyak apa pun prompt-nya diperbaiki. Keluhan streamer: "terlalu matter of
 fact".
 
 CARANYA: satu lapisan refleks di depan pipeline. Kalimat pendek ("Aduh!",
@@ -227,7 +227,7 @@ def sumber_baru(ev: dict | None, limiter, now: float,
                 jeda: float = SUMBER_BARU_SEC) -> bool:
     """Penyerang ini kabar BARU? Sekaligus mencatatnya sebagai sudah dikenal.
 
-    Aturan Bohan 2026-08-07: "kalau lagi dipukulin zombie, trus ada arrow
+    Aturan streamer 2026-08-07: "kalau lagi dipukulin zombie, trus ada arrow
     skeleton nancap, itu boleh dicela; kalau ada spider baru nyerang, itu baru
     boleh cela". Jadi yang menyela adalah PERUBAHAN ancaman, bukan pengulangan.
     """

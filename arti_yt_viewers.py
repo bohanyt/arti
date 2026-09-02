@@ -1,4 +1,4 @@
-"""Jumlah penonton live YouTube → sinyal kehidupan proaktif (spek Bohan 2026-08-03).
+"""Jumlah penonton live YouTube → sinyal kehidupan proaktif (spek streamer 2026-08-03).
 
 Naik = ada yang baru masuk → bangunkan Arti (bump jam kehidupan + bahan
 sapaan). Turun/stabil = BUKAN tanda kehidupan; digabung jam chat/mic,

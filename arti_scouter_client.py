@@ -359,11 +359,11 @@ def _messages(prompt: str) -> list[dict[str, str]]:
 
 
 def _call_cursor(prompt: str, config: dict) -> tuple[str, int]:
-    """Sesi Cursor per-role: default 'scout' (composer-2.5, revisi Bohan
+    """Sesi Cursor per-role: default 'scout' (composer-2.5, revisi streamer
     2026-08-03 — grok tiap menit kemahalan); observer menimpa via
     config["cursor_role"]="observer" (grok-4.5/high, hanya akhir live).
 
-    Keputusan Bohan 2026-08-01: Cursor jadi provider utama (langganan setahun,
+    Keputusan streamer 2026-08-01: Cursor jadi provider utama (langganan setahun,
     pool Cursor Models), chain API gratis turun jadi fallback. Gagal apa pun ->
     raise, supaya loop chain lanjut ke provider berikutnya seperti biasa.
     """

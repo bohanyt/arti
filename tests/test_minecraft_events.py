@@ -85,7 +85,7 @@ def test_quiet_events_never_react():
     for ev in (
         {"ev": "spawned", "pos": {}},
         {"ev": "status", "health": 20},
-        {"ev": "chat", "from": "bohanyto", "text": "halo"},
+        {"ev": "chat", "from": "streamer_test", "text": "halo"},
         {"ev": "task_done", "task": "come"},
     ):
         assert map_event_to_reaction(ev, lim, 100.0, CFG) is None
@@ -94,7 +94,7 @@ def test_quiet_events_never_react():
 STATUS = {
     "ev": "status", "health": 18, "food": 12, "task": "follow",
     "dim": "overworld", "is_night": True, "pos": {"x": 10, "y": 64, "z": -3},
-    "nearby_players": [{"name": "bohanyto", "distance": 2}],
+    "nearby_players": [{"name": "streamer_test", "distance": 2}],
     "nearby_hostiles": [{"kind": "creeper", "distance": 9}],
 }
 
@@ -103,11 +103,11 @@ def test_format_context_status_and_fresh_events():
     events = [
         (100.0, {"ev": "death", "killer": ""}),
         (150.0, {"ev": "status"}),  # status TIDAK diulang di daftar kejadian
-        (190.0, {"ev": "chat", "from": "bohanyto", "text": "sini arti"}),
+        (190.0, {"ev": "chat", "from": "streamer_test", "text": "sini arti"}),
     ]
     out = format_context(STATUS, events, ttl_sec=120.0, now=200.0)
     assert "darah kepotong dikit" in out and "malam" in out
-    assert "bohanyto (2 blok)" in out and "creeper (9 blok)" in out
+    assert "streamer_test (2 blok)" in out and "creeper (9 blok)" in out
     assert "kamu MATI" in out and "sini arti" in out
     assert out.count("dtk lalu") == 2
 
@@ -120,5 +120,5 @@ def test_format_context_ttl_drops_stale():
 
 def test_status_note_summary():
     note = status_note(STATUS)
-    assert "darah kepotong dikit" in note and "malam" in note and "bohanyto" in note
+    assert "darah kepotong dikit" in note and "malam" in note and "streamer_test" in note
     assert status_note(None) == ""

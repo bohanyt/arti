@@ -1,13 +1,13 @@
 """Gerbang ucapan telinga desktop — silero-vad v6, numpang faster-whisper.
 
 Masalah (19 Agu 2026): telinga desktop cuma bergerbang RMS, dan musik itu
-TIDAK sunyi — selama Bohan muter lagu, tiap 5 detik satu potongan terkirim
+TIDAK sunyi — selama streamer muter lagu, tiap 5 detik satu potongan terkirim
 ke Whisper (log 18 Agu: "[Dengar] Музыка", subtitle Norwegia, lirik video
 masak) = kuota kebuang + konteks sampah.
 
 Solusi: VAD lokal (model silero v6 yang SUDAH dibundel faster-whisper —
 tanpa torch, tanpa unduhan baru, CPU ~milidetik) menyaring potongan
-sebelum dikirim. Batas yang diterima Bohan ("lagu vokal tetep lolos
+sebelum dikirim. Batas yang diterima streamer ("lagu vokal tetep lolos
 gapapa"): lirik terdengar sebagai ucapan oleh VAD — lapis keduanya filter
 halusinasi teks yang sudah ada + saklar runtime `dengar off`.
 

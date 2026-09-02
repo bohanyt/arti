@@ -1,6 +1,6 @@
 """Benang obrolan — ingatan dialog lintas giliran proaktif (lapis B).
 
-Lahir dari tes 16 Agu 14.28 (dump Bohan): dalam 9 giliran curious, "sorokan
+Lahir dari tes 16 Agu 14.28 (dump streamer): dalam 9 giliran curious, "sorokan
 kegedean" diungkit 5 balasan BERUNTUN, "teori liar" dinagih 3x, tema "ujian"
 4x. Akarnya: tiap giliran curious itu pulau — Arti tidak ingat dia barusan
 bilang apa dan sudah menagih apa, jadi tiap giliran jatuh ke jangkar terakhir

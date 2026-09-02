@@ -2,19 +2,19 @@
 composer dan Groq (19 Agu 2026).
 
 Riset + probe: docs/research/2026-08-19-codex-chatgpt-plus.md.
-Angka probe di mesin Bohan: server+thread 0,4 dtk; turn dingin 5,8 dtk;
+Angka probe di mesin streamer: server+thread 0,4 dtk; turn dingin 5,8 dtk;
 HANGAT 1,5-3,0 dtk (gpt-5.6-luna) — di bawah kapak suara, kelas composer.
 
 Prinsip (cermin arti_cursor_agent, versi ringkas):
 - SDK openai-codex mengelola `codex app-server` lokal yang PERSISTEN
-  (keputusan Bohan: "sdk app server lokal aja biar persistent") — thread
+  (keputusan streamer: "sdk app server lokal aja biar persistent") — thread
   dipakai ulang antar giliran = hangat + cache konteks.
 - Default MATI (`codex_agent_enabled: False`): ToS abu-abu + kuota
-  jendela-5-jam DIBAGI dengan ChatGPT pribadi Bohan. Nyala = keputusan
+  jendela-5-jam DIBAGI dengan ChatGPT pribadi streamer. Nyala = keputusan
   sadar lewat config_local.
 - HANYA untuk giliran suara (penyelamat saat composer gagal/breaker).
   Kerja latar DILARANG memakai kolam ini — analog aturan #2: kuota ini
-  milik Bohan pribadi, scouter 90-detikan akan menghabiskannya.
+  milik streamer pribadi, scouter 90-detikan akan menghabiskannya.
 - Auth: login ChatGPT tersimpan (~/.codex/auth.json, PLAINTEXT — kelas
   rahasia yang sama dengan .env: jangan pernah dibaca/dicetak).
 - Gagal apa pun -> raise/None cepat, pemanggil jatuh ke Groq. Thread

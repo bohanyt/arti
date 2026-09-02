@@ -1,6 +1,6 @@
 """Desktop audio loopback → dialogue ring (RAM). No auto-trigger to voice pipeline.
 
-Telinga Arti (keputusan Bohan 2026-08-02): SELALU nyala saat live. Anti dobel
+Telinga Arti (keputusan streamer 2026-08-02): SELALU nyala saat live. Anti dobel
 suara Arti sendiri (routing dia: TTS → CABLE → di-"listen" balik ke headset,
 jadi loopback PASTI berisi suara Arti): chunk dicek TTS SEBELUM rekam (skip),
 SESUDAH rekam (ingest menolak), cooldown pasca-TTS, plus jaring similarity
@@ -37,7 +37,7 @@ def pilih_loopback_device(devices, want: str):
     """Pilih device yang benar saat NAMANYA kembar — loopback selalu menang.
 
     Bug 14 Agu 2026: `soundcard.get_microphone(nama, include_loopback=True)`
-    mengembalikan device PERTAMA yang namanya cocok. Di mesin Bohan nama
+    mengembalikan device PERTAMA yang namanya cocok. Di mesin streamer nama
     "Headset (EarPods)" dipakai DUA device sekaligus:
 
         loopback=True   ch=2   <- loopback speaker, yang kita mau
@@ -113,7 +113,7 @@ def make_loopback_record_chunk(
 ) -> Callable[[], "object | None"]:
     """Bangun callable () -> np.float32 mono | None dari loopback WASAPI.
 
-    - `desktop_audio_device` kosong = IKUT default speaker Windows (kalau Bohan
+    - `desktop_audio_device` kosong = IKUT default speaker Windows (kalau streamer
       pindah ke EarPods, capture ikut pindah — dicek ulang tiap chunk).
     - Recorder dibuka sekali dan dipertahankan; error/ganti device = reopen.
     - Import soundcard DI DALAM closure: modul tetap importable tanpa
@@ -127,7 +127,7 @@ def make_loopback_record_chunk(
     - Deadman + kebangkitan: MAX_CAPTURE_FAILS gagal beruntun = telinga
       REHAT `desktop_audio_revival_sec` detik lalu coba bangun SENDIRI —
       bukan mati permanen. Log 2026-08-09 22.31: device kaget sebentar saat
-      Bohan buka instance Prism, 5 gagal x 5 dtk = cuma 25 detik toleransi,
+      streamer buka instance Prism, 5 gagal x 5 dtk = cuma 25 detik toleransi,
       lalu Arti budek sepanjang sisa sesi live. Sesudah rehat, percobaan
       bangunnya SEKALI per siklus (gagal = langsung rehat lagi) supaya
       terminal tidak dibanjiri. revival_sec <= 0 = perilaku lama (permanen).

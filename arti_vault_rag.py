@@ -534,7 +534,7 @@ def prewarm_embedding(config: dict | None = None) -> None:
     Log 18 Agu 22.31: LM Studio me-load Qwen3 dari nol saat request pertama
     datang (~10-16 dtk) sementara timeout query cuma 8 dtk — panggilan RAG
     pertama SELALU timeout dan jatuh ke pencarian kata kunci. Ping ini
-    dipanggil di awal startup wizard: modelnya bangun selagi Bohan masih
+    dipanggil di awal startup wizard: modelnya bangun selagi streamer masih
     menjawab checklist. Timeout ping dilonggarkan sendiri (cold load memang
     lama; justru itu yang sedang dibayar di sini)."""
     cfg = {**DEFAULT_CONFIG, **(config or {}), "lmstudio_embedding_timeout_sec": 90}

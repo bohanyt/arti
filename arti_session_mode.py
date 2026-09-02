@@ -1,12 +1,12 @@
 """Mode sesi Arti — satu sumber kebenaran "sekarang dia lagi jadi apa".
 
-Stream punya 4 kombinasi (spek Bohan 2026-08-04) = (Bohan hadir / Bohan AFK) x
+Stream punya 4 kombinasi (spek streamer 2026-08-04) = (streamer hadir / streamer AFK) x
 (main Minecraft / tidak):
 
-    duet       Bohan nemenin, tidak main  -> Arti temen ngobrol (perilaku lama)
-    duet_game  Bohan nemenin, main game   -> main bareng, Arti nguntit
-    host_chat  Bohan AFK, tidak main      -> ARTI PEGANG SIARAN (mode baru)
-    host_game  Bohan AFK, main game       -> Arti solo gaming stream
+    duet       streamer nemenin, tidak main  -> Arti temen ngobrol (perilaku lama)
+    duet_game  streamer nemenin, main game   -> main bareng, Arti nguntit
+    host_chat  streamer AFK, tidak main      -> ARTI PEGANG SIARAN (mode baru)
+    host_game  streamer AFK, main game       -> Arti solo gaming stream
 
 Modul ini MURNI (tanpa state global, tanpa I/O) supaya bisa dites tanpa bridge.
 Bridge menyimpan satu bool `_host_mode`; "lagi main" dibaca dari runner
@@ -49,8 +49,8 @@ def mode_policy(mode: str, config: dict | None = None) -> dict:
     """Kebijakan proaktif per mode — dibaca gate inisiatif & bridge.
 
     `dormancy_applies` False = aturan "sepi total 5 menit -> diam" TIDAK
-    berlaku. Itu benar untuk semua mode kecuali `duet`: kalau Bohan ada dan
-    ruangan mati total, diam memang jawabannya (keluhan Bohan 2026-08-03,
+    berlaku. Itu benar untuk semua mode kecuali `duet`: kalau streamer ada dan
+    ruangan mati total, diam memang jawabannya (keluhan streamer 2026-08-03,
     "1 jam gaada viewer trus si arti ngomong sendiri"). Begitu dia AFK atau
     lagi main, Arti-lah acaranya — dia harus terus bicara.
     """
@@ -166,7 +166,7 @@ def detect_afk_intent(text: str) -> bool:
     """Streamer barusan pamit pergi? (deterministik, bukan tebakan LLM)
 
     Dipakai sebagai JARING: kalau Arti gagal mengeluarkan [MODE: host] dan
-    Bohan benar-benar pergi, stream mati sampai dia balik — konsekuensinya
+    streamer benar-benar pergi, stream mati sampai dia balik — konsekuensinya
     terlalu mahal untuk mengandalkan LLM saja.
 
     Negator dicek HANYA di depan frasa pamitnya. Audit 2026-08-05: dulu

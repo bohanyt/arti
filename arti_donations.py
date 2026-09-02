@@ -282,7 +282,7 @@ def _find_youtube_ref(obj, depth: int = 0, key: str = ""):
 
 def _parse_sl_mediashare_locked(msg: dict) -> DonationEvent | None:
     """Bentuk PASTI type "mediaShareEvent" — dikunci dari sampel asli live
-    2026-08-02 (data/streamlabs_events_sample.jsonl, share @bohanyt):
+    2026-08-02 (data/streamlabs_events_sample.jsonl, share @streamer_test):
 
       message.event : "newMedia" (baru antre) / "play" (MULAI DIPUTAR di stream)
       message.media : {media: "<ID YouTube 11 char>", media_title, duration(MS!),
@@ -340,7 +340,7 @@ def _parse_sl_mediashare_locked(msg: dict) -> DonationEvent | None:
 
 
 def parse_streamlabs_mediashare(payload) -> list[DonationEvent]:
-    """Parser media share Streamlabs (loyalty points, cap 59 dtk Bohan).
+    """Parser media share Streamlabs (loyalty points, cap 59 dtk streamer).
 
     Type "mediaShareEvent" = bentuk PASTI (terkunci dari sampel asli, lihat
     _parse_sl_mediashare_locked). Nama type lain tetap lewat jalur defensif

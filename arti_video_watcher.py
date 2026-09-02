@@ -5,7 +5,7 @@ Terukur di spike 2026-08-02:
   T1 metadata yt-dlp (tanpa download)             : 2,5 dtk
   T1 transkrip json3 (tanpa download)             : 0,6 dtk
 
-Tangga ingest (internet tidak stabil saat playback — concern Bohan):
+Tangga ingest (internet tidak stabil saat playback — concern streamer):
   T3 Gemini (server-side) -> T1 transkrip (KB-an) -> [T2 frame, HANYA pasca-
   playback & bila dua-duanya gagal] -> metadata saja -> gagal jujur.
 
@@ -51,7 +51,7 @@ def mmss(sec: float) -> str:
 
 
 def frame_times(duration_sec: float, n: int = 10) -> list[int]:
-    """Titik frame per 10% durasi (ide Bohan): video 59 dtk -> 6,12,18,...
+    """Titik frame per 10% durasi (ide streamer): video 59 dtk -> 6,12,18,...
 
     t_k = round(durasi * k/10); titik 0 dan >= durasi dibuang. Otomatis adil
     untuk durasi berapa pun.
@@ -158,7 +158,7 @@ def check_submit_allowed(
 
 
 def format_reaction_trigger(job: VideoJob, digest: str, title: str) -> str:
-    """Trigger reaksi — nada per sumber (keputusan Bohan):
+    """Trigger reaksi — nada per sumber (keputusan streamer):
     saweria = donasi berbayar -> terima kasih + reaksi; streamlabs/chat = kasual.
     """
     who = job.viewer or "seseorang"

@@ -1,12 +1,12 @@
 """Pemoles suara Arti — pelebaran range intonasi + kenaikan pitch berwarna.
 
-Lahir 16 Agu 2026 dari sesi uji dengar Bohan (dump/uji_pitch, skrip
+Lahir 16 Agu 2026 dari sesi uji dengar streamer (dump/uji_pitch, skrip
 scripts/uji_pitch_suara.py + uji_range_suara.py). Latar: suara F1 Supertone
 "kayak pembawa berita" — datar; penonton bilang robotik. Supertonic TIDAK
 punya parameter pitch/prosodi, dan kenop yang ada (voice/speed/steps) SUDAH
-dites Bohan sampai terkunci. Jalan yang tersisa: post-process.
+dites streamer sampai terkunci. Jalan yang tersisa: post-process.
 
-Resep FINAL pilihan kuping Bohan (berkas E3_range_x14_plus2):
+Resep FINAL pilihan kuping streamer (berkas E3_range_x14_plus2):
 
 1. RANGE ×1,4 — PSOLA murni pitch: F0' = median + 1,4 × (F0 − median).
    Naik-turun dilebarkan, nada tengah diam, DURASI TIDAK DISENTUH
@@ -15,7 +15,7 @@ Resep FINAL pilihan kuping Bohan (berkas E3_range_x14_plus2):
    formant juga ("warna ikut naik") — justru itu yang dipilih kupingnya;
    transposisi PSOLA murni (F0 saja) TIDAK terasa naik (uji E_FINAL).
    Durasi dikompensasi DI SINTESIS: bridge meminta Supertone bicara di
-   speed/faktor, resample mengembalikannya — net tetap speed setelan Bohan.
+   speed/faktor, resample mengembalikannya — net tetap speed setelan streamer.
 
 Ongkos terukur: ~23 ms (kalimat pendek) / ~92 ms (13,7 dtk audio) — tidak
 terasa dibanding sintesis ~500-800 ms.

@@ -45,7 +45,7 @@ def is_enabled(config: dict | None) -> bool:
 
 def is_orbit(config: dict | None) -> bool:
     """Mode kamera "orbit": TANPA /spectate sama sekali — kamera di-teleport
-    relatif terhadap badan Arti (`execute at`). Keluhan Bohan 2026-08-09 yang
+    relatif terhadap badan Arti (`execute at`). Keluhan streamer 2026-08-09 yang
     melahirkannya: (1) sudut pandang spectate tidak pernah berubah, (2) "yang
     paling ganggu pas udah mati ga balik lagi ke badan arti". Orbit lolos dari
     keduanya secara struktural: tidak ada kunci yang bisa putus — saat dia

@@ -1,4 +1,4 @@
-"""Renungan — busur mikir keras-keras multi-giliran (permintaan Bohan 20 Agu).
+"""Renungan — busur mikir keras-keras multi-giliran (permintaan streamer 20 Agu).
 
 "ada 'wondering' ga sih? dia ngomong sendiri thinking out loud biar kerekam
 trus otomatis build buat jadi reasoningnya sendiri... kayak storytime gitu,

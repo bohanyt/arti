@@ -1,6 +1,6 @@
 """Tee terminal->disk untuk proses MANDIRI di luar bridge (19 Agu 2026).
 
-Audit Bohan ("loggernya aman ga? otomatis ke disk?"): bridge sudah punya
+Audit streamer ("loggernya aman ga? otomatis ke disk?"): bridge sudah punya
 Tee stdout+stderr sejak import — tapi arti_dubbing dan arti_discord hidup
 sebagai proses terpisah TANPA logger: status/error mereka menguap begitu
 terminal ditutup (fatal untuk Discord yang kelak 24/7 di VM).

@@ -1,6 +1,6 @@
 """Catch-up observer: sesi yang mati tanpa shutdown bersih tetap dirangkum.
 
-Keluhan Bohan 2026-08-10: "beberapa sesi kemaren ada yang ga ke summarize".
+Keluhan streamer 2026-08-10: "beberapa sesi kemaren ada yang ga ke summarize".
 Pipeline observer cuma jalan di SHUTDOWN BERSIH — bridge yang di-force-close,
 crash, atau OOM meninggalkan transcript utuh di disk tapi beats-nya tidak
 pernah ditulis (terbukti: transcript 2026-08-09 berakhir ~23:39, beats

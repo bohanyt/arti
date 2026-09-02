@@ -126,7 +126,7 @@ def test_viewer_nickname_strips_trailing_digits_and_suffix():
         "@abdmanlifyou241": "abdmanli",
         "@Rafi-radio108": "Rafi",
         "@NickyTuan": "Nicky",
-        "@bohanyt": "bohan",
+        "@streamer_test": "bohan",
         "@muhammadfadhilranda7169": "muhammad",
         "@Agen_H1889": "Agen",
         "@dipa3Dmodeller": "dipa",

@@ -753,13 +753,13 @@ CONFIG = {
     "yt_viewer_poll_sec": 30.0,
     # Minecraft — Arti sebagai player di server lokal operator (plan [date removed],
     # Phase 0 GO, Phase 1 = integrasi bridge ini). Nama per-mesin diisi di
-    # config_local (bot: arti_berarti, streamer: bohanyto). Shipped OFF;
+    # config_local (bot: arti_berarti, streamer: streamer_test). Shipped OFF;
     # nyalakan minecraft_enabled di config_local, lalu 'mc on' / [MC: join].
     "minecraft_enabled": False,
     "minecraft_host": "127.0.0.1",
     "minecraft_port": 25565,
     "minecraft_bot_name": "Arti",
-    "minecraft_streamer_name": "Bohan",
+    "minecraft_streamer_name": "Streamer",
     "minecraft_node_path": "node",
     "minecraft_bot_script": "mc-bot/bot.js",
     "minecraft_status_interval_sec": 10,
@@ -1943,7 +1943,7 @@ _viewer_join_note_ts = 0.0
 
 
 def _on_viewer_count_increase(prev: int, count: int) -> None:
-    """Penonton nambah (spek Bohan 2026-08-03: "itu yang ngetrigger si arti
+    """Penonton nambah (spek streamer 2026-08-03: "itu yang ngetrigger si arti
     aja kalo nambah"): bangunkan proaktif + bahan sapaan. Angka penonton
     dilarang disebut Arti (bisa meleset & terdengar sistemik)."""
     global _yt_viewer_count, _last_human_activity_ts
@@ -2037,7 +2037,7 @@ def _apply_session_mode_change(reason: str, *, in_game: bool | None = None) -> N
     scene. Non-blocking: OBS lemot tidak boleh menahan siaran.
 
     `in_game` = paksa nilainya, dipakai jalur JOIN. Alasannya (bug live
-    2026-08-05, log "[Mode] ngobrol bareng Bohan (minecraft_join)"):
+    2026-08-05, log "[Mode] ngobrol bareng streamer (minecraft_join)"):
     `runner.start()` cuma menyalakan thread manajer — proses bot belum ada
     saat baris berikutnya jalan, jadi `is_active()` masih False dan mode
     terbaca `duet`. Akibat nyatanya scene OBS pindah ke scene YANG SALAH
@@ -2059,7 +2059,7 @@ def _set_host_mode(on: bool, reason: str, *, announce: bool = True) -> None:
     Perubahan masuk history (biar Arti tahu dari turn berikutnya). `announce`
     menambah SATU turn proaktif supaya peralihannya kedengaran penonton —
     dimatikan kalau peralihan itu sudah tercakup omongan yang barusan terjadi
-    (Arti sendiri yang bilang "oke aku pegang" lewat tag, atau Bohan barusan
+    (Arti sendiri yang bilang "oke aku pegang" lewat tag, atau streamer barusan
     bersuara), supaya tidak dobel bicara.
     """
     global _host_mode, _afk_armed_ts
@@ -2142,7 +2142,7 @@ def _set_minecraft_goal(goal: str) -> None:
 def _complete_minecraft_goal() -> None:
     """Arti menyatakan misinya kelar ([MC: goal_done]).
 
-    Spek Bohan 2026-08-04: "kalau nemu sebelum live berakhir, dia pause game
+    Spek streamer 2026-08-04: "kalau nemu sebelum live berakhir, dia pause game
     dan ke mode chat sama stream" — jadi misi tuntas = KELUAR dari game, balik
     jadi host ngobrol. Tanpa misi aktif, tag ini diabaikan (anti halusinasi).
     """
@@ -2424,7 +2424,7 @@ def _play_reflex(ev: dict) -> None:
 
 def _reflex_worker(path: str, category: str, line: str, mood: str,
                    eskalasi: bool = False) -> None:
-    """Refleks sebagai giliran bicara MINI (spek Bohan 2026-08-05).
+    """Refleks sebagai giliran bicara MINI (spek streamer 2026-08-05).
 
     Urutan: mata melebar (`aware`) -> lampu bicara + overlay mood selama
     bunyinya -> balik `default`. Dibuat lengkap supaya state tidak nyangkut:
@@ -2554,7 +2554,7 @@ def _execute_reply_tags(
 
     SEMUA bentuk tag dibuang dari teks — valid maupun tidak — supaya tidak
     pernah terucap. Tag yang MENGUBAH SESI (ganti mode, masuk/keluar dunia,
-    pasang/tutup misi) hanya dijalankan kalau turn ini datang dari Bohan
+    pasang/tutup misi) hanya dijalankan kalau turn ini datang dari streamer
     (suara/ketikan/chat dari handle-nya) atau dari Arti sendiri; penonton lain
     cuma boleh memengaruhi aksi kecil. Tanpa gate ini satu penonton iseng bisa
     menyuruh Arti keluar dari game atau ganti misi di tengah jalan.
@@ -2602,7 +2602,7 @@ def _reaksi_penting(text: str) -> bool:
 def _queue_game_reaction(text: str) -> None:
     """Antre reaksi game — yang TERBARU menang, yang penting tak tersentuh.
 
-    Keluhan Bohan 2026-08-05 malam: "kalau ada event dia mati, fokus ke
+    Keluhan streamer 2026-08-05 malam: "kalau ada event dia mati, fokus ke
     matinya dulu" -> kematian menyapu SEMUA reaksi game yang belum terjawab.
     Diperluas 2026-08-10 ("dia masih suka event yang delay... pakai event
     yang latest"): SETIAP reaksi game baru menyapu reaksi game biasa yang
@@ -2663,7 +2663,7 @@ def _queue_game_reaction(text: str) -> None:
 def _game_reaction_expired(trigger) -> bool:
     """Reaksi game yang sudah kedaluwarsa lebih baik dibuang daripada diucapkan.
 
-    Live 2026-08-05 malam: Bohan memukulinya beruntun, antrean game menumpuk,
+    Live 2026-08-05 malam: streamer memukulinya beruntun, antrean game menumpuk,
     dan tiap giliran makan ~10 dtk — komentar "diserang zombie" keluar dua
     menit sesudah zombie-nya mati. Itu yang dia rasakan sebagai "reaksinya
     rada delay". Hanya berlaku untuk `game`: omongan manusia & donasi tidak
@@ -2939,7 +2939,7 @@ def _mc_event_hub(ev: dict) -> None:
 def _spectator_lepas_saat_mati() -> None:
     """Lepaskan spectate SEKETIKA saat Arti mati.
 
-    Keluhan Bohan 2026-08-09: "kalau mati ngejitter soalnya ngespectate
+    Keluhan streamer 2026-08-09: "kalau mati ngejitter soalnya ngespectate
     ghostnya... masa aku klik shift terus". Antara mati dan kunci-ulang di
     respawn ada beberapa detik kamera menempel di mayat/hantu — teleport kecil
     memutus spectate (setara menekan shift), respawn yang mengunci ulang.
@@ -2965,7 +2965,7 @@ def _kamera_f5(tekan_override: int | None = None) -> None:
 
     PostMessage mengantar WM_KEYDOWN langsung ke antrean window itu tanpa
     fokus; GLFW (LWJGL3) membaca pesan window di Windows, jadi peluangnya
-    bagus — tapi efek VISUALNYA hanya bisa dikonfirmasi mata Bohan. Gagal
+    bagus — tapi efek VISUALNYA hanya bisa dikonfirmasi mata streamer. Gagal
     menemukan window = diam (kamera itu hiasan).
     """
     tekan = (int(tekan_override) if tekan_override is not None
@@ -3076,7 +3076,7 @@ _bag_check_last = 0.0
 
 
 def _cek_tas_rutin() -> None:
-    """Sesekali berhenti dan pamerkan isi tas (permintaan Bohan 2026-08-09).
+    """Sesekali berhenti dan pamerkan isi tas (permintaan streamer 2026-08-09).
 
     Hanya saat AMAN (tanpa musuh terdeteksi, darah cukup) — berhenti 6 detik
     di depan skeleton itu bunuh diri. Sesudah tas ditutup dia disuruh jalan
@@ -3166,11 +3166,11 @@ def _spectator_on_event(ev: dict) -> None:
 
 
 def _queue_minecraft_chat_reply(teks: str) -> None:
-    """Bohan ngetik di chat Minecraft -> antre giliran bicara.
+    """streamer ngetik di chat Minecraft -> antre giliran bicara.
 
     trigger_type "mc_chat" dan BUKAN "game": tipe game sengaja dibuang saat
     Arti sibuk (reaksi basi tidak layak antre), sedangkan pertanyaan langsung
-    dari Bohan tidak boleh hilang. "mc_chat" juga dihitung sebagai giliran
+    dari streamer tidak boleh hilang. "mc_chat" juga dihitung sebagai giliran
     PEMILIK — pengirimnya sudah disaring `minecraft_streamer_name` di runner,
     jadi ini memang dia, dan dia harus bisa menyuruh keluar/ganti misi lewat
     chat sama seperti lewat mic.
@@ -3183,7 +3183,7 @@ def _queue_minecraft_chat_reply(teks: str) -> None:
 def _cermin_ke_chat_game(teks: str) -> None:
     """Cerminkan balasan Arti ke chat Minecraft (16 Agu, mabar via e4mc).
 
-    Teman-teman Bohan TIDAK mendengar TTS-nya — tanpa cermin ini Arti bisu di
+    Teman-teman streamer TIDAK mendengar TTS-nya — tanpa cermin ini Arti bisu di
     mata semua orang di server. Mode (minecraft_chat_mirror):
       "tamu"  (default) = hanya saat minecraft_mode_tamu menyala — di server
                sendiri penonton stream sudah mendengar suaranya, chat game
@@ -3209,7 +3209,7 @@ def _cermin_ke_chat_game(teks: str) -> None:
 def _queue_minecraft_chat_pemain(teks: str, nama: str) -> None:
     """Chat pemain LAIN di game (16 Agu, mabar) -> antre giliran bicara.
 
-    Teman-teman Bohan tidak mendengar TTS Arti — chat game adalah satu-satunya
+    Teman-teman streamer tidak mendengar TTS Arti — chat game adalah satu-satunya
     kanal mereka. Pengirim sudah disaring runner (bukan kamera, bukan bot
     layanan, bukan '!command'). NAMA disebut di trigger supaya Arti tahu siapa
     yang ngajak ngobrol dan bisa membalas dengan nama — persona-nya memang
@@ -3406,7 +3406,7 @@ def _invsee_show(alasan: str) -> None:
 
 
 def _note_streamer_text_for_minecraft(text: str) -> None:
-    """Perintah masuk/keluar Minecraft langsung dari kalimat Bohan.
+    """Perintah masuk/keluar Minecraft langsung dari kalimat streamer.
 
     Live 2026-08-05 malam: dia tiga kali menyuruh "arti, coba buka minecraft
     deh" dan Arti tidak pernah masuk. Bukan bug logika — giliran yang dipicu
@@ -4095,7 +4095,7 @@ class VTSController:
 
         `fade` (detik) memakai `fadeTime` milik VTS supaya ekspresi MELELEH,
         bukan dipotong. Ditambahkan 27 Agu: linger emosi menahan mood lalu
-        mematikannya seketika, dan Bohan melihatnya sebagai "ga pelan pelan
+        mematikannya seketika, dan streamer melihatnya sebagai "ga pelan pelan
         ilang" — memang, karena yang dibuat cuma penundaan, bukan peredupan.
         VTS mendokumentasikan rentang 0-2 detik, jadi dijepit di 2.
         """
@@ -5468,7 +5468,7 @@ def transcribe_audio(audio_array, samplerate=16000, use_groq=True, *,
 def donation_alert_delay_sec(message: str, config: dict | None = None) -> float:
     """Berapa lama nunggu alert donasi overlay selesai sebelum Arti bereaksi.
 
-    Bohan 2026-08-02: alert OBS punya audio sendiri — "si X donasi Rp Y"
+    streamer 2026-08-02: alert OBS punya audio sendiri — "si X donasi Rp Y"
     (±4 detik) lalu pesannya DIBACAKAN. Arti tidak boleh tabrakan suara.
     Estimasi: base (nama+nominal+jingle) + waktu baca pesan per karakter,
     di-cap. base <= 0 = tanpa tunda (perilaku instan).
@@ -5505,7 +5505,7 @@ _media_playback_until = 0.0
 def hold_media_playback(seconds: float) -> None:
     """Media share mulai diputar overlay: potong TTS Arti + tahan turn baru.
 
-    Use case Bohan: Arti lagi ngomong -> video nongol di tengah layar ->
+    Use case streamer: Arti lagi ngomong -> video nongol di tengah layar ->
     dia BERHENTI, nonton bareng, komentar setelah selesai.
     """
     global _media_playback_until
@@ -6379,7 +6379,7 @@ def text_input_worker():
     Ketik pesan + Enter di window bridge:
       halo arti apa kabar        → dijawab seperti omongan streamer (jalur PTT)
       yt arti kamu nyala?        → simulasi chat YT dari handle default
-                                   (CONFIG["yt_default_viewer"], mis. @bohanyt)
+                                   (CONFIG["yt_default_viewer"], mis. @streamer_test)
       yt @seseorang: pesan       → simulasi chat YT dari viewer tertentu
     """
     global _media_playback_until, _desktop_listen_enabled
@@ -6536,7 +6536,7 @@ def _desktop_groq_keys() -> list[str]:
     """Pool kunci Groq KHUSUS telinga: semua env GROQ_API_KEY_<apapun>.
 
     Kunci utama GROQ_API_KEY (tanpa underscore ekor) SENGAJA dikecualikan —
-    itu jatah ASR mic. Bohan nambah akun: tinggal tambah GROQ_API_KEY_xxx di
+    itu jatah ASR mic. streamer nambah akun: tinggal tambah GROQ_API_KEY_xxx di
     .env, pool otomatis membesar (2026-08-03: _bo, _g, _g2 = 3 kunci = 12K
     request whisper/hari khusus telinga)."""
     seen: list[str] = []
@@ -6629,7 +6629,7 @@ def refresh_vision_for_turn(user_speech: str = "") -> None:
 
     Kalau omongan turn INI menyinggung layar ("layar", "screen", "lihat", ...)
     tapi jendela vision belum terbuka, buka dulu — jangan tunggu timer scouter.
-    Terbukti di sesi live 2026-08-01: Bohan tanya "yang lagi ada di layar aku apa"
+    Terbukti di sesi live 2026-08-01: streamer tanya "yang lagi ada di layar aku apa"
     SEBELUM scouter sempat membuka jendela, jadi Arti menjawab tanpa data dan
     mengarang ("aku lagi nonton video YouTube"). Scouter baru membuka jendelanya
     SETELAH pertanyaan lewat. Mekanisme bukanya sama persis dengan scouter
@@ -7193,7 +7193,7 @@ def load_viewer_context():
 def viewer_block_for(viewer_name: str | None) -> str:
     """Blok profil SATU penonton — hanya untuk turn di mana dia benar-benar chat.
 
-    Menggantikan dump statis semua penonton di system prompt. Keputusan Bohan
+    Menggantikan dump statis semua penonton di system prompt. Keputusan streamer
     2026-08-01: "ambil soal mereka kalau mereka nanya aja, gausah penuhin context
     kalau mereka belum terbukti ada". Dump lama berisi SEMUA penonton (23 baris,
     ~900 char, ~230 token) di TIAP turn walau tidak ada penonton sama sekali —
@@ -8075,7 +8075,7 @@ def groq_chat_completion(
 
 
 def _codex_cfg_untuk_kelas(user_speech: str, cfg: dict) -> dict:
-    """Naikkan effort Luna khusus kelas jawaban berat (usul Bohan 27 Agu).
+    """Naikkan effort Luna khusus kelas jawaban berat (usul streamer 27 Agu).
 
     Kelasnya dihitung dari mesin panjang-jawaban yang SUDAH ada
     (`arti_reply_policy`), jadi tidak ada penilai kedua yang bisa berbeda
@@ -9843,8 +9843,8 @@ def _ada_penonton() -> bool:
     jumlah penonton live (>0; -1 = bukan live/belum diketahui) atau ada
     yang chat dalam 10 menit terakhir. Nol dua-duanya = dia sendirian.
 
-    Bohan SENDIRI tidak dihitung sebagai penonton. Live 14 Agu 2026: tiga
-    pesan tes "asd"/"asdas"/"d" dari @bohanyt membuat fungsi ini True,
+    streamer SENDIRI tidak dihitung sebagai penonton. Live 14 Agu 2026: tiga
+    pesan tes "asd"/"asdas"/"d" dari @streamer_test membuat fungsi ini True,
     register SENDIRIAN tidak pernah menyala, dan Arti menyapa "Penonton" di
     9 dari 12 balasan padahal siarannya offline. Dia menguji streamnya
     sendiri — itu bukan audiens.
@@ -9861,11 +9861,11 @@ def _ada_penonton() -> bool:
 
 
 def _append_host_context(llm_system: str) -> str:
-    """Blok mode sesi: Bohan lagi nemenin, atau Arti yang pegang siaran.
+    """Blok mode sesi: streamer lagi nemenin, atau Arti yang pegang siaran.
 
-    Selalu ada (bukan cuma saat host mode) — saat Bohan hadir pun Arti perlu
+    Selalu ada (bukan cuma saat host mode) — saat streamer hadir pun Arti perlu
     tahu CARA pamitnya, supaya kalimat "aku afk ya" bisa dia terjemahkan jadi
-    tag tanpa Bohan menyentuh keyboard.
+    tag tanpa streamer menyentuh keyboard.
     """
     if not CONFIG.get("host_mode_enabled", True):
         return llm_system
@@ -9958,7 +9958,7 @@ def _append_minecraft_context(llm_system: str) -> str:
         if _garis:
             block += "\n\n" + _garis + "\n"
     # SIAPA SIAPA di dunia ini (permintaan operator [date removed]: "dia harusnya
-    # sadar kalau bohanyto itu aku, dan kamera aku juga"). Tanpa ini dia cuma
+    # sadar kalau streamer_test itu aku, dan kamera aku juga"). Tanpa ini dia cuma
     # melihat dua nama asing di `nearby_players`, dan akun kamera yang selalu
     # menempel padanya bisa dia sapa seolah penonton yang baru datang.
     _nama_bohan = str(CONFIG.get("minecraft_streamer_name") or "").strip()
@@ -10974,7 +10974,7 @@ def _save_config_to_file():
     2. PERCUMA: _load_local_config() dijalankan SETELAH CONFIG didefinisikan
        dan MENANG (CONFIG.update). Karena youtube_video_id/chat_enabled ada
        di config_local, "default" yang ditulis ke source selalu ditelan
-       overlay lokal di sesi berikutnya — Bohan bisa tekan Enter ("keep")
+       overlay lokal di sesi berikutnya — streamer bisa tekan Enter ("keep")
        lalu bridge polling video ID LAMA sepanjang sesi.
     Menulis ke config_local.json membereskan keduanya: gitignored, dan
     di atas overlay source.

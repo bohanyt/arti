@@ -1,13 +1,13 @@
 """Arti di Discord — Fase 1: bot teks di channel khusus (17 Agu 2026).
 
-Proses MANDIRI, bukan bagian bridge (keputusan Bohan: Arti online di
+Proses MANDIRI, bukan bagian bridge (keputusan streamer: Arti online di
 Discord kapan pun proses ini hidup, siaran atau tidak; nanti pindah ke VM
 always-free — lihat docs/plans/2026-08-17-arti-discord.md).
 
 Jalankan:  ./venv/Scripts/python.exe arti_discord.py
 
 Prinsip yang TIDAK boleh dilanggar:
-- Token dari env `DISCORD_BOT_TOKEN` (.env, ditempel Bohan sendiri) —
+- Token dari env `DISCORD_BOT_TOKEN` (.env, ditempel streamer sendiri) —
   jangan pernah dicetak.
 - Gate pemilik (pelajaran mc_chat_pemain 16 Agu): pesan member biasa boleh
   DIOBROLIN, tidak bisa MENYETIR. Fase 1 malah tidak punya jalur perintah

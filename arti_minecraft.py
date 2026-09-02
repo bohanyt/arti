@@ -918,7 +918,7 @@ def food_phrase(food) -> str:
 def hp_phrase(hp, hp_max: int = 20) -> str:
     """Darah dalam bahasa manusia, bukan angka.
 
-    Keluhan Bohan 2026-08-05 malam: "masih terlalu matter of fact... dia sebut
+    Keluhan streamer 2026-08-05 malam: "masih terlalu matter of fact... dia sebut
     hp sisa berapa, kan gaada yang ngomong gitu — harusnya kalau deket setengah
     ya 'darah tinggal setengah', kalau tinggal 1 heart bilang 1 heart."
     Di Minecraft 2 HP = 1 hati, jadi angkanya dikonversi ke hati.
@@ -2045,11 +2045,11 @@ _LABEL_TERLIHAT = {
 
 
 def penglihatan_line(status: dict | None) -> str:
-    """Apa yang MATANYA lihat + jaraknya (Bohan 12 Agu: "penglihatannya rada
+    """Apa yang MATANYA lihat + jaraknya (streamer 12 Agu: "penglihatannya rada
     deket buat scanning").
 
     Sebelum ada ini, prompt cuma memuat entity + isi tas — Arti buta terhadap
-    sumber daya, jadi ketika Bohan menyuruh cari kayu dia menjawab jujur
+    sumber daya, jadi ketika streamer menyuruh cari kayu dia menjawab jujur
     "emang nggak kelihatan" (live 22.40) padahal hutan bisa 25 blok di
     sebelahnya. Jarak disebut supaya dia (dan nudge) bisa memutuskan, bukan
     menebak. "" kalau bot tidak melapor apa pun.
@@ -2153,7 +2153,7 @@ class MinecraftRunner:
                 "--host", str(cfg.get("minecraft_host", "127.0.0.1")),
                 "--port", str(cfg.get("minecraft_port", 25565)),
                 "--username", str(cfg.get("minecraft_bot_name", "Arti")),
-                "--streamer", str(cfg.get("minecraft_streamer_name", "Bohan")),
+                "--streamer", str(cfg.get("minecraft_streamer_name", "Streamer")),
                 "--status-interval", str(cfg.get("minecraft_status_interval_sec", 10)),
                 # POV penonton: 0 = mati (bot.js tidak menyentuh
                 # prismarine-viewer sama sekali kalau portnya 0).
@@ -2335,15 +2335,15 @@ class MinecraftRunner:
             pass
 
     def _balas_chat_streamer(self, teks: str, now: float, nama: str | None = None) -> None:
-        """Chat in-game Bohan -> Arti BENAR-BENAR menjawab.
+        """Chat in-game streamer -> Arti BENAR-BENAR menjawab.
 
         Sebelum ini chat-nya cuma masuk ingatan: dia mengingatnya, tapi tidak
-        pernah membalas. Untuk mabar itu bikin pincang — Bohan mengetik dan
+        pernah membalas. Untuk mabar itu bikin pincang — streamer mengetik dan
         Arti diam saja, jadi satu-satunya cara ngobrol adalah pegang mic.
 
         Sengaja lewat hook `streamer_chat` terpisah, bukan `queue_reaction`:
         reaksi game boleh dibuang saat sibuk (reaksi basi tidak layak antre),
-        sedangkan pertanyaan langsung dari Bohan tidak boleh hilang.
+        sedangkan pertanyaan langsung dari streamer tidak boleh hilang.
         """
         balas = self._hooks.get("streamer_chat")
         if not callable(balas):

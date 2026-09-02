@@ -4,7 +4,7 @@ Modul ini TIDAK menyentuh bridge. Ia menyediakan satu API blocking —
 :func:`send_turn` — yang menerima prompt jadi dan mengembalikan teks balasan.
 
 KENAPA ADA
-Bohan langganan Cursor. Composer 2.5 ditarik dari "Cursor Models pool" yang sudah
+streamer langganan Cursor. Composer 2.5 ditarik dari "Cursor Models pool" yang sudah
 termasuk langganan (beda dari API pool pihak ketiga, yang kuotanya sudah habis). Jadi
 menjawab chat viewer lewat Composer memakai resource yang sudah dibayar.
 
@@ -231,7 +231,7 @@ _warned_unknown_roles: set[str] = set()
 def resolve_role_model(role: str, config: dict | None = None) -> tuple[str, str | None]:
     """(model_id, effort) untuk satu role. Pure — target unit test.
 
-    Peran — SEMUA composer-2.5 NOT FAST (revisi Bohan 2026-08-10: "biar
+    Peran — SEMUA composer-2.5 NOT FAST (revisi streamer 2026-08-10: "biar
     hemat, harus composer 2.5 NOT FAST deh, grok 4.5 gausah dulu, i feel
     composer is smart enough" — MENGGANTIKAN keputusan 2026-08-03 yang masih
     menahan observer di grok-high dan lookup di grok-low; grok-high pernah

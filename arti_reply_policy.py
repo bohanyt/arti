@@ -96,10 +96,10 @@ _HANDLE_IN_WRAPPER_RE = re.compile(r"Viewer\s+(@\S+)")
 def viewer_nickname(handle: str, max_len: int = 8) -> str:
     """Nama panggilan pendek (±2-3 suku kata) dari handle viewer.
 
-    Concern Bohan 2026-08-02: TTS membaca handle utuh termasuk angka ekor —
+    Concern streamer 2026-08-02: TTS membaca handle utuh termasuk angka ekor —
     "abdmanlifyou241" jadi panjang dan kaku. Aturan: buang @, buang angka/
     separator ekor, ambil kata pertama (pecah camelCase & _-.), buang suffix
-    platform (bohanyt -> bohan), potong maksimal `max_len` huruf.
+    platform (streamertest -> bohan), potong maksimal `max_len` huruf.
     """
     h = (handle or "").strip().lstrip("@")
     if not h:
@@ -276,7 +276,7 @@ def resolve_reply_plan(
 
     - yt        : ladder adaptif lama (brief/normal/deep/gacha/rant)
     - inisiatif : celetukan Arti sendiri -> pendek, tetap (bawaan 1 kalimat)
-    - streamer  : ucapan Bohan -> ladder yang sama, dinilai dari kalimatnya
+    - streamer  : ucapan streamer -> ladder yang sama, dinilai dari kalimatnya
     """
     jenis = jenis_giliran(user_speech)
     if jenis == "yt":

@@ -1,6 +1,6 @@
-"""Menebak apakah Bohan SUDAH selesai bicara, dari teks transkripnya.
+"""Menebak apakah streamer SUDAH selesai bicara, dari teks transkripnya.
 
-Kenapa ada: ekor sunyi PTT dipatok 5,0 detik atas permintaan Bohan sendiri
+Kenapa ada: ekor sunyi PTT dipatok 5,0 detik atas permintaan streamer sendiri
 (12 Agu 2026, "aku lemot mikir") supaya dia tidak kepotong saat menimbang
 kata. Itu keputusan yang benar — TAPI harganya dibayar oleh SETIAP ucapan,
 termasuk yang jelas-jelas sudah selesai seperti "iya", "gas", atau "hah?".
@@ -24,7 +24,7 @@ biasanya lebih pendek daripada hening sesudah kalimat benar-benar habis.
 
 ATURAN TARUHAN: kalau ragu, bilang BELUM selesai. Salah tebak "belum" cuma
 membuat Arti menunggu seperti sekarang (tidak ada yang rusak). Salah tebak
-"sudah" berarti Bohan dipotong di tengah kalimat — persis keluhan yang dulu
+"sudah" berarti streamer dipotong di tengah kalimat — persis keluhan yang dulu
 melahirkan ekor 5 detik ini.
 """
 

@@ -247,10 +247,10 @@ def _policy(mode: str, config: dict) -> dict:
 def is_dormant(
     config: dict, *, now: float, last_human_ts: float, mode: str = "duet"
 ) -> bool:
-    """Ruangan mati total? (revisi spek Bohan 2026-08-03)
+    """Ruangan mati total? (revisi spek streamer 2026-08-03)
 
-    BERGANTUNG MODE (spek Bohan 2026-08-04): aturan "sepi = diam" hanya
-    berlaku di mode `duet` — Bohan hadir dan tidak ada acara. Begitu dia AFK
+    BERGANTUNG MODE (spek streamer 2026-08-04): aturan "sepi = diam" hanya
+    berlaku di mode `duet` — streamer hadir dan tidak ada acara. Begitu dia AFK
     (`host_chat`) atau Arti lagi main game (`duet_game`/`host_game`), Arti-lah
     acaranya dan dia HARUS terus bicara. Kebijakannya di arti_session_mode.
 
@@ -263,7 +263,7 @@ def is_dormant(
     <= 0 = fitur mati (perilaku lama). last_human_ts 0/None = belum ada
     data (startup) -> jangan blokir. Jumlah penonton NAIK juga dihitung
     tanda kehidupan (bridge bump timestamp via telemetri arti_yt_viewers);
-    spek final Bohan: turun + 5 menit tanpa chat/mic = off."""
+    spek final streamer: turun + 5 menit tanpa chat/mic = off."""
     if not _policy(mode, config)["dormancy_applies"]:
         return False
     dormant_sec = float(config.get("initiative_dormant_after_idle_sec", 300.0))
@@ -304,7 +304,7 @@ def should_fire_initiative(
     last_human_ts: float = 0.0,
     mode: str = "duet",
 ) -> bool:
-    """Boleh buka topik sendiri sekarang? Spek final Bohan 2026-08-02:
+    """Boleh buka topik sendiri sekarang? Spek final streamer 2026-08-02:
 
     1. `initiative_quiet_sec` (30) sejak ARTI terakhir bicara — bales chat,
        bales streamer, atau monolognya sendiri, semuanya menghitung.
@@ -314,11 +314,11 @@ def should_fire_initiative(
     Chat penonton yang ngobrol sendiri TIDAK ngeblok — kalau ruangan kosong,
     justru Arti yang harus banyak ngomong.
 
-    Cadence: `initiative_backoff_base_sec` <= 0 (setelan Bohan) = FLAT tiap 30
+    Cadence: `initiative_backoff_base_sec` <= 0 (setelan streamer) = FLAT tiap 30
     detik; > 0 = eskalasi eksponensial (dobel, cap backoff_max) untuk yang mau
     Arti makin kalem di ruangan kosong.
 
-    MODE ACARA (`mode` != "duet", spek Bohan 2026-08-04): saat Arti pegang
+    MODE ACARA (`mode` != "duet", spek streamer 2026-08-04): saat Arti pegang
     siaran atau lagi main game, jeda dipakai dari kebijakan mode (lebih rapat),
     dormansi tidak berlaku, dan eskalasi backoff dilewati — pembawa acara tidak
     boleh makin diam justru saat dia yang harus mengisi. Pagar anti-motong
@@ -463,7 +463,7 @@ def build_minecraft_narration_prompt(
 
     Framing sengaja beda dari inisiatif biasa: tidak ada kalimat "stream lagi
     hening" (dia lagi main, bukan nunggu), dan dia didorong bicara soal
-    kejadian/aksi/rencana — persis permintaan Bohan "like a streamer".
+    kejadian/aksi/rencana — persis permintaan streamer "like a streamer".
     """
     global _mc_angle_idx
     if angle_idx is None:
@@ -508,10 +508,10 @@ _host_angle_idx = 0
 def build_host_prompt(
     material: str, *, greet_note: str = "", angle_idx: int | None = None
 ) -> str:
-    """Turn proaktif saat ARTI PEGANG SIARAN (Bohan AFK).
+    """Turn proaktif saat ARTI PEGANG SIARAN (streamer AFK).
 
     Beda framing dari inisiatif biasa: dia bukan "mengisi keheningan sambil
-    nunggu Bohan", dia PEMBAWA ACARANYA. Marker "[Arti pegang siaran]" dibaca
+    nunggu streamer", dia PEMBAWA ACARANYA. Marker "[Arti pegang siaran]" dibaca
     ulang arti_voice_pipeline untuk memilih instruksi turn yang tepat.
     """
     global _host_angle_idx

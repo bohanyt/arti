@@ -1,6 +1,6 @@
 """Panel craft melayang — display entity vanilla, tanpa plugin/mod di server.
 
-Kebutuhan Bohan (2026-08-07): "aku pengen liat dia crafting dari POV kamera
+Kebutuhan streamer (2026-08-07): "aku pengen liat dia crafting dari POV kamera
 ini" — UI craft yang terlihat dari luar, setengah tembus pandang, bukan GUI
 yang cuma ada di klien pemain yang crafting.
 
@@ -10,7 +10,7 @@ item/teks/blok melayang, terlihat SEMUA pemain, dan bisa disummon lewat RCON.
 Jadi panelnya dirakit dari entity biasa — tidak perlu mod di klien kamera,
 tidak perlu overlay OBS, dan penonton YouTube melihat hal yang sama.
 
-Diverifikasi langsung di server Bohan (Paper 1.21.4), bukan dari dokumentasi:
+Diverifikasi langsung di server streamer (Paper 1.21.4), bukan dari dokumentasi:
 
   * `summon item_display` / `text_display` / `block_display` -> jalan.
   * TIDAK bisa ditempelkan ke pemain — `/ride ... mount <pemain>` dijawab
@@ -20,7 +20,7 @@ Diverifikasi langsung di server Bohan (Paper 1.21.4), bukan dari dokumentasi:
     cuma ~3x/detik, dan sekaligus jadi animasi barang meluncur dari kanan
     bawah tanpa trik apa pun.
   * `text_display` berisi spasi TIDAK menggambar latar. Sempat dipakai lempeng
-    `block_display` (kaca hitam) sebagai latar, lalu DIBUANG: Bohan cuma mau
+    `block_display` (kaca hitam) sebagai latar, lalu DIBUANG: streamer cuma mau
     ikon + label, dan lempeng itu yang paling kentara menembus blok dunia.
 
 Modul ini MURNI: semua fungsi mengembalikan string perintah. Yang mengirim ke
@@ -163,7 +163,7 @@ def bagian(grid, size: int):
     """Daftar (nama_tag, dx, dy, depan) untuk satu panel. Urutan = urutan tp.
 
     TANPA latar. Dulu ada lempeng kaca hitam di belakang resepnya; dibuang
-    atas permintaan Bohan 2026-08-07 ("grey panenya gausah deh, yang nurut
+    atas permintaan streamer 2026-08-07 ("grey panenya gausah deh, yang nurut
     cuma icon iconnya aja sama label"). Lempeng itu juga yang paling kelihatan
     menembus blok dunia.
     """
