@@ -20,7 +20,7 @@ edge-tts==7.2.8           # TTS fallback (engine utama: Supertone di venv312)
 numpy==2.4.6              # resampling audio + embedding vault RAG
 requests==2.34.2          # semua HTTP API (Groq, Gemini, OpenRouter, YT innertube)
 websockets==16.0          # VTube Studio API + subtitle server OBS
-python-dotenv==1.2.2      # load .env (opsional — arti_env.py punya fallback manual)
+python-dotenv==1.2.3      # load .env (opsional — arti_env.py punya fallback manual)
 
 # --- Input / hotkey ---
 keyboard==0.13.5          # hotkey keyboard PTT
