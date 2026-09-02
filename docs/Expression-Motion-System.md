@@ -541,13 +541,13 @@ C:\Program Files (x86)\Steam\steamapps\common\VTube Studio\
 |------|---------|
 | `vts_token.txt` | VTS API authentication token (shared by both websockets) |
 | Plugin name: `HermesVTuberBridge` | Registered in VTS |
-| Plugin developer: `AntigravityDeveloper` | Registered in VTS |
+| Plugin developer: `YourDeveloperName` | Registered in VTS |
 
 ---
 
 ## Appendix: Streamer Feedback (2026-06-01)
 
-After implementing the smooth FaceAngle injection system, the streamer (Bohan) gave live feedback:
+After implementing the smooth FaceAngle injection system, the streamer (streamer) gave live feedback:
 
 > - "Eh bagus gerakannya" ✅
 > - "...pelan gitu..." ✅  

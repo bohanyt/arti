@@ -30,7 +30,7 @@ function arg(name, fallback) {
 const HOST = arg('host', '127.0.0.1')
 const PORT = parseInt(arg('port', '25565'), 10)
 const USERNAME = arg('username', 'Arti')
-const STREAMER = arg('streamer', 'Bohan')
+const STREAMER = arg('streamer', 'streamer')
 const STATUS_SEC = parseInt(arg('status-interval', '10'), 10)
 // POV penonton (Phase 3): prismarine-viewer menyiarkan pandangan Arti ke
 // halaman web lokal, lalu OBS memasangnya sebagai Browser Source. 0 = mati.

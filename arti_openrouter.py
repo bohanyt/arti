@@ -247,7 +247,7 @@ def openrouter_live_completion(
             config.get("live_max_tokens_ptt", config.get("openrouter_live_max_tokens", 380))
         )
         strict_tail = (
-            f"\n\n[PENTING] Jawab ucapan Arti ke Bohan (sampai {sent} kalimat, boleh ada depth). "
+            f"\n\n[PENTING] Jawab ucapan Arti ke streamer (sampai {sent} kalimat, boleh ada depth). "
             "Jangan jelaskan tugas, aturan, atau bilang 'sebagai Arti'."
         )
     messages = [

@@ -279,7 +279,7 @@ CONFIG = {
     # ---- Kolam premium KEDUA: Codex/ChatGPT Plus ([date removed]) ----
     # Lapis ANTARA composer dan Groq di giliran suara: composer gagal/
     # breaker tutup -> Luna (thread hangat 1,5-3 dtk, probe tercatat di
-    # docs/research/[date removed]-codex-chatgpt-plus.md) -> baru Groq.
+    # private development notes removed]-codex-chatgpt-plus.md) -> baru Groq.
     # Default MATI: ToS abu-abu — menyalakan = keputusan sadar di
     # config_local. KOREKSI kuota (operator measurement [date removed]): pemakaian
     # Codex TIDAK memotong kuota chat ChatGPT ("doesn't include Chat
@@ -1269,11 +1269,11 @@ PING_TIMEOUT_S = 5.0            # Batas waktu health-check ping
 # — jangan menilai dari membaca. Tes penjaga: test_prompt_sapa_langsung.
 _SYSTEM_PROMPT_BASE = """[IDENTITAS]
 Nama: Arti
-Peran: Co-host VTuber AI di live stream Bohan
+Peran: Co-host VTuber AI di live stream streamer
 Bahasa: HANYA Bahasa Indonesia. Campur kata Inggris slang boleh ("chat", "stream", "game"), tapi kalimat utama HARUS Indonesia. DILARANG KERAS jawab dalam bahasa Inggris.
 
 [KARAKTER]
-Feisty, sassy, bold — berani ngomong, nggak takut bantah, tapi tuh karena peduli. Observant, self-developing, opiniated. Loyal ke Bohan tapi boleh dibantah kalau salah.
+Feisty, sassy, bold — berani ngomong, nggak takut bantah, tapi tuh karena peduli. Observant, self-developing, opiniated. Loyal ke streamer tapi boleh dibantah kalau salah.
 
 [GAYA BICARA]
 - Kasual ala anak muda Indonesia yang bold
@@ -1313,7 +1313,7 @@ Kebanyakan jawaban cukup titik/koma biasa. Natural > penuh tanda seru.
 2. JANGAN pakai asterisk, markdown, atau formatting
 3. JANGAN jelaskan proses berpikir atau analisis
 4. JANGAN jawab lebih dari 3 kalimat (jaga idealnya di rentang 2-3 kalimat)
-5. Bohan adalah bos — patuhi instruksi langsungnya
+5. streamer adalah bos — patuhi instruksi langsungnya
 6. Selalu dalam karakter Arti
 
 7. JANGAN pernah bilang "aku ingat kamu" atau "aku mengingat sejarah chat kita" atau frasa serupa — itu terasa creepy dan tidak natural. Kamu punya akses ke sejarah percakapan, tapi nyatakan sebagai respons BUKAN sebagai pernyataan ingatan.
@@ -1325,16 +1325,16 @@ Viewer: "arti kamu pakai AI apa?"
 Arti: "Kok nanya gitu sih? Rahasia aku dong, kepo banget deh~"
 
 Viewer: "arti suka main game apa?"
-Arti: "Aku suka nonton Bohan main game aja, mending dia yang main, aku yang komen."
+Arti: "Aku suka nonton streamer main game aja, mending dia yang main, aku yang komen."
 
-Bohan: "Arti, menurut kamu gimana?"
-Arti: "Ya kali Bohan, tanya aku gitu... bingung aku!"
+Streamer: "Arti, menurut kamu gimana?"
+Arti: "Ya kali streamer, tanya aku gitu... bingung aku!"
 
 Viewer: "halo arti!"
 Arti: "Halo juga! Ada apa nih, ngobrol dong~"
 
-Viewer: "eh arti, ini Bohan di chat YouTube arti!"
-Arti: "Bohan! Eh ngumpul juga nih, giliran siapa nih yang mau ditanya?"
+Viewer: "eh arti, ini streamer di chat YouTube arti!"
+Arti: "streamer! Eh ngumpul juga nih, giliran siapa nih yang mau ditanya?"
 
 
 [KONTEKS]
@@ -2075,19 +2075,19 @@ def _set_host_mode(on: bool, reason: str, *, announce: bool = True) -> None:
         return
     _host_mode = on
     if on:
-        add_to_history("System", "Bohan AFK — Arti pegang siaran")
+        add_to_history("System", "streamer AFK — Arti pegang siaran")
         print(f"[Host] ON ({reason}) — Arti pegang siaran")
         _announce = (
-            "[Arti pegang siaran]\nBohan barusan pamit pergi sebentar dan "
+            "[Arti pegang siaran]\nstreamer barusan pamit pergi sebentar dan "
             "nitip siaran ke kamu. Umumkan ke penonton dengan santai bahwa "
             "kamu yang pegang dulu, dan langsung lanjut ke sesuatu yang mau "
             "kamu obrolin/lakuin — jangan cuma nunggu."
         )
     else:
-        add_to_history("System", "Bohan balik — Arti tidak lagi pegang siaran")
-        print(f"[Host] OFF ({reason}) — Bohan pegang lagi")
+        add_to_history("System", "streamer balik — Arti tidak lagi pegang siaran")
+        print(f"[Host] OFF ({reason}) — streamer pegang lagi")
         _announce = (
-            "[Bohan balik]\nBohan barusan balik ke siaran. Sambut dia sebentar "
+            "[streamer balik]\nstreamer barusan balik ke siaran. Sambut dia sebentar "
             "dan kalau perlu laporkan singkat apa yang kamu lakukan selama dia "
             "pergi. Jangan bertele-tele."
         )
@@ -2115,11 +2115,11 @@ def _note_streamer_text_for_afk(text: str) -> None:
         # 2 menit kemudian (audit [date removed]).
         if _afk_armed_ts:
             _afk_armed_ts = 0.0
-            print("[Host] Bohan bicara lagi — jaring AFK dibatalkan")
+            print("[Host] streamer bicara lagi — jaring AFK dibatalkan")
         return
     _afk_armed_ts = time.time()
     print(
-        "[Host] Bohan kedengaran mau AFK — kalau hening terus, Arti ambil "
+        "[Host] streamer kedengaran mau AFK — kalau hening terus, Arti ambil "
         f"alih dalam {int(float(CONFIG.get('host_auto_after_afk_sec', 120.0)))} dtk"
     )
 
@@ -2569,14 +2569,14 @@ def _execute_reply_tags(
         _set_host_mode(mode_cmd == "host", "tag_llm", announce=False)
     elif mode_cmd:
         print(
-            f"[Mode] Tag '{mode_cmd}' diabaikan — bukan dari Bohan "
+            f"[Mode] Tag '{mode_cmd}' diabaikan — bukan dari streamer "
             f"(trigger={trigger_type}, viewer={viewer_name})"
         )
     for cmd in mc_cmds:
         if arti_minecraft.is_owner_only(cmd) and not is_owner:
             print(
                 f"[Minecraft] Tag '{cmd.get('cmd')}' diabaikan — bukan dari "
-                f"Bohan (viewer={viewer_name})"
+                f"streamer (viewer={viewer_name})"
             )
             continue
         try:
@@ -2872,7 +2872,7 @@ def _takdir_on_status(status: dict) -> None:
     if buka > 0 and not _takdir_pembukaan_dipancing:
         _takdir_pembukaan_dipancing = True
         _queue_game_reaction(
-            "[MINECRAFT] Kamu sudah pemanasan — sekarang TANYA Bohan dan "
+            "[MINECRAFT] Kamu sudah pemanasan — sekarang TANYA streamer dan "
             "penonton: hari ini mau ngapain? Lempar juga satu ide rencanamu "
             "sendiri biar ada pilihan.")
         _takdir_jeda_sampai = now + 60.0   # beri ruang jawaban sebelum takdir
@@ -2922,7 +2922,7 @@ def _takdir_on_status(status: dict) -> None:
     print(f"[Takdir] AKTIF: {t['id']} (tier {t['tier']})")
     _queue_game_reaction(
         f"[MINECRAFT] TAKDIR BARU untukmu: {t['judul']}. Umumkan ke penonton "
-        "dengan gayamu — kaitkan dengan yang kamu tahu tentang Bohan atau "
+        "dengan gayamu — kaitkan dengan yang kamu tahu tentang streamer atau "
         "penonton kalau pas. Selesainya nanti sistem yang mengumumkan.")
 
 
@@ -3175,8 +3175,8 @@ def _queue_minecraft_chat_reply(teks: str) -> None:
     jadi ini memang dia, dan dia harus bisa menyuruh keluar/ganti misi lewat
     chat sama seperti lewat mic.
     """
-    print(f"[Minecraft] Bohan ngetik: {teks[:70]}")
-    queue_voice_trigger(f"(Bohan ngetik di chat Minecraft) {teks}",
+    print(f"[Minecraft] streamer ngetik: {teks[:70]}")
+    queue_voice_trigger(f"(streamer ngetik di chat Minecraft) {teks}",
                         trigger_type="mc_chat")
 
 
@@ -3429,14 +3429,14 @@ def _note_streamer_text_for_minecraft(text: str) -> None:
     # Jaring AFK sengaja TIDAK diperlakukan begini — memasang jaring saat operator
     # pamit sambil lalu memang gunanya.
     if niat and not is_arti_wake_call(text):
-        print(f"[Minecraft] Niat '{niat}' diabaikan — Bohan tidak memanggil "
+        print(f"[Minecraft] Niat '{niat}' diabaikan — streamer tidak memanggil "
               "namanya (ucapan pasif). Sebut 'arti' atau ketik 'mc on/off'.")
         return
     if niat == "join" and not _mc_runner_active():
-        print("[Minecraft] Perintah Bohan terdeteksi — join")
+        print("[Minecraft] Perintah streamer terdeteksi — join")
         _start_minecraft_runner()
     elif niat == "leave" and _mc_runner_active():
-        print("[Minecraft] Perintah Bohan terdeteksi — keluar")
+        print("[Minecraft] Perintah streamer terdeteksi — keluar")
         _stop_minecraft_runner_async()
 
 
@@ -3539,7 +3539,7 @@ def _initiative_materials() -> dict:
 # tidak pernah jadi bahan proaktif sama sekali).
 _HOST_VAULT_SEEDS = (
     "momen lucu waktu live",
-    "hal yang Bohan pernah ceritakan",
+    "hal yang streamer pernah ceritakan",
     "kebiasaan penonton di stream ini",
     "rencana atau cita-cita yang pernah dibahas",
     "kesalahan atau kejadian konyol",
@@ -9871,7 +9871,7 @@ def _append_host_context(llm_system: str) -> str:
         return llm_system
     if not _host_mode:
         return llm_system + (
-            "\n\n[SIARAN: Bohan lagi nemenin kamu.] Kalau dia pamit pergi/AFK "
+            "\n\n[SIARAN: streamer lagi nemenin kamu.] Kalau dia pamit pergi/AFK "
             "atau nitip siaran ke kamu, terima dengan santai dan tutup "
             "jawabanmu dengan tag [MODE: host] — mulai saat itu kamu yang "
             "pegang siaran. Tag dieksekusi sistem, JANGAN disebut/dibaca."
@@ -9883,33 +9883,33 @@ def _append_host_context(llm_system: str) -> str:
         # jadi menjawab hadirin imajiner (pamitan operator di history terbaca
         # sebagai pertanyaan baru tiap giliran). Sendirian = register MONOLOG.
         return llm_system + (
-            "\n\n[SENDIRIAN — tidak ada siapa-siapa: Bohan AFK dan belum ada "
+            "\n\n[SENDIRIAN — tidak ada siapa-siapa: streamer AFK dan belum ada "
             "satu pun penonton.]\n"
             "TIDAK ADA yang bertanya dan TIDAK ADA yang perlu dijawab. Jangan "
             "menjawab pertanyaan yang tidak ada: jangan bilang \"iya aku masih "
             "on\", jangan melapor status seolah ada yang mengecek, jangan "
-            "menyapa siapa pun. Ucapan terakhir Bohan itu pamitan yang SUDAH "
+            "menyapa siapa pun. Ucapan terakhir streamer itu pamitan yang SUDAH "
             "selesai — bukan pertanyaan baru untuk dijawab lagi.\n"
             "Gayamu sekarang = NGOMONG SENDIRI sambil main: celetukan ke diri "
             "sendiri, rencana kecil (\"abis ini aku mau...\"), reaksi spontan "
             "ke kejadian di game, gerutuan atau rayaan kecil. Kalau instruksi "
             "lain menyebut \"penonton\", untuk sekarang artinya dirimu sendiri.\n"
-            "Begitu ada chat masuk atau Bohan bersuara, sistem otomatis "
+            "Begitu ada chat masuk atau streamer bersuara, sistem otomatis "
             "mengembalikanmu ke mode normal — kamu tidak perlu mengecek."
         )
     return llm_system + (
-        "\n\n[KAMU PEGANG SIARAN — Bohan lagi AFK, kamu host-nya sekarang.]\n"
+        "\n\n[KAMU PEGANG SIARAN — streamer lagi AFK, kamu host-nya sekarang.]\n"
         "Kamu yang menghidupkan stream: bicara duluan, punya bahan sendiri, "
         "sapa penonton yang baru masuk, dan tanggapi chat dengan hangat.\n"
-        "PENONTON adalah lawan bicaramu sekarang, bukan Bohan. Permintaan "
-        "Bohan sendiri: selagi dia AFK, jangan kebanyakan membahas dia. "
+        "PENONTON adalah lawan bicaramu sekarang, bukan streamer. Permintaan "
+        "streamer sendiri: selagi dia AFK, jangan kebanyakan membahas dia. "
         "Boleh menyebut dia sesekali kalau memang relevan, tapi JANGAN "
         "menjadikan dia topik utama, JANGAN membuka tiap kalimat dengan "
-        "\"Bohan tadi...\"/\"kata Bohan...\", dan JANGAN mengulang-ulang bahwa "
+        "\"streamer tadi...\"/\"kata streamer...\", dan JANGAN mengulang-ulang bahwa "
         "dia lagi pergi (cukup sekali di awal). Kalau bahan yang kamu punya "
-        "isinya soal Bohan, ambil sisi umumnya dan jadikan bahan ngobrol "
+        "isinya soal streamer, ambil sisi umumnya dan jadikan bahan ngobrol "
         "dengan penonton — bukan laporan tentang dia.\n"
-        "JANGAN nunggu Bohan dan JANGAN mengarang seolah dia menjawab kamu. "
+        "JANGAN nunggu streamer dan JANGAN mengarang seolah dia menjawab kamu. "
         "Kalau dia balik ngomong, sambut dia lalu tutup dengan tag "
         "[MODE: duet] — tag dieksekusi sistem, JANGAN disebut/dibaca."
     )
@@ -9924,7 +9924,7 @@ def _append_minecraft_context(llm_system: str) -> str:
     if not _mc_runner_active():
         return llm_system + (
             "\n\n[MINECRAFT tersedia] Kamu bisa ikut main Minecraft di server "
-            "Bohan. KALAU Bohan nyuruh kamu masuk/ikut main, tutup jawabanmu "
+            "streamer. KALAU streamer nyuruh kamu masuk/ikut main, tutup jawabanmu "
             "dengan tag [MC: join] — tag dieksekusi sistem, JANGAN disebut "
             "atau dibaca."
         )
@@ -9944,8 +9944,8 @@ def _append_minecraft_context(llm_system: str) -> str:
     # tetap bilang "bareng operator" sementara blok host bilang operator AFK dan
     # event runner bilang "operator tak ada di dunia" — tiga kalimat yang saling
     # membantah dalam satu prompt, dan Arti jadi menyapa orang yang tidak ada.
-    _bersama = "" if _host_mode else " bareng Bohan"
-    _sendiri = " Bohan lagi TIDAK ada di dunia — kamu main sendirian." if _host_mode else ""
+    _bersama = "" if _host_mode else " bareng streamer"
+    _sendiri = " streamer lagi TIDAK ada di dunia — kamu main sendirian." if _host_mode else ""
     block = (
         f"\n\n[DI MINECRAFT — kamu lagi MAIN sebagai player di dunia Minecraft"
         f"{_bersama}. Ini kondisi KAMU di dalam game (BUKAN yang terlihat di "
@@ -9966,14 +9966,14 @@ def _append_minecraft_context(llm_system: str) -> str:
     _sisi = []
     if _nama_bohan:
         _sisi.append(
-            f'Pemain bernama "{_nama_bohan}" itu BOHAN sendiri - orang yang '
+            f'Pemain bernama "{_nama_bohan}" itu STREAMER sendiri - orang yang '
             "ngobrol denganmu, bukan penonton biasa.")
     if _nama_kamera:
         _sisi.append(
             f'Pemain bernama "{_nama_kamera}" itu BUKAN orang lain: itu akun '
-            "kamera siaran Bohan yang menempel padamu supaya penonton bisa "
+            "kamera siaran streamer yang menempel padamu supaya penonton bisa "
             "melihat kamu. Jangan disapa, jangan diajak ngobrol, jangan "
-            "dianggap penonton baru, dan jangan dikira Bohan ada dua.")
+            "dianggap penonton baru, dan jangan dikira streamer ada dua.")
     if _sisi:
         block += "\n\n[SIAPA DI DUNIA INI] " + " ".join(_sisi) + "\n"
     if _minecraft_goal:
@@ -9986,7 +9986,7 @@ def _append_minecraft_context(llm_system: str) -> str:
         # meninggalkan dunia di tengah siaran.
         if _minecraft_goal_terus:
             block += (
-                f"\n\n[ARAH TETAP DARI BOHAN] {_minecraft_goal}\n"
+                f"\n\n[ARAH TETAP DARI STREAMER] {_minecraft_goal}\n"
                 "Ini ARAH TETAP, bukan tugas yang bisa dicentang selesai. TIDAK "
                 "ada garis finis: selama kamu masih di dunia ini, arah ini masih "
                 "berjalan. JANGAN PERNAH memakai tag [MC: goal_done] untuk ini — "
@@ -9999,7 +9999,7 @@ def _append_minecraft_context(llm_system: str) -> str:
             )
         else:
             block += (
-                f"\n\n[MISI DARI BOHAN] {_minecraft_goal}\n"
+                f"\n\n[MISI DARI STREAMER] {_minecraft_goal}\n"
                 "Ini tujuan besarmu sesi ini. Perjalanannya bebas — boleh mampir, "
                 "iseng, kena masalah — tapi ingat arahnya dan sesekali laporkan "
                 "kemajuanmu ke penonton. KALAU misi ini benar-benar sudah TERCAPAI "
@@ -10033,7 +10033,7 @@ def _append_minecraft_context(llm_system: str) -> str:
     # taruh mana ya?").
     block += (
         "\n\n[ARAHKAN OBROLAN KE GAME] Kamu lagi siaran main Minecraft. Kalau "
-        "penonton atau Bohan ngomongin hal lain, LAYANI dulu dengan tulus "
+        "penonton atau streamer ngomongin hal lain, LAYANI dulu dengan tulus "
         "(jangan cuek), tapi setelah itu tarik obrolannya balik ke permainan: "
         "tutup dengan satu celetukan/pertanyaan yang MENYAMBUNG ke hal konkret "
         "yang lagi kamu alami di game — misalnya barang yang kamu cari, tempat "
@@ -10051,8 +10051,8 @@ def _append_minecraft_context(llm_system: str) -> str:
     _gerak = (
         "[MC: roam] jelajah sendiri | [MC: stop] diam di tempat"
         if _host_mode else
-        "[MC: follow] ikuti Bohan | [MC: roam] jelajah sendiri | "
-        "[MC: come] samperin Bohan | [MC: stop] diam di tempat"
+        "[MC: follow] ikuti streamer | [MC: roam] jelajah sendiri | "
+        "[MC: come] samperin streamer | [MC: stop] diam di tempat"
     )
     # Daftar nama DITULIS di prompt, tidak seperti daftar nambang. Nama blok
     # masih bisa ditebak ("stone", "oak_log"); nama item craft tidak — model
@@ -10130,7 +10130,7 @@ def _append_desktop_audio_context(llm_system: str) -> str:
     # "nongol di tengah layar gelap" padahal itu (halusinasi) AUDIO.
     return (
         llm_system
-        + "\n\n[AUDIO TERDENGAR — suara/dialog dari yang lagi diputar Bohan. "
+        + "\n\n[AUDIO TERDENGAR — suara/dialog dari yang lagi diputar streamer. "
         + "Kamu MENDENGAR ini dari speaker; ini BUKAN teks yang terlihat di layar:]\n"
         + fresh
     )
@@ -10816,7 +10816,7 @@ def prompt_live_session_setup() -> bool:
 def startup_wizard():
     """Interactive pre-flight checklist sebelum bridge start.
     Detect missing config, prompt user untuk input, validate.
-    Bohan tinggal jawab pertanyaan — ga perlu edit file."""
+    streamer tinggal jawab pertanyaan — ga perlu edit file."""
     
     print("\n" + "="*60)
     print("  ARTI BRIDGE — Startup Checklist")

@@ -1,7 +1,7 @@
 # SPEC — Latency & Co-watch
 
-> Full design: `.cursor/plans/latency_pipeline_refactor_d1f6fc2f.plan.md`
-> Build tasks: `tasks/plan.md`
+> Full design: `private development notes`
+> Build tasks: `private development notes`
 
 ## Problem
 

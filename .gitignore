@@ -89,7 +89,7 @@ data/reflex/
 # Alat ukur harness Minecraft (perintah.txt/status.json/tas.json)
 tmp/
 
-# Bahan mentah yang dilempar Bohan buat dianalisis (screenshot, potongan
+# Bahan mentah yang dilempar streamer buat dianalisis (screenshot, potongan
 # terminal, hasil tes) — bisa memuat nama penonton. Hanya README yang di-commit.
 dump/*
 !dump/README.md

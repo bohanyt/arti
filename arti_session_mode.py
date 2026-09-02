@@ -24,10 +24,10 @@ HOST_GAME = "host_game"
 MODES = (DUET, DUET_GAME, HOST_CHAT, HOST_GAME)
 
 _LABELS = {
-    DUET: "ngobrol bareng Bohan",
-    DUET_GAME: "main Minecraft bareng Bohan",
-    HOST_CHAT: "Arti pegang siaran (Bohan AFK)",
-    HOST_GAME: "Arti main Minecraft sendirian (Bohan AFK)",
+    DUET: "ngobrol bareng streamer",
+    DUET_GAME: "main Minecraft bareng streamer",
+    HOST_CHAT: "Arti pegang siaran (streamer AFK)",
+    HOST_GAME: "Arti main Minecraft sendirian (streamer AFK)",
 }
 
 

@@ -1,7 +1,7 @@
 """Provider Codex (ChatGPT Plus) — kolam premium kedua, lapis antara
 composer dan Groq (19 Agu 2026).
 
-Riset + probe: docs/research/2026-08-19-codex-chatgpt-plus.md.
+Riset + probe: private development notes
 Angka probe di mesin streamer: server+thread 0,4 dtk; turn dingin 5,8 dtk;
 HANGAT 1,5-3,0 dtk (gpt-5.6-luna) — di bawah kapak suara, kelas composer.
 

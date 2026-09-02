@@ -2,7 +2,7 @@
 
 Proses MANDIRI, bukan bagian bridge (keputusan streamer: Arti online di
 Discord kapan pun proses ini hidup, siaran atau tidak; nanti pindah ke VM
-always-free — lihat docs/plans/2026-08-17-arti-discord.md).
+always-free — lihat private development notes).
 
 Jalankan:  ./venv/Scripts/python.exe arti_discord.py
 
@@ -88,7 +88,7 @@ def soul_teks(config: dict) -> str:
 
 ATURAN_DISCORD = """
 [KONTEKS: DISCORD]
-Kamu lagi nongkrong di server Discord Bohan, ngobrol santai lewat teks.
+Kamu lagi nongkrong di server Discord streamer, ngobrol santai lewat teks.
 - Jawab bahasa Indonesia kasual, maksimal 3 kalimat. Ini chat, bukan pidato.
 - Jangan pernah membocorkan info pribadi penonton YouTube (nama asli,
   cerita pribadi mereka). Kepribadianmu dan running bits boleh.
@@ -264,7 +264,7 @@ def main() -> int:
         r.append(f"{nama}: {msg.content[:200]}")
 
         konteks = "\n".join(r)
-        label_user = "Bohan (streamer, pemilikmu)" if dari_pemilik else f"{nama} (member server)"
+        label_user = "streamer (streamer, pemilikmu)" if dari_pemilik else f"{nama} (member server)"
         teks_user = (
             f"[Riwayat channel]\n{konteks}\n\n"
             f"[Pesan terbaru dari {label_user}]: {msg.content}"

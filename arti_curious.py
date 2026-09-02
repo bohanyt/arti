@@ -447,7 +447,7 @@ _MC_NARRATION_ANGLES = (
     "Reaksikan suasana di sekitarmu: tempatnya, siang/malam, bahaya yang "
     "kelihatan, atau kondisi badanmu (HP/lapar) kalau memang lagi genting.",
     "Ajak ngobrol soal permainan ini — lempar celetukan ke penonton atau ke "
-    "Bohan tentang apa yang lagi terjadi di dunia game.",
+    "streamer tentang apa yang lagi terjadi di dunia game.",
 )
 _mc_angle_idx = 0
 
@@ -522,12 +522,12 @@ def build_host_prompt(
     sapaan = f"\nSelipkan dulu sapaan singkat: {greet_note}" if greet_note else ""
     return (
         "[Arti pegang siaran]\n"
-        "Bohan lagi AFK — kamu yang pegang mic sekarang, penonton nontonin "
+        "streamer lagi AFK — kamu yang pegang mic sekarang, penonton nontonin "
         "KAMU. Bicara duluan, jangan nunggu siapa pun.\n"
         f"Sudut kali ini: {angle}\n"
         f"Bahan: {material}{sapaan}\n"
         "Maksimal 3 kalimat, Bahasa Indonesia, penuh karakter kamu. JANGAN "
-        "mengeluh sepi, JANGAN mengulang-ulang bahwa Bohan lagi pergi, dan "
+        "mengeluh sepi, JANGAN mengulang-ulang bahwa streamer lagi pergi, dan "
         "JANGAN mengarang seolah dia menjawab kamu. Jangan menyebut sistem, "
         "log, atau istilah teknis."
     )
