@@ -1,13 +1,22 @@
 # Changelog
 
-## Public documentation polish — 2026-09-02
+## Public hardening — 2026-09-02
 
-- connected the public repository README to `https://artiberarti.com` and the public documentation index;
-- replaced stale documentation references that pointed to private/excluded plans and handoffs;
-- corrected the public wiring guide so it references the actual shipped bridge/config paths and no longer points to unpublished local voice-lab artifacts;
-- clarified that Stardew Valley is not included in this public release.
+This pass deepens the September 2 public refresh after a repository-wide publication audit.
 
-No runtime behavior changed in this documentation-only maintenance pass.
+Public-facing changes include:
+
+- connected the public repository README to `https://artiberarti.com` and rebuilt the public documentation index around files that are actually shipped;
+- replaced stale documentation references that pointed to private/excluded plans, handoffs, tests, benchmarks, and helper scripts;
+- generalized maintainer-bound defaults/prompts/comments that had survived the first sanitization pass;
+- corrected Minecraft, VTube Studio, vision, scouter, emotion, co-watch, provider, TTS, and reflex documentation so fresh-clone setup no longer depends on unpublished material;
+- added the public-safe `scripts/build_reflex_cache.py` helper required by the shipped reflex feature;
+- added stronger publication CI checks for privacy, tracked-file references, and repository-local Python imports;
+- added public regression coverage for expression parsing and the OpenRouter live model chain;
+- fixed a latent OpenRouter fallback bug where disabling `openrouter_live_fast_only` with empty explicit model overrides could reference retired undefined names and raise `NameError`;
+- clarified that Stardew Valley remains outside this public release boundary.
+
+The OpenRouter fix is a narrowly scoped runtime correction discovered by the publication audit. Other maintainer-name and documentation changes are behavior-preserving publication transforms. Hardware/application integrations still require separate local verification.
 
 ## Public refresh — 2026-09-02
 
@@ -25,7 +34,7 @@ Not included:
 
 - private handoffs, task queues, raw research/plans, transcripts, viewer/vault data, runtime logs/telemetry, machine backups, or private fine-tuning material;
 - real credentials or local configuration;
-- product changes newer than the frozen source baseline;
+- product changes newer than the frozen source baseline unless explicitly documented under the public-hardening section above;
 - Stardew Valley runtime/SMAPI/test/evidence material;
 - PR #25 / OBS-2B2a terrain work.
 
