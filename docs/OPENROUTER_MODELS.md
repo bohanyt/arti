@@ -1,73 +1,57 @@
-# OpenRouter models — Arti bridge
+# OpenRouter model selection
 
-Semua slug di bawah pakai prefix provider, contoh: `nvidia/nemotron-3-super-120b-a12b:free`.
+This page explains how to choose and maintain OpenRouter models for ARTI without treating a dated provider snapshot as permanent truth.
 
-Edit di `CONFIG` [`hermes_vtuber_bridge.py`](../hermes_vtuber_bridge.py) atau override di `config_local.json` / `live_session.json`.
+**Status:** the checked-out runtime configuration is the source of truth for exact model slugs. OpenRouter models can be renamed, retired, rate-limited, or moved between tiers independently of this repository.
 
-## Aturan pertama: cocokkan model dengan budget token
+For the cross-provider view, read [`MODEL-REGISTRY.md`](MODEL-REGISTRY.md).
 
-Ini pelajaran paling mahal di repo ini — dua kali kena bug yang sama.
+## Runtime roles
 
-**Model reasoning menghabiskan `max_tokens` untuk chain-of-thought sebelum menulis jawaban.** Kalau budgetnya ketat, `content` balik **kosong** dengan `finish_reason=length`, dan `clean_ai_reply()` membuang sisanya → *"Jawaban AI kosong"*. Ini yang terjadi pada qwen3.6 (fix `dd88d9e`, pakai `reasoning_effort=none`) dan pada Poolside Laguna (terdeteksi 2026-07-31).
+OpenRouter is used as a fallback/background provider, not as a single universal model for every path. The public bridge currently exposes role-specific keys including:
 
-Budget nyata per jalur:
+| Runtime role | Configuration keys |
+|---|---|
+| live fallback | `openrouter_live_model`, `openrouter_live_last_resort` |
+| compact summarizer | `openrouter_summarizer_model`, `openrouter_summarizer_fallback` |
+| reflection | `openrouter_reflection_model`, `openrouter_reflection_fallback_model`, `openrouter_reflection_last_resort` |
+| optional heavier reflection | `openrouter_reflection_ultra_model`, gated by `reflection_try_ultra` |
 
-| Jalur | `max_tokens` | Sumber |
-|-------|-------------|--------|
-| Live YT (1–5 kalimat) | **110–320** | `_TOKENS_BY_SENT`, `arti_reply_policy.py:55` |
-| Live PTT | ~380 | `live_max_tokens_ptt` |
-| Scouter / summarizer | **350** | `scouter_max_tokens` |
-| Reflection post-stream | 2000 | `arti_openrouter.py` |
+Inspect the `CONFIG` block in [`hermes_vtuber_bridge.py`](../hermes_vtuber_bridge.py) and the routing code in [`arti_openrouter.py`](../arti_openrouter.py) for the exact values in your revision.
 
-→ Jalur live dan scouter **wajib** model non-reasoning yang `finish=stop` di budget kecil. Reflection bebas.
+The main live conversational provider path is configured separately. OpenRouter should be understood as one fallback/background layer in the broader provider registry, not the primary provider by definition.
 
-## Peran di bridge
+## Match models to the path budget
 
-| Peran | CONFIG key | Default (Jul 2026) |
-|-------|------------|-------------------|
-| Health check probe | `openrouter_live_model` | Nemotron 3 Super |
-| Live fallback (setelah Groq gagal) | `openrouter_live_model` → `openrouter_live_last_resort` | Nemotron Super → Gemma 4 |
-| Summarizer tiap 5 trigger | `openrouter_summarizer_model` → `openrouter_summarizer_fallback` | Nemotron Super → Nemotron Nano |
-| Scouter chain | `scouter_openrouter_models` | Nemotron Super → Nemotron Nano → Gemma 4 |
-| Post-stream reflection | `openrouter_reflection_model` → fallback → last_resort | Nemotron Super → Gemma 4 → Laguna XS 2.1 |
-| Reflection opsional berat | `openrouter_reflection_ultra_model` (`reflection_try_ultra`) | Nemotron Ultra |
+A model that works with a generous output budget can still be unsuitable for a latency-sensitive path.
 
-**Main LLM live tetap Groq** (`groq_models` rolling). OpenRouter = fallback + offline brain.
+ARTI's live reply policy uses small/adaptive output budgets based on the requested reply length, while background summarization and reflection use different budgets. The exact live mapping is defined in [`arti_reply_policy.py`](../arti_reply_policy.py); Scouter and reflection limits are defined by their corresponding runtime configuration/code.
 
-## Hasil probe 2026-07-31
+When evaluating an OpenRouter candidate, test it on the actual path budget and verify that it:
 
-Diuji langsung ke `/chat/completions` dengan prompt bahasa Indonesia pendek.
+1. returns non-empty user-facing content;
+2. finishes within the path's timeout and output budget;
+3. does not leak hidden reasoning or provider-side metadata into the reply;
+4. fails in a way that allows the configured fallback chain to continue.
 
-| Model | Slug | 110 tok | 350 tok | Latensi | Verdict |
-|-------|------|:-------:|:-------:|---------|---------|
-| **Nemotron 3 Super 120B** | `nvidia/nemotron-3-super-120b-a12b:free` | ✅ stop | ✅ stop | **344–391 ms** | Terbaik — satu-satunya yang bersih **dan** cepat di budget ketat |
-| **Gemma 4 26B** | `google/gemma-4-26b-a4b-it:free` | ✅ stop | ✅ stop | 1,1–3,7 dtk | Sehat tapi lambat — pakai sebagai last resort |
-| **Nemotron 3 Nano 30B** | `nvidia/nemotron-3-nano-30b-a3b:free` | ⚠️ bocor CoT Inggris | ✅ stop | 342–436 ms | OK di ≥350 tok saja |
-| **Ling 3.0 Flash** | `inclusionai/ling-3.0-flash:free` | ❌ kosong | ✅ stop | 0,9–1,2 dtk | Jangan di jalur live |
-| **Laguna XS 2.1** | `poolside/laguna-xs-2.1:free` | ❌ kosong | ❌ kosong | 436 ms | Reasoning — butuh ~600 tok. Reflection saja |
-| **Laguna S 2.1** | `poolside/laguna-s-2.1:free` | ❌ kosong | ❌ kosong | 0,6–2,7 dtk | Sama seperti XS |
+Do not promote a model to the live fallback just because it succeeds with a much larger test budget.
 
-## Slug MATI — jangan dipakai lagi
+## Model and slug changes
 
-Semua mengembalikan `404 No endpoints found`:
+Do not maintain a long-lived "dead model" table in public documentation. Provider catalogs age faster than this repository.
 
-| Slug mati | Pengganti | Catatan |
-|-----------|-----------|---------|
-| `poolside/laguna-xs.2:free` | `poolside/laguna-xs-2.1:free` | **Di-rename**, bukan dihapus — titik jadi strip, versi naik. Tapi tetap tidak cocok untuk jalur live (lihat tabel probe). |
-| `poolside/laguna-m.1:free` | — | Hilang total; tier `m` sudah tidak ada. Terdekat: `poolside/laguna-s-2.1:free`. |
-| `owl-alpha` | — | Hilang total. Sempat jadi default keras di `arti_openrouter.py`, `arti_scouter_client.py`, dan `scouter_openrouter_models`. |
+When replacing a model:
 
-## Bukan OpenRouter
+1. confirm the current model identifier from the provider;
+2. update the local/configured role rather than scattering the slug across docs;
+3. exercise the real runtime path with its normal token and timeout limits;
+4. verify fallback behavior by making the first candidate unavailable;
+5. keep evidence language scoped to the revision and path you actually tested.
 
-| Provider | Dipakai untuk |
-|----------|----------------|
-| **Groq** | LLM utama PTT/YT (`groq_models`) |
-| **Groq Whisper** | ASR mic |
-| **NVIDIA NIM** | DiffusionGemma vision layar (`nvidia_model`) — bukan chat OpenRouter |
+If a provider model disappears, the correct response is to advance or update the configured chain—not to assume an old benchmark or free-tier status is still valid.
 
-## Tips ganti model
+## Configuration
 
-1. Cek slug masih hidup: `GET https://openrouter.ai/api/v1/models` (tanpa auth) lalu cari id-nya. Model **sering di-rename**, bukan dihapus — cek varian dengan strip/versi berbeda sebelum menyimpulkan mati.
-2. **Selalu probe di budget token asli jalurnya**, bukan budget besar. Model yang lolos di 600 token bisa mengembalikan kosong di 110.
-3. Yang dinilai: `finish_reason` harus `stop` (bukan `length`), `content` tidak kosong, dan tidak ada CoT bahasa Inggris yang bocor.
-4. Set key di CONFIG, restart bridge. Health check startup akan probe `openrouter_live_model`.
+Set the OpenRouter credential through `.env` using the placeholder documented in [`.env.example`](../.env.example). Keep account-specific settings and model overrides in local configuration rather than committing credentials.
+
+For provider-independent routing behavior, return to [`MODEL-REGISTRY.md`](MODEL-REGISTRY.md).

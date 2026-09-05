@@ -1,39 +1,59 @@
-# Observer + Kurator — Arti v0.6
+# Observer and Curator post-stream pipeline
 
-Post-stream pipeline: segment full transcript → summarize beats → verify → vault.
+Observer and Curator turn completed session transcripts into reviewable summary beats and approved memory material after a stream.
+
+**Status:** the pipeline code is shipped publicly, but real transcripts, generated databases, session notes, and vault contents are local runtime data and are intentionally not included in the repository.
 
 ## Flow
 
+```text
+session transcript
+    → Observer (segmentation + draft beats)
+    → Curator (verification)
+    → local beat output / observer database
+    → approved vault memory
 ```
-Ctrl+C → Observer (10min segments) → Kurator (verify) → beats.jsonl/md → observer_rag.db → vault_rag (approved)
-```
 
-Blocking shutdown with progress bar (`observer_shutdown_blocking: true`).
+When `observer_shutdown_blocking` is enabled, shutdown waits for the configured Observer/Curator work to finish instead of silently abandoning it.
 
-## Two databases
+## Local runtime data
 
-| DB | Path | Contents |
-|----|------|----------|
-| Observer (audit) | `data/observer_rag.db` | All beats including rejected |
-| Live Arti | `data/vault_rag.db` | Approved vault + `*_beats.md` |
+| Local data | Default path | Purpose |
+|---|---|---|
+| Observer audit database | `data/observer_rag.db` | Stores Observer/Curator beat records, including material that may not be promoted. |
+| Live vault database | `data/vault_rag.db` | Stores approved memory used by the live RAG path. |
 
-## CONFIG
+These are runtime-local paths. They are not public fixtures and should not be attached to public bug reports.
 
-- `observer_enabled` — master switch
-- `observer_segment_minutes` — default 10
-- `observer_provider_chain` — text LLM chain (no Groq)
-- `observer_shutdown_blocking` — wait until pipeline done
+## Relevant configuration
+
+- `observer_enabled` — master switch for the post-stream pipeline.
+- `observer_segment_minutes` — target transcript segment size.
+- `observer_provider_chain` — ordered text-provider chain for Observer work.
+- `observer_shutdown_blocking` — whether shutdown waits for the pipeline to complete.
+
+Exact defaults belong to the checked-out runtime configuration.
 
 ## Manual re-run
+
+From the repository root:
 
 ```bash
 python -c "import arti_observer_shutdown as o; from hermes_vtuber_bridge import CONFIG; o.run_observer_shutdown(CONFIG)"
 ```
 
-## Health
+Run this only against local session data you are comfortable processing.
+
+## Health check
 
 ```bash
 python bridge_health.py --deep
 ```
 
-Checks observer text models when `observer_provider_chain` is set.
+The deep health check can exercise configured Observer text-provider availability. It does not prove that a private transcript or local database contains correct semantic summaries.
+
+## Verification boundary
+
+Public CI can validate deterministic Python behavior, imports, and repository hygiene. It does not publish or process real stream transcripts, private viewer data, or local vault databases.
+
+When reporting an Observer problem publicly, reproduce with synthetic transcript content and include only the minimum provider/status information needed to diagnose the failure.
