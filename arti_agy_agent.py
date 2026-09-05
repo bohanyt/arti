@@ -8,6 +8,10 @@ generation penuh sebelum pemanasan ulang.
 
 from __future__ import annotations
 
+from arti_screen_privacy import screen_privacy
+
+_privacy_epoch = screen_privacy.epoch
+
 import atexit
 from dataclasses import dataclass, field
 import json
@@ -375,12 +379,18 @@ def _failure(reason: str, started: float, *, model: str, effort: str) -> AgyResu
 
 def send_turn(system_prompt: str, user_content: str, config: dict) -> AgyResult:
     """Kirim satu NDJSON turn. Hasil gagal berarti caller harus fallback."""
-    global _turns
+    global _turns, _privacy_epoch
     started = time.perf_counter()
     model = str(_cfg(config, "agy_model", "gemini-3.7-flash-low"))
     effort = str(_cfg(config, "agy_effort", "low"))
     if not bool(_cfg(config, "agy_agent_enabled", False)):
         return _failure("disabled", started, model=model, effort=effort)
+    epoch = screen_privacy.epoch
+    if not screen_privacy.current(config.get("_screen_privacy_epoch", epoch)):
+        return _failure("screen_privacy", started, model=model, effort=effort)
+    if _privacy_epoch != epoch:
+        _discard("screen privacy boundary")
+        _privacy_epoch = epoch
     if not is_warm():
         prewarm(config)
         return _failure("cold", started, model=model, effort=effort)

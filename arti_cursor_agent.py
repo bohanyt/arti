@@ -34,6 +34,8 @@ helper murninya diuji tanpa `cursor-sdk` terpasang dan tanpa jaringan.
 
 from __future__ import annotations
 
+from arti_screen_privacy import screen_privacy
+
 import atexit
 import json
 import os
@@ -443,6 +445,7 @@ class CursorSession:
 
     def __init__(self, config: dict, role: str = "voice") -> None:
         self.config = config
+        self.privacy_epoch = screen_privacy.epoch
         self.role = role
         self._sdk: Any = None
         self._client: Any = None
@@ -524,6 +527,13 @@ class CursorSession:
         if timeout_s is None:
             timeout_s = role_timeout_sec(self.role, cfg)
         t0 = time.monotonic()
+
+        epoch = screen_privacy.epoch
+        if not screen_privacy.current(cfg.get("_screen_privacy_epoch", epoch)):
+            return CursorResult(reason="screen_privacy")
+        if self.privacy_epoch != epoch:
+            self.close(detach=True)
+            self.privacy_epoch = epoch
 
         need, why = should_recycle(self.turn_count, self.age_sec, self.dirty, cfg)
         if need:

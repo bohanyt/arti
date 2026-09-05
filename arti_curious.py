@@ -8,6 +8,7 @@ import arti_benang
 import arti_renungan
 import arti_screen_context as sc
 import arti_vision_client
+from arti_screen_privacy import bind_context_epoch, screen_privacy
 
 _last_curious_ts = 0.0
 _last_interval_check_ts = 0.0
@@ -123,6 +124,8 @@ def reset_session() -> None:
 
 def _vision_effective(config: dict) -> bool:
     """Manual toggle OR scouter auto-window (mirrors bridge is_vision_active)."""
+    if not screen_privacy.allows_screen():
+        return False
     if not config.get("vision_enabled", config.get("screen_context_enabled", False)):
         return False
     if config.get("vision_runtime_on", False):
@@ -505,6 +508,7 @@ _HOST_ANGLES = (
 _host_angle_idx = 0
 
 
+@bind_context_epoch
 def build_host_prompt(
     material: str, *, greet_note: str = "", angle_idx: int | None = None
 ) -> str:
@@ -547,6 +551,7 @@ _FALLBACK_MATERIALS = (
 )
 
 
+@bind_context_epoch
 def build_initiative_prompt(
     config: dict,
     *,
@@ -800,8 +805,11 @@ def build_curious_system_addon(config: dict) -> str:
     )
 
 
+@bind_context_epoch
 def build_prompt(config: dict) -> str:
     """User message for curious LLM turn."""
+    if not screen_privacy.allows_screen():
+        return ""
     latest = sc.screen_ring.latest()
     scene = (latest.scene if latest else "").strip()
     playback = latest.playback_mmss if latest else None
