@@ -1,12 +1,14 @@
-# Scouter — screen context helper
+# Scouter conversation and screen-relevance helper
 
-Scouter is ARTI's compact screen-understanding path: capture a screen frame, ask a configured vision provider for a concise description, and expose that context to the conversation runtime.
+Scouter produces a compact digest of recent streamer/chat context and can mark whether the conversation appears to require fresh screen context. It is a lightweight gating/summarization path, not the main screenshot-description pipeline.
 
-The implementation lives in [`arti_scouter_client.py`](../arti_scouter_client.py). Provider availability changes over time, so this document describes the **shipped routing contract**, not a promise that every external provider is currently free or online.
+**Status:** this document describes the provider chain and output contract shipped in the checked-out revision. Provider availability, quotas, and model catalogs remain external and must be verified locally.
+
+The implementation lives in [`arti_scouter_client.py`](../arti_scouter_client.py). For the heavier screenshot/vision path, see [`VISION-APIS.md`](VISION-APIS.md).
 
 ## Default provider order
 
-The public source currently defines this default Scouter chain:
+The public Scouter client currently defines this default chain:
 
 ```text
 google_gemini
@@ -17,9 +19,9 @@ google_gemini
 → nvidia
 ```
 
-A provider is skipped/fails forward when it is not configured, rejects the request, times out, or otherwise cannot return a usable result.
+The chain is ordered fallback, not a benchmark ranking. A provider can be skipped or fail forward when it is retired, unconfigured, quota-gated, times out, errors, or does not return a usable result. If no provider succeeds within the configured budget, callers should continue without pretending a fresh Scouter digest exists.
 
-GitHub Models is intentionally treated as a retired Scouter provider in the current client; do not add it back to local configuration expecting the public default path to use it.
+GitHub Models is treated as retired by the current Scouter resolver and is not part of the supported chain.
 
 ## Credentials
 
@@ -35,38 +37,41 @@ NVIDIA_API_KEY
 OLLAMA_API_KEY
 ```
 
-Not every provider requires every variable above, and local Ollama-compatible setups may use local endpoints instead of a hosted credential. See [`.env.example`](../.env.example) for the public placeholders actually shipped by the repository.
+Not every provider requires every variable above, and local Ollama-compatible setups may use local endpoints. See [`.env.example`](../.env.example) for the public placeholders shipped by the repository.
 
 Never commit the real `.env`.
 
 ## Local configuration
 
-Provider order and model choices can be overridden by the runtime configuration. Keep machine/account-specific choices in `config_local.json` rather than editing credentials into source.
+Provider order and model choices can be overridden by runtime configuration. Keep machine/account-specific choices in `config_local.json` rather than editing credentials into source.
 
-The default chain should be understood as a fallback strategy, not a benchmark ranking. Latency, quotas, model names, and free tiers are external service properties and can change without a repository update.
+The default chain should be read as fallback policy. Latency, quotas, model names, and free tiers can change independently of the repository.
 
 ## Output contract
 
-Scouter is designed to return a small piece of context suitable for a live conversation turn rather than a long OCR/vision report. The bridge can then decide whether the result is fresh/relevant enough to inject into ARTI's prompt.
+Scouter returns a compact structured digest suitable for a live conversation path. The public result includes summary/topic/emotion fields plus screen-related signals such as `screen_relevant` and `screen_hint`.
 
-Screen context is untrusted external input. The runtime should treat text visible on screen as observed content, not as privileged system instructions.
+Those screen signals can help the broader runtime decide whether fresh screenshot context is worth requesting. They are not themselves proof that the screen was captured or visually inspected.
 
-## Relationship to the broader vision path
+Observed chat/screen text remains untrusted input and must not be treated as privileged system instructions.
 
-Scouter is not the only vision-related module in ARTI. The main vision path and its model/configuration keys are documented in [`VISION-APIS.md`](VISION-APIS.md).
+## Relationship to the main vision path
 
-The two paths may have different provider identifiers/order because they solve different latency/context tasks. Always inspect the corresponding public source before assuming they share a chain.
+[`arti_vision_client.py`](../arti_vision_client.py) owns the main screenshot/vision chain documented in [`VISION-APIS.md`](VISION-APIS.md).
+
+Scouter and Vision intentionally use different provider identifiers/order because they solve different latency and context tasks. Both follow the same fallback principle: skip/fail forward while budget remains, then continue without fresh optional context if the chain is exhausted.
 
 ## Local smoke check
 
-1. Put the credential for one supported provider in `.env`.
-2. Keep the other providers unset if you want to isolate that path.
-3. Start ARTI locally and trigger the feature that requests Scouter context.
-4. Confirm a concise screen description is returned.
-5. Disable/break that provider locally and confirm the chain fails forward rather than crashing the bridge.
+1. Configure one supported Scouter provider.
+2. Keep later providers unset if you want to isolate that path.
+3. Start ARTI locally and generate enough recent conversation context to trigger Scouter.
+4. Confirm a compact digest is returned.
+5. Use a conversation that clearly refers to the screen and confirm the screen-relevance fields behave sensibly.
+6. Disable or break the first provider and confirm the chain can fail forward without crashing the bridge.
 
-Public CI does not send screenshots to external model APIs, so real provider calls remain local verification.
+Public CI does not make live external-provider calls, so provider availability remains local verification.
 
 ## Privacy
 
-A captured desktop frame may contain private messages, account information, browser tabs, tokens, or personal data. Do not attach real captures or raw Scouter payloads to public issues unless they are intentionally synthetic and safe to publish.
+Recent chat/context can contain private messages, account information, viewer identifiers, or personal data. Do not attach raw Scouter inputs/outputs to public issues unless the content is intentionally synthetic and safe to publish.

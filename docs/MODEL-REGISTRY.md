@@ -1,53 +1,58 @@
-# Model & Provider Registry
+# Model and provider registry
 
-This page documents the provider/model roles referenced by the public ARTI runtime. It is a **source snapshot**, not a promise that a third-party endpoint is still available today. Provider catalogs, free tiers, rate limits, and model slugs can change independently of this repository.
+This page explains the provider/model roles referenced by the public ARTI runtime and how those roles should be maintained when third-party model catalogs change.
+
+**Status:** this is a revision-scoped technical reference, not an evergreen provider catalog. Exact model slugs and enabled chains live in the checked-out source/configuration; external availability, pricing, quotas, and free tiers can change without a repository update.
 
 ## Source of truth
 
-Runtime defaults live in `hermes_vtuber_bridge.py` and provider-specific modules such as:
+Runtime defaults live in [`hermes_vtuber_bridge.py`](../hermes_vtuber_bridge.py) and provider-specific modules such as:
 
-- `arti_openrouter.py`
-- `arti_vision_client.py`
-- `arti_scouter_client.py`
-- `arti_ollama_vision.py`
-- `arti_cursor_agent.py`
+- [`arti_openrouter.py`](../arti_openrouter.py)
+- [`arti_vision_client.py`](../arti_vision_client.py)
+- [`arti_scouter_client.py`](../arti_scouter_client.py)
+- [`arti_ollama_vision.py`](../arti_ollama_vision.py)
+- [`arti_cursor_agent.py`](../arti_cursor_agent.py)
 
-`config_local.json` can override supported defaults without modifying tracked source.
+`config_local.json` can override supported defaults without modifying tracked source. Keep that file local.
 
 ## Conversational roles
 
 The bridge separates latency-sensitive live turns from heavier/background work.
 
-| Role | Typical default family | Notes |
+| Role | Runtime intent | Notes |
 |---|---|---|
-| live / fast | Groq-hosted fast model | Used for latency-sensitive voice/chat fallbacks |
-| live / strong | stronger Groq model | Selected for more complex live questions |
-| OpenRouter fallback | configured free/available endpoint | Availability can change; the runtime rolls through configured fallbacks |
-| local/cloud fallback | Ollama-compatible endpoint | Optional; configured by environment/local config |
-| Cursor agent | Composer-family model | Optional and disabled unless explicitly configured |
-| Codex/other agent adapters | configured external client | Optional and disabled unless explicitly configured |
+| live / fast | low-latency conversational path | Uses configured fast candidates and small/adaptive output budgets. |
+| live / strong | more complex live questions | Uses the stronger configured live candidate when routing policy selects it. |
+| OpenRouter live fallback | fallback after primary live providers fail | Must return usable content within the live token budget; see [`OPENROUTER_MODELS.md`](OPENROUTER_MODELS.md). |
+| OpenRouter summarizer | compact background summaries | Uses its own configured model/fallback pair and token budget. |
+| OpenRouter reflection | post-stream/background reflection | Uses a larger output budget than live turns and may use a different fallback chain. |
+| local/cloud adapters | optional configured providers | Availability depends on local credentials/endpoints and explicit configuration. |
+| external agent adapters | optional agent-backed paths | Disabled unless the corresponding local integration is explicitly configured. |
 
-The exact model slugs are intentionally kept in code/config instead of duplicated here so documentation cannot silently drift from runtime behavior.
+The exact model slugs are intentionally kept in code/config instead of duplicated here. That prevents a documentation table from silently becoming more authoritative than the runtime.
 
-## Vision roles
+## Vision and Scouter roles
 
-`arti_vision_client.py` owns the vision provider chain. The public snapshot may include adapters for Gemini, OpenRouter, Ollama-compatible endpoints, Cloudflare, NVIDIA, Z.ai, Groq, or other providers. A provider being implemented does **not** mean it is enabled by default or guaranteed to have a working free endpoint.
+[`arti_vision_client.py`](../arti_vision_client.py) owns the main screenshot/vision chain. [`arti_scouter_client.py`](../arti_scouter_client.py) owns a separate compact digest chain that can mark screen context as relevant. They solve different latency/context tasks and therefore do not need identical provider order.
 
-See `VISION-APIS.md` for configuration and smoke-test guidance.
+See [`VISION-APIS.md`](VISION-APIS.md) and [`SCOUTER.md`](SCOUTER.md) for the current shipped chains.
+
+A provider adapter existing in the repository does **not** mean it is enabled or accepted by the current chain. Retired providers can remain as compatibility code while the resolver skips or rejects them.
 
 ## Model retirement behavior
 
-External providers regularly retire or rename models. ARTI therefore treats provider/model failure as a routing problem rather than assuming one permanent model:
+External providers regularly retire or rename models. ARTI therefore treats model/provider failure as a routing problem rather than assuming one permanent model:
 
-1. provider-specific errors are normalized;
-2. known unavailable/decommissioned models are skipped where supported;
-3. the configured chain advances to the next candidate;
-4. optional providers can be disabled locally without editing source.
+1. provider-specific failures are normalized where supported;
+2. unavailable, retired, or locally disabled candidates are skipped;
+3. the configured chain advances while its time/output budget remains;
+4. if no optional provider succeeds, the caller should continue without pretending fallback succeeded.
 
-When a model disappears, prefer updating the configured model slug or chain and verifying it with the relevant smoke test. Do not encode provider marketing claims or temporary free-tier limits as permanent invariants.
+When a model disappears, update the configured model slug or chain and verify it on the exact runtime path that uses it. Do not encode provider marketing claims or temporary free-tier limits as permanent invariants.
 
 ## Configuration hygiene
 
-Keep secrets in `.env`, never in tracked config. Start from `.env.example` and `config_local.json.example`.
+Keep secrets in `.env`, never in tracked config. Start from [`.env.example`](../.env.example) and [`config_local.json.example`](../config_local.json.example).
 
-For a public bug report, include the provider name, model slug, normalized error/status, and whether the failure reproduces with a minimal request. Do not paste API keys, full private prompts, session logs, viewer data, or local absolute paths.
+For a public bug report, include the provider name, model slug, normalized error/status, and whether the failure reproduces with a minimal request. Do not paste API keys, private prompts, session logs, viewer data, or local absolute paths.
