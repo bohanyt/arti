@@ -24,6 +24,10 @@ Prinsip (cermin arti_cursor_agent, versi ringkas):
 
 from __future__ import annotations
 
+from arti_screen_privacy import screen_privacy
+
+_privacy_epoch = screen_privacy.epoch
+
 import os
 from pathlib import Path
 import tempfile
@@ -167,9 +171,15 @@ def send_turn(system_prompt: str, user_content: str, config: dict) -> str | None
     suara tidak boleh disandera. Run yatim ditinggalkan dan thread-nya
     dibuang (daur ulang di prewarm berikutnya).
     """
-    global _turns, _gagal_beruntun
+    global _turns, _gagal_beruntun, _privacy_epoch
     if not is_enabled(config):
         return None
+    epoch = screen_privacy.epoch
+    if not screen_privacy.current(config.get("_screen_privacy_epoch", epoch)):
+        return None
+    if _privacy_epoch != epoch:
+        _tutup("screen privacy boundary")
+        _privacy_epoch = epoch
     if not is_warm():
         prewarm(config)
         return None
@@ -182,6 +192,8 @@ def send_turn(system_prompt: str, user_content: str, config: dict) -> str | None
 
     def _run():
         try:
+            if not screen_privacy.current(epoch):
+                return
             with _lock:
                 th = _thread
             if th is None:

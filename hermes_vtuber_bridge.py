@@ -43,6 +43,7 @@ import pipeline_timer
 from pipeline_timer import PipelineTimer, format_latency_line
 import arti_expression_runtime
 import arti_screen_context
+from arti_screen_privacy import screen_privacy, STREAMER_TRIGGERS
 import arti_timeline_guard
 import arti_vision_client
 import arti_curious
@@ -1366,7 +1367,7 @@ def _normalize_voice_trigger(item) -> VoiceTrigger:
         return item
     if hasattr(item, "text"):
         return VoiceTrigger(
-            str(item.text),
+            item.text if isinstance(item.text, str) else str(item.text),
             str(getattr(item, "trigger_type", "mic") or "mic"),
             getattr(item, "viewer_name", None),
             float(
@@ -1510,6 +1511,8 @@ def _start_mic_watch_once(device_id, device_name: str, seconds: float, label: st
 def queue_voice_trigger(text, trigger_type="mic", viewer_name=None, *, asr_stages=None) -> bool:
     """Antrikan jawaban dan log trigger; True hanya jika trigger diterima."""
     global _pending_turn_id, _last_human_activity_ts, _last_streamer_speech_ts
+    if trigger_type in STREAMER_TRIGGERS:
+        _note_screen_privacy(text)
     # Detektor kehidupan (audit [date removed]): jalur AKTIF (streamer manggil
     # Arti via PTT/wake, donasi, link video) tidak lewat add_to_history
     # "Streamer" — tanpa bump ini, operator ngobrol intens dengan Arti >5 menit
@@ -3655,7 +3658,41 @@ def start_host_topic_workers() -> None:
     ).start()
 
 
+_screen_privacy_ingress_lock = threading.Lock()
+
+
+def _clear_screen_privacy_context() -> None:
+    """Clear mixed RAM context whose fragments have no reliable screen provenance."""
+    global scouter_result, summarizer_result, _last_scouter_history_snapshot
+    stream_history.clear()
+    with scouter_lock:
+        scouter_result = summarizer_result = None
+        CONFIG.pop("scouter_last_result", None)
+    _last_scouter_history_snapshot = []
+    arti_screen_context.screen_ring.clear()
+    arti_screen_context.watch_state = arti_screen_context.WatchState()
+    arti_vision_client.reset_gerbang_layar()
+    arti_curious.reset_session()
+
+
+def _note_screen_privacy(text: str) -> None:
+    with _screen_privacy_ingress_lock, history_lock:
+        if screen_privacy.apply_streamer_text(text or ""):
+            _clear_screen_privacy_context()
+            state = "restricted" if screen_privacy.restricted else "allowed"
+            print(f"[ScreenPrivacy] {state}; previous screen context revoked")
+
+
+def reset_screen_privacy_session() -> None:
+    """Explicit bridge-session boundary; screen consent is never config-backed."""
+    with _screen_privacy_ingress_lock, history_lock:
+        screen_privacy.reset_session()
+        _clear_screen_privacy_context()
+
+
 def add_to_history(source, message, arti_meta=None):
+    if source == "Streamer":
+        _note_screen_privacy(message)
     # Benang obrolan ([date removed]): giliran curious perlu tahu Arti barusan bilang
     # apa & sudah menagih apa — tanpa ini dia fiksasi (5 balasan beruntun
     # mengungkit hal yang sama, tes [date removed] [time removed]). catat() dijamin tak melempar.
@@ -6138,6 +6175,8 @@ def request_asr_stream_restart(reason: str = "") -> None:
 
 def is_vision_active(config: dict | None = None) -> bool:
     """Master vision_enabled + manual toggle OR scouter auto-window."""
+    if not screen_privacy.allows_screen():
+        return False
     cfg = config or CONFIG
     if not cfg.get("vision_enabled", cfg.get("screen_context_enabled", False)):
         return False
@@ -6637,6 +6676,8 @@ def refresh_vision_for_turn(user_speech: str = "") -> None:
     master switch vision_enabled.
     """
     global vision_auto_until
+    if not screen_privacy.allows_screen():
+        return
     if not is_vision_active():
         import arti_scouter_client  # import lokal — bridge tidak meng-importnya di level modul
 
@@ -7275,14 +7316,22 @@ def _emotion_to_mood(emotion: str) -> str:
     return emotion_to_mood.get(emotion, "lazy")
 
 
-def apply_scouter_result(summary_data: dict) -> None:
-    """Apply scouter JSON: mood, memory, auto-vision window, vision describe."""
+def apply_scouter_result(summary_data: dict, *, privacy_epoch: int | None = None) -> None:
+    """Apply Scouter data only if its source context still belongs to this epoch."""
     global scouter_result, summarizer_result, vision_auto_until, _last_scouter_ts, _last_scouter_history_snapshot
 
-    with scouter_lock:
-        scouter_result = summary_data
-        summarizer_result = summary_data
-        CONFIG["scouter_last_result"] = summary_data
+    with history_lock:
+        if privacy_epoch is not None and not screen_privacy.current(privacy_epoch):
+            return
+        privacy_epoch = screen_privacy.epoch
+        if screen_privacy.restricted:
+            summary_data = {**summary_data, "screen_relevant": False, "screen_hint": None,
+                            "curious_worthy": False, "curious_hook": None,
+                            "curious_question": None, "important_facts": []}
+        with scouter_lock:
+            scouter_result = summary_data
+            summarizer_result = summary_data
+            CONFIG["scouter_last_result"] = summary_data
 
     emotion = summary_data.get("emotion", "neutral")
     new_mood = _emotion_to_mood(emotion)
@@ -7292,10 +7341,12 @@ def apply_scouter_result(summary_data: dict) -> None:
     print(f"[Scouter] Emotion: {emotion} → Mood: {new_mood}")
 
     for fact in arti_timeline_guard.filter_scouter_facts(summary_data.get("important_facts", [])):
+        if not screen_privacy.current(privacy_epoch):
+            return
         if fact and len(str(fact)) > 10:
             save_long_term_memory(f"Stream fact: {fact}")
 
-    if summary_data.get("screen_relevant"):
+    if summary_data.get("screen_relevant") and screen_privacy.allows_screen():
         sec = float(CONFIG.get("scouter_auto_vision_sec", 60))
         vision_auto_until = max(vision_auto_until, time.time() + sec)
         _sync_vision_runtime_to_config()
@@ -7321,17 +7372,20 @@ def _run_scouter_pass(reason: str) -> None:
     import arti_scouter_client
 
     with history_lock:
+        privacy_epoch = screen_privacy.epoch
         recent_history = list(stream_history)[-15:]
     context_text = "\n".join(recent_history)
     if not context_text.strip():
         return
 
     print(f"[Scouter] Run ({reason})...")
-    summary_data = arti_scouter_client.run(context_text, _scouter_config())
+    summary_data = arti_scouter_client.run(
+        context_text, {**_scouter_config(), "_screen_privacy_epoch": privacy_epoch}
+    )
     if not summary_data:
         print("[Scouter] Semua provider gagal.")
         return
-    apply_scouter_result(summary_data)
+    apply_scouter_result(summary_data, privacy_epoch=privacy_epoch)
 
 
 def _scouter_timer_due() -> bool:
@@ -7415,6 +7469,8 @@ start_summarizer = start_scouter
 
 def get_scouter_context():
     """Ambil hasil scouter terbaru untuk inject ke prompt."""
+    if screen_privacy.restricted:
+        return ""
     with scouter_lock:
         data = scouter_result
     if not data:
@@ -7914,6 +7970,8 @@ def _openrouter_after_groq(
     cfg: dict,
     reason,
 ) -> tuple[str | None, str | None]:
+    if not screen_privacy.current(cfg.get("_screen_privacy_epoch", screen_privacy.epoch)):
+        return None, None
     if not cfg.get("openrouter_live_fallback_enabled", True):
         return None, None
     print(f"[Brain] Fallback OpenRouter (groq: {reason})...")
@@ -7986,6 +8044,8 @@ def groq_chat_completion(
     dicoba: list[str] = []   # yang SUNGGUH ditembak, bukan panjang rantai
 
     for model in chain:
+        if not screen_privacy.current(cfg.get("_screen_privacy_epoch", screen_privacy.epoch)):
+            return None, None
         dicoba.append(model)
         payload = {
             "model": model,
@@ -9245,6 +9305,7 @@ def stop_idle_animation():
 # 5. MAIN ORCHESTRATOR LOOP
 # ==========================================
 async def main_loop():
+    reset_screen_privacy_session()
     print("=== HERMES VTUBER BRIDGE (CONTEXT BUFFER ENHANCED) ===")
     
     global main_event_loop, _brain_busy, _brain_busy_since
@@ -10142,6 +10203,15 @@ async def _handle_voice_trigger(
     """Satu trigger sekaligus: mikir → RAG → Groq → TTS (no overlap)."""
     global _pending_turn_id, hotkey_active, last_arti_reply_text, current_api_task
 
+    with history_lock:
+        privacy_epoch = screen_privacy.epoch
+    if trigger.trigger_type == "curious" and (
+        screen_privacy.restricted
+        or trigger.queued_at <= screen_privacy.changed_at
+        or not screen_privacy.current(getattr(trigger.text, "privacy_epoch", privacy_epoch))
+    ):
+        return
+
     user_speech = trigger.text
     turn_id = trigger.turn_id or _pending_turn_id
     timer = PipelineTimer(extra=pipeline_timer.pop_asr_stages())
@@ -10218,6 +10288,10 @@ async def _handle_voice_trigger(
     rag_query = turn.rag_query
     timer.mark("after_rag")
 
+    if not screen_privacy.current(privacy_epoch):
+        await arti_expression_runtime.apply_turn_end(vts, CONFIG)
+        return
+
     ai_reply = None
     provider = CONFIG["api_provider"].lower()
     _cursor_route = _should_route_to_cursor(trigger.trigger_type)
@@ -10227,6 +10301,8 @@ async def _handle_voice_trigger(
     async def do_api_call():
         """Semua API calls diwrap di sini biar bisa di-cancel."""
         nonlocal ai_reply, tts_sentence_chunks
+        if not screen_privacy.current(privacy_epoch):
+            return
 
         # --- JALUR CURSOR COMPOSER (chat YT; fallback otomatis ke rantai lama) ---
         # Ditaruh paling depan supaya rantai provider di bawahnya tidak dirombak.
@@ -10236,6 +10312,7 @@ async def _handle_voice_trigger(
         if _cursor_route:
             ai_reply, tts_sentence_chunks, _src = await _cursor_reply_with_fallback(
                 llm_system, prompt_content, user_speech,
+                config={**CONFIG, "_screen_privacy_epoch": privacy_epoch},
                 trigger_type=trigger.trigger_type,
             )
 
@@ -10497,6 +10574,9 @@ async def _handle_voice_trigger(
     finally:
         current_api_task = None
     timer.mark("after_llm")
+    if not screen_privacy.current(privacy_epoch):
+        await arti_expression_runtime.apply_turn_end(vts, CONFIG)
+        return
     # --- EKSEKUSI JAWABAN AI ---
     if ai_reply:
         # Bersihkan tanda bintang dan yapping bahasa Inggris sebelum memproses lebih lanjut
@@ -10597,9 +10677,12 @@ async def _handle_voice_trigger(
                                     pipeline_timer.note_tts_jeda_ms(
                                         int((time.perf_counter() - _j0) * 1000)
                                     )
+                                if not screen_privacy.current(privacy_epoch):
+                                    break
                                 await tts.speak(chunk)
                         else:
-                            await tts.speak(ai_reply)
+                            if screen_privacy.current(privacy_epoch):
+                                await tts.speak(ai_reply)
                     finally:
                         nod_scope["active"] = False
                         nod_cancel.set()
@@ -10616,6 +10699,9 @@ async def _handle_voice_trigger(
                         "latency_ms": stages.get("total_ms"),
                         "stages": stages,
                     }
+                    if not screen_privacy.current(privacy_epoch):
+                        await arti_expression_runtime.apply_turn_end(vts, CONFIG)
+                        return
                     add_to_history("Arti (VTuber)", ai_reply, arti_meta=arti_meta)
                     _cermin_ke_chat_game(ai_reply)
                     _pending_turn_id = None

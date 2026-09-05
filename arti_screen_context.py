@@ -9,6 +9,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from arti_screen_privacy import screen_privacy
+
 DEFAULT_RING_SIZE = 5
 
 # Penanda log bridge Arti SENDIRI di layar (temuan live [date removed] sore: vision
@@ -59,8 +61,11 @@ class ScreenSnapshot:
     # Sudut obrolan dari model vision — opsional & aditif. Model lama / provider yang
     # tidak mengisi field ini tetap jalan: hook kosong = perilaku persis seperti dulu.
     hook: str = ""
+    privacy_epoch: int = field(default_factory=lambda: screen_privacy.epoch)
 
     def to_dict(self) -> dict[str, Any]:
+        if not screen_privacy.allows_screen(self.privacy_epoch):
+            return {}
         return {
             "wall_ts": self.wall_ts,
             "scene": self.scene,
@@ -80,15 +85,21 @@ class ScreenRing:
 
     def push(self, snapshot: ScreenSnapshot) -> None:
         with self._lock:
-            self._items.append(snapshot)
+            if screen_privacy.allows_screen(snapshot.privacy_epoch):
+                self._items.append(snapshot)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._items.clear()
 
     def snapshot(self) -> list[ScreenSnapshot]:
         with self._lock:
-            return list(self._items)
+            return [s for s in self._items if screen_privacy.allows_screen(s.privacy_epoch)]
 
     def latest(self) -> ScreenSnapshot | None:
         with self._lock:
-            return self._items[-1] if self._items else None
+            items = [s for s in self._items if screen_privacy.allows_screen(s.privacy_epoch)]
+            return items[-1] if items else None
 
 
 screen_ring = ScreenRing()
@@ -100,8 +111,11 @@ class WatchState:
     playback_mmss: str | None = None
     scene_ring: list[dict[str, Any]] = field(default_factory=list)
     updated_at: float = 0.0
+    privacy_epoch: int = field(default_factory=lambda: screen_privacy.epoch)
 
     def to_dict(self) -> dict[str, Any]:
+        if not screen_privacy.allows_screen(self.privacy_epoch):
+            return {}
         return {
             "event_id": self.event_id,
             "playback_mmss": self.playback_mmss,
@@ -292,6 +306,8 @@ def update_watch_state_from_snapshot(
     ring: ScreenRing | None = None,
     state: WatchState | None = None,
 ) -> None:
+    if not screen_privacy.allows_screen(snap.privacy_epoch):
+        return
     target_ring = ring or screen_ring
     target_state = state or watch_state
     target_ring.push(snap)
@@ -300,6 +316,7 @@ def update_watch_state_from_snapshot(
         target_state.event_id = event_id
     target_state.scene_ring = [s.to_dict() for s in target_ring.snapshot()]
     target_state.updated_at = snap.wall_ts
+    target_state.privacy_epoch = snap.privacy_epoch
 
 
 def screen_watcher_worker(

@@ -12,6 +12,7 @@ import arti_reply_policy
 import arti_timeline_guard
 import arti_vault_rag
 import arti_web_lookup
+from arti_screen_privacy import PRIVACY_INSTRUCTION, screen_privacy
 
 
 @dataclass
@@ -61,6 +62,8 @@ async def prepare_turn_context(
     ctx.rag_query = extract_trigger_message(speech) or speech
     base_system = trim_system_prompt(dynamic_system_prompt, config)
     base_system = append_watch_party_context(base_system)
+    if screen_privacy.restricted:
+        base_system += PRIVACY_INSTRUCTION
     if arti_timeline_guard.is_timeline_question(ctx.rag_query):
         base_system = arti_timeline_guard.append_timeline_guard(base_system, config)
 
@@ -68,6 +71,8 @@ async def prepare_turn_context(
         return await asyncio.to_thread(get_categorized_history)
 
     async def _load_rag(system_base: str) -> str:
+        if screen_privacy.restricted:
+            return system_base
         # Reaksi game: 8 detik RAG di jalur kritis untuk kejadian yang butuh
         # jawaban SEKARANG (live [date removed] malam, "reaksinya rada delay" —
         # tiap pukulan zombie menunggu lookup vault). Vault berisi kenangan

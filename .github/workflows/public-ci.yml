@@ -25,7 +25,7 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install cloud-safe test dependencies
-        run: python -m pip install --upgrade pip pytest pytest-timeout hypothesis numpy requests websockets python-dotenv
+        run: python -m pip install --upgrade pip pytest pytest-timeout hypothesis numpy pillow requests websockets python-dotenv
       - name: Validate requirements syntax
         run: |
           python - <<'PY'
@@ -61,6 +61,7 @@ jobs:
             tests/test_expression_runtime.py \
             tests/test_openrouter_chain.py \
             tests/test_session_mode.py \
+            tests/test_screen_privacy.py \
             tests/test_minecraft_events.py \
             tests/test_minecraft_runner.py
 

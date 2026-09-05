@@ -20,6 +20,7 @@ import arti_openrouter
 import arti_text_openai as text_oai
 import arti_zai_vision
 from arti_vision_openai import is_rate_limit_error
+from arti_screen_privacy import screen_privacy
 
 _scouter_lock = threading.Lock()
 _last_uptime_log_ts = 0.0
@@ -550,6 +551,7 @@ _PROVIDERS: dict[str, ProviderFn] = {
 
 def run_chain(context_text: str, config: dict) -> ScouterResult | None:
     """Run scouter chain on history text; returns parsed result or None."""
+    privacy_epoch = config.get("_screen_privacy_epoch", screen_privacy.epoch)
     if not context_text.strip():
         return None
 
@@ -567,6 +569,8 @@ def run_chain(context_text: str, config: dict) -> ScouterResult | None:
 
     try:
         for idx, name in enumerate(chain):
+            if not screen_privacy.current(privacy_epoch):
+                return None
             fn = _PROVIDERS.get(name)
             if not fn:
                 continue
@@ -574,7 +578,9 @@ def run_chain(context_text: str, config: dict) -> ScouterResult | None:
                 scouter_uptime.chain_fallback_count += 1
             try:
                 print(f"[Scouter] Trying {name}...")
-                raw, ms = fn(prompt, config)
+                raw, ms = fn(prompt, {**config, "_screen_privacy_epoch": privacy_epoch})
+                if not screen_privacy.current(privacy_epoch):
+                    return None
                 result = parse_scouter_response(raw)
                 if result is None:
                     last_err = f"{name}: bad JSON"

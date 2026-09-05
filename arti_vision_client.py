@@ -15,6 +15,7 @@ import arti_github_vision
 import arti_nvidia_client
 import arti_ollama_vision
 import arti_screen_context as sc
+from arti_screen_privacy import screen_privacy
 import arti_vision_capture
 import arti_vision_openai as oai
 import arti_zai_vision
@@ -393,6 +394,9 @@ def describe_with_chain(
     jpeg_b64: str | None = None,
 ) -> tuple[sc.ScreenSnapshot | None, str]:
     """Run vision chain; returns (snapshot, provider_name or '')."""
+    privacy_epoch = screen_privacy.epoch
+    if not screen_privacy.allows_screen(privacy_epoch):
+        return None, "privacy"
     if not config.get("vision_enabled", config.get("screen_context_enabled", False)):
         return None, ""
     runtime_on = config.get("vision_runtime_on", False)
@@ -425,6 +429,8 @@ def describe_with_chain(
 
     try:
         for idx, name in enumerate(chain):
+            if not screen_privacy.allows_screen(privacy_epoch):
+                return None, "privacy"
             fn = _PROVIDERS.get(name)
             if not fn:
                 continue
@@ -432,12 +438,15 @@ def describe_with_chain(
                 vision_uptime.chain_fallback_count += 1
             try:
                 print(f"[Vision] Trying {name}...")
-                raw, ms = fn(user_prompt, jpeg_b64, config)
+                raw, ms = fn(user_prompt, jpeg_b64, {**config, "_screen_privacy_epoch": privacy_epoch})
+                if not screen_privacy.allows_screen(privacy_epoch):
+                    return None, "privacy"
                 snap = _parse_raw(raw, config)
                 if snap is None:
                     last_err = f"{name}: empty scene"
                     print(f"[Vision] {name} parse fail ({ms}ms)")
                     continue
+                snap.privacy_epoch = privacy_epoch
                 _record_success(name)
                 _maybe_log_uptime()
                 print(f"[Vision] OK {name} ({ms}ms)")
@@ -476,6 +485,8 @@ def make_watcher_fn(config: dict) -> Callable[[], tuple[sc.ScreenSnapshot | None
 
 def refresh_if_stale(config: dict) -> tuple[sc.ScreenSnapshot | None, str]:
     """On-demand describe when ring snapshot older than vision_stale_sec."""
+    if not screen_privacy.allows_screen():
+        return None, "privacy"
     stale_sec = float(config.get("vision_stale_sec", 30))
     latest = sc.screen_ring.latest()
     if latest and (time.time() - latest.wall_ts) <= stale_sec:
