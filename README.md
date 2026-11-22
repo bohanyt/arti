@@ -1,48 +1,48 @@
-# ARTI
+# ARTI — an AI VTuber who lives on stream
 
-ARTI is an Indonesian-speaking AI VTuber who plays Stardew Valley by herself, live, as a streamer. She joins a
-co-op farm as a farmhand, decides what to do with her day, does it with her own hands in the real game, and talks
-with chat while she plays. The goal is that she plays the game through to its end by her own choices, understands
-it, enjoys it, and is fun to watch on the way.
+*An Indonesian AI VTuber who talks with her streamer and chat, remembers, and is learning to play games by herself.*
 
-YouTube: https://www.youtube.com/@bohanyt
+ARTI is not a chatbot glued to an avatar. She hears the streamer, reads YouTube chat, answers in her own voice through her own VTube Studio avatar, and remembers what happened in earlier streams. Her big ongoing challenge is playing a real game with her own hands, by her own choices. Right now that game is Stardew Valley: she joins her streamer's farm as a co-op farmhand and lives her own days there.
 
-## What she does
+**Watch her:** https://www.youtube.com/@bohanyt
 
-- **Plays.** She moves, uses tools, interacts with the world, works any menu or dialog, and goes to bed, through
-  the same kinds of input a player has. Nothing is scripted per task: she is shown what she can do right now, and
-  she chooses.
-- **Learns the game as facts, never as orders.** Seasons, crops, money, shops and the Community Center reach her
-  as things that are true. What to do about them stays her decision.
-- **Remembers.** She keeps what she did yesterday, what changed in the world and what she is working toward,
-  across days and across sessions.
-- **Talks.** The ARTI who answers chat is the same ARTI who chooses and plays. She reacts to her own journey
-  instead of narrating it.
+## What works today
 
-## How it is built
+| Part | Status |
+| --- | --- |
+| Talking live in Indonesian (microphone in, her own voice out) | Works on real streams |
+| Reading and answering YouTube chat | Works on real streams |
+| Her avatar in VTube Studio (expressions, reactions, subtitles) | Works on real streams |
+| Remembering earlier streams and what she did | Works; still growing |
+| Playing Stardew Valley by herself as a co-op farmhand | Experimental: she plays real sessions, but she is slow (about a minute per decision) and still gets stuck |
+| Minecraft player (Mineflayer bridge in `mc-bot/`) | Older integration, not the current focus |
 
-- **Hands: a C# SMAPI mod** (`stardew-mod/`). It runs inside her copy of the game, reports what is around her,
-  carries out her inputs, and reads the result back from game state instead of assuming a command worked.
-- **Mind: a Python runtime.** Each moment it builds a "page": what she sees, what she remembers, and the choices
-  open to her. A language model picks one, the runtime runs it through the mod, then checks the effect in the world.
-- **Voice bridge.** Speech to text for the microphone, chat intake, and text to speech for her voice, kept apart
-  from the game loop so that talking stays fast while she plays.
-- **VTube Studio.** Her avatar: expressions, idle motion and reactions, with a subtitle overlay on stream.
-- **Two games, one farm.** A host game owns the farm. ARTI runs a separate SMAPI-enabled game and joins it as a
-  farmhand over ordinary multiplayer.
+"Works on real streams" means it has run on her channel. A change that only passed its tests is not counted as proven.
 
-An older Minecraft integration is also in the tree. It is not the current focus.
+## How she works
+
+```mermaid
+flowchart LR
+    Mic[Streamer's microphone] --> Voice[Voice bridge]
+    Chat[YouTube chat] --> Voice
+    Voice <--> Mind[Her mind: one Python runtime]
+    Memory[Her memory] <--> Mind
+    Mind --> Avatar[VTube Studio avatar + subtitles]
+    Voice --> TTS[Her voice]
+    Mind <--> Mod[Her hands: a C# SMAPI mod in her own copy of the game]
+    Mod <--> Farm[The streamer's co-op farm]
+```
+
+- **Her mind** builds a "page" each moment: what she sees, what she remembers, and the choices open to her. A language model picks one, the runtime carries it out through the mod, then checks the effect in the world.
+- **Her hands** (`stardew-mod/`) run inside her copy of the game. They report what is around her, press what she chose, and read the result back from game state instead of assuming a command worked.
+- **She learns the game as facts, never as orders.** Seasons, crops, money, shops and the Community Center reach her as things that are true. What to do about them stays her decision.
+- **The ARTI who answers chat is the same ARTI who plays.** She reacts to her own journey instead of narrating it.
 
 `docs/WIRING.md` shows how the parts connect.
 
 ## Status
 
-Experimental. This is a working lab and not a product: one person's project, run by its author on the author's
-own machines, and pushed forward with AI coding agents. Nothing is packaged to install and run. It is published
-so the work can be seen, read and judged.
-
-She plays real sessions, but she is slow for a streamer and she still gets stuck. A change that passed its tests
-is not counted as proven in the game.
+Experimental. This is one person's project and a working lab, not a product. It runs on its author's own machines and is pushed forward with AI coding agents. Nothing is packaged to install and run: it is published so the work can be seen, read and judged.
 
 ## What is not in this repository
 
