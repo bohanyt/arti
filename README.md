@@ -2,7 +2,7 @@
 
 *An Indonesian AI VTuber who talks with her streamer and chat, remembers, and is learning to play games by herself.*
 
-ARTI is not a chatbot glued to an avatar. She hears the streamer, reads YouTube chat, answers in her own voice through her own VTube Studio avatar, and remembers what happened in earlier streams. Her big ongoing challenge is playing a real game with her own hands, by her own choices. Right now that game is Stardew Valley: she joins her streamer's farm as a co-op farmhand and lives her own days there. Stardew is the first game; more come after.
+ARTI is not a chatbot glued to an avatar. She hears the streamer, reads live chat from YouTube, TikTok and Instagram, answers in her own voice through her own VTube Studio avatar, and remembers what happened in earlier streams. Her big ongoing challenge is playing a real game with her own hands, by her own choices. Right now that game is Stardew Valley: she joins her streamer's farm as a co-op farmhand and lives her own days there. Stardew is the first game; more come after.
 
 **Watch her:** https://www.youtube.com/@bohanyt
 
@@ -11,7 +11,7 @@ ARTI is not a chatbot glued to an avatar. She hears the streamer, reads YouTube 
 | Part | Status |
 | --- | --- |
 | Talking live in Indonesian (microphone in, her own voice out) | Works on real streams |
-| Reading and answering YouTube chat | Works on real streams |
+| Reading and answering live chat from YouTube, TikTok and Instagram (one door through Social Stream Ninja) | Works on real streams |
 | Her avatar in VTube Studio (expressions, reactions, subtitles) | Works on real streams |
 | Remembering earlier streams and what she did | Works; still growing |
 | Playing Stardew Valley by herself as a co-op farmhand | Experimental: she plays real sessions, but she is slow (about a minute per decision) and still gets stuck |
