@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "arti:contracts/occurrence_ring.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["v", "save_id", "player_id", "runtime_id", "capacity", "first_seq", "last_seq", "records"],
+  "properties": {
+    "v": { "const": "arti.occurrence_ring/1" },
+    "save_id": { "$ref": "common.schema.json#/$defs/Id" }, "player_id": { "type": "integer" },
+    "runtime_id": { "$ref": "common.schema.json#/$defs/Id", "$comment": "last writer (R0-03 §7.4)" },
+    "capacity": { "const": 512 },
+    "first_seq": { "type": "integer", "minimum": 0 }, "last_seq": { "type": "integer", "minimum": 0 },
+    "records": { "type": "array", "maxItems": 512, "items": { "$ref": "#/$defs/Record" } }
+  },
+  "$defs": {
+    "Record": { "type": "object", "additionalProperties": false,
+      "required": ["occ_seq", "kind", "subject", "frame", "tick", "wall_ms", "runtime_id", "facts"],
+      "properties": {
+        "occ_seq": { "type": "integer", "minimum": 1 },
+        "tick": { "$ref": "common.schema.json#/$defs/Tick", "$comment": "R0-05 E11" },
+        "facts_truncated": { "type": "boolean" },
+        "kind": { "enum": ["host_proposal", "item_received", "mail_arrived", "levelup_shown", "progression_admitted",
+                           "progression_settled", "op_closed", "ko_items_lost", "barrier", "native_restart", "effect", "native_progress", "native_story"] },
+        "subject": { "type": "string", "maxLength": 160 },
+        "frame": { "$ref": "common.schema.json#/$defs/Frame" },
+        "wall_ms": { "$ref": "common.schema.json#/$defs/WallMs" },
+        "runtime_id": { "$ref": "common.schema.json#/$defs/Id" },
+        "attempt_id": { "$ref": "common.schema.json#/$defs/Id" },
+        "facts": { "$ref": "common.schema.json#/$defs/Facts" } },
+      "allOf": [
+        { "if": { "properties": { "kind": { "const": "host_proposal" } } }, "then": { "properties": { "facts": {
+            "required": ["phase", "proposal_kind", "sender_id", "proposal_id"],
+            "properties": { "phase": { "enum": ["shown", "withdrawn", "accepted", "declined"] },
+                            "proposal_kind": { "enum": ["gift", "dance", "trade", "marriage", "other"] } } } } } },
+        { "if": { "properties": { "kind": { "const": "item_received" } } }, "then": { "properties": { "facts": {
+            "required": ["source", "item_id", "qty"],
+            "properties": { "source": { "enum": ["gift", "mail", "quest", "other"] } } } } } },
+        { "if": { "properties": { "kind": { "const": "levelup_shown" } } }, "then": { "properties": { "facts": {
+            "required": ["skill", "level", "profession"] } } } },
+        { "if": { "properties": { "kind": { "enum": ["progression_admitted", "progression_settled"] } } },
+          "then": { "required": ["attempt_id"], "properties": { "facts": {
+            "required": ["receiver_epoch", "menu_type", "op", "accepted"],
+            "properties": { "op": { "enum": ["a_prose_advance", "b_info_ok", "c_shipping_ok", "d_levelup_ok", "e_item_list_ok"] } } } } } },
+        { "if": { "properties": { "kind": { "const": "op_closed" } } }, "then": { "required": ["attempt_id"],
+            "properties": { "facts": { "required": ["witness"] } } } },
+        { "if": { "properties": { "kind": { "const": "effect" } } }, "then": { "required": ["attempt_id"],
+            "$comment": "late native effect witness of an attempt whose result.json was already written (R0-05 §4.2)",
+            "properties": { "facts": { "required": ["effect_kind", "subject", "effect_frame"],
+              "properties": { "effect_kind": { "$ref": "verb_phases.schema.json#/$defs/EffectKind" },
+                              "subject": { "type": "string", "maxLength": 160 },
+                              "effect_frame": { "$ref": "common.schema.json#/$defs/Frame" },
+                              "item_id": { "type": "string", "maxLength": 96 },
+                              "qty": { "type": "integer" },
+                              "price": { "type": "integer", "minimum": 0 } } } } } },
+        { "if": { "properties": { "kind": { "const": "barrier" } } }, "then": { "properties": { "facts": {
+            "required": ["edge", "barrier_kind", "instance_id"],
+            "properties": { "edge": { "enum": ["opened", "stage", "closed"] } } } } } },
+        { "if": { "properties": { "kind": { "const": "native_restart" } } }, "then": { "properties": { "facts": {
+            "required": ["prev_runtime_id", "last_persisted_seq", "last_persisted_wall_ms", "prev_exit"],
+            "properties": { "prev_exit": { "enum": ["orderly", "unclean"] } } } } } }
+      ] }
+  }
+}

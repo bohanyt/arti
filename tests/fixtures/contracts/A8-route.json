@@ -1,0 +1,5 @@
+[
+  {"trace":"TR-EXE-01","name":"route_walk_then_interact","epoch":1,"interrupt":null,"phases":["walking","pre_edge","post_edge"],"writable":true,"status":"completed"},
+  {"trace":"TR-EXE-03","name":"interrupt_during_walk","epoch":1,"interrupt":"cancel","phases":["walking"],"writable":false,"status":"uncertain"},
+  {"trace":"TR-ADV-14","name":"foreign_epoch_during_walk","epoch":2,"interrupt":null,"phases":["walking"],"writable":false,"status":"uncertain"}
+]

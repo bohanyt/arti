@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "arti:contracts/journal.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["v", "seq", "ts_ms", "run_id", "session_id", "core_sha", "ev", "facts"],
+  "properties": {
+    "v": { "const": "arti.journal/1" },
+    "seq": { "type": "integer", "minimum": 1 },
+    "ts_ms": { "$ref": "common.schema.json#/$defs/WallMs" },
+    "run_id": { "$ref": "common.schema.json#/$defs/Id" },
+    "session_id": { "type": ["string", "null"], "maxLength": 128 },
+    "core_sha": { "type": "string", "pattern": "^[0-9a-f]{7,40}$" },
+    "ev": { "$ref": "journal_vocab.schema.json#/$defs/Ev" },
+    "attempt_id": { "$ref": "common.schema.json#/$defs/Id" },
+    "request_id": { "$ref": "common.schema.json#/$defs/Id" },
+    "decision_id": { "$ref": "common.schema.json#/$defs/Sha256" },
+    "offer_generation": { "$ref": "common.schema.json#/$defs/Gen" },
+    "activity_id": { "$ref": "common.schema.json#/$defs/Id" },
+    "actor": { "$ref": "common.schema.json#/$defs/JournalActor" },
+    "bucket": { "$ref": "common.schema.json#/$defs/Bucket" },
+    "code": { "type": "string", "pattern": "^[a-zA-Z0-9_]{2,64}$" },
+    "incident_id": { "$ref": "common.schema.json#/$defs/Id" },
+    "provider": { "enum": ["codex", "claude"] },
+    "model": { "type": "string", "maxLength": 64, "not": { "pattern": "astra" } },
+    "latency_ms": { "type": "integer", "minimum": 0 },
+    "facts": { "$ref": "common.schema.json#/$defs/Facts" }
+  }
+}

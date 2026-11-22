@@ -1,0 +1,10 @@
+{ "id": "SCH-18", "source": "R0-07 §15, §6", "schema": "accounting.schema.json",
+  "input": "attempt_final with evidence.value E3 and closure.closed false",
+  "cases": [
+    { "name": "e3_unclosed", "base": "attempt_final_e2", "expect": "invalid", "keyword": "const",
+      "ops": [ { "op": "set", "path": "/evidence/value", "value": "E3" }, { "op": "set", "path": "/evidence/outcome", "value": "CLEAN_FAIL" },
+               { "op": "set", "path": "/evidence/effect_keys", "value": [] }, { "op": "set", "path": "/evidence/closure/closed", "value": false } ] },
+    { "name": "control_e3_closed", "base": "attempt_final_e2", "expect": "valid",
+      "ops": [ { "op": "set", "path": "/evidence/value", "value": "E3" }, { "op": "set", "path": "/evidence/outcome", "value": "CLEAN_FAIL" },
+               { "op": "set", "path": "/evidence/effect_keys", "value": [] } ] },
+    { "name": "control_e2", "base": "attempt_final_e2", "expect": "valid" } ] }

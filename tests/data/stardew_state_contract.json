@@ -1,0 +1,108 @@
+{
+  "location": "Farm",
+  "tile": {
+    "x": 64,
+    "y": 17
+  },
+  "pixel": {
+    "x": 4096,
+    "y": 1088
+  },
+  "facing": 2,
+  "time_of_day": 630,
+  "date": {
+    "season": "spring",
+    "day": 3,
+    "year": 1
+  },
+  "energy": 264,
+  "health": 100,
+  "is_player_free": true,
+  "can_player_move": true,
+  "active_menu": "GameMenu",
+  "ui_revision": 42,
+  "menu": {
+    "name": "GameMenu",
+    "menu_type": "GameMenu",
+    "page_type": "InventoryPage",
+    "snap_id": 103,
+    "snap_label": "Right Ring",
+    "snap_bounds": {
+      "x": 700,
+      "y": 420,
+      "w": 64,
+      "h": 64
+    },
+    "close_id": 9175502,
+    "focus_key": "inventory.slot.15",
+    "visible_text": null,
+    "speaker": null,
+    "components": [
+      {
+        "key": "game.tab.inventory",
+        "native_id": 12340,
+        "source": "frame",
+        "role": "tab",
+        "name": "Inventory",
+        "label": "Inventory",
+        "bounds": {
+          "x": 64,
+          "y": 64,
+          "w": 64,
+          "h": 64
+        },
+        "neighbors": {
+          "up": -99998,
+          "right": 12341,
+          "down": 0,
+          "left": -99999
+        },
+        "text": "Inventory",
+        "count": null,
+        "selected": true
+      },
+      {
+        "key": "inventory.slot.15",
+        "native_id": 15,
+        "source": "page",
+        "role": "inventory_slot",
+        "name": "15",
+        "label": "Right Ring",
+        "bounds": {
+          "x": 700,
+          "y": 420,
+          "w": 64,
+          "h": 64
+        },
+        "neighbors": {
+          "up": 3,
+          "right": 16,
+          "down": 27,
+          "left": 14
+        },
+        "text": "Parsnip Seeds",
+        "count": 15,
+        "selected": true
+      }
+    ]
+  },
+  "inventory": {
+    "active_slot": 0,
+    "hotbar": [
+      {
+        "slot": 0,
+        "name": "Hoe",
+        "stack": 1,
+        "is_tool": true
+      },
+      {
+        "slot": 3,
+        "name": "Parsnip Seeds",
+        "stack": 15,
+        "is_tool": false
+      }
+    ],
+    "slots_used": 7,
+    "items_total": 143
+  }
+}

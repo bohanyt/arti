@@ -1,0 +1,7 @@
+{ "id": "SCH-32", "source": "R0-07 §15, §4.3 TargetKind", "schema": "observation.schema.json",
+  "input": "observation world.targets[].kind tree",
+  "cases": [
+    { "name": "target_kind_tree", "base": "observation_hud", "expect": "invalid", "keyword": "enum",
+      "ops": [ { "op": "set", "path": "/world/targets/0/kind", "value": "tree" } ] },
+    { "name": "control_other_world_object", "base": "observation_hud", "expect": "valid",
+      "ops": [ { "op": "set", "path": "/world/targets/0/kind", "value": "other_world_object" } ] } ] }

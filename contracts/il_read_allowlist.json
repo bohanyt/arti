@@ -1,0 +1,1919 @@
+{
+  "game_mvid": "aa1f513a-94f0-4ef6-a35f-2d5b4a3721bf",
+  "review": "N1: exact closed signatures; consequential/lazy getter sites are explicit D29 debt, not pure queries. No prefix fallback; native_only=false.",
+  "queries": [
+    {
+      "member": "System.Collections.Generic.IEnumerator`1<!0> Netcode.NetHashSet`1<System.String>::GetEnumerator()",
+      "reason": "read-only enumeration wrapper over existing native string flags; no game-state mutation (ADR 63)"
+    },
+    {
+      "member": "System.Collections.Generic.IList`1<StardewValley.GameLocation> StardewValley.Game1::get_locations()",
+      "reason": "returns the existing loaded location collection for observation, without loading new locations (ADR 63)"
+    },
+    {
+      "member": "Netcode.NetDictionary`5/PairsCollection<!0,!1,!2,!3,!4> Netcode.NetDictionary`5<System.String,System.String,Netcode.NetString,StardewValley.SerializableDictionary`2<System.String,System.String>,StardewValley.Network.NetStringDictionary`2<System.String,Netcode.NetString>>::get_Pairs()",
+      "reason": "constructs a read-only enumeration wrapper over existing fields; does not initialize bundle data"
+    },
+    {
+      "member": "!0 Netcode.NetArray`2<StardewValley.Object,Netcode.NetRef`1<StardewValley.Object>>::get_Item(System.Int32)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "!0 Netcode.NetArray`2<System.Boolean,Netcode.NetBool>::get_Item(System.Int32)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "!0 Netcode.NetArray`2<System.Int32,Netcode.NetInt>::get_Item(System.Int32)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "!0 Netcode.NetFieldBase`2<Microsoft.Xna.Framework.Color,Netcode.NetColor>::get_Value()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "!0 Netcode.NetFieldBase`2<Microsoft.Xna.Framework.Point,Netcode.NetPoint>::get_Value()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "!0 Netcode.NetFieldBase`2<Microsoft.Xna.Framework.Vector2,Netcode.NetVector2>::get_Value()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "!0 Netcode.NetFieldBase`2<StardewValley.Farmer,Netcode.NetRef`1<StardewValley.Farmer>>::get_Value()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "!0 Netcode.NetFieldBase`2<StardewValley.Item,Netcode.NetRef`1<StardewValley.Item>>::get_Value()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "!0 Netcode.NetFieldBase`2<StardewValley.Network.NetWorldState,Netcode.NetRef`1<StardewValley.Network.NetWorldState>>::get_Value()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "!0 Netcode.NetFieldBase`2<StardewValley.Object,Netcode.NetRef`1<StardewValley.Object>>::get_Value()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "!0 Netcode.NetFieldBase`2<StardewValley.Objects.Boots,Netcode.NetRef`1<StardewValley.Objects.Boots>>::get_Value()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "!0 Netcode.NetFieldBase`2<StardewValley.Objects.Clothing,Netcode.NetRef`1<StardewValley.Objects.Clothing>>::get_Value()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "!0 Netcode.NetFieldBase`2<StardewValley.Objects.Hat,Netcode.NetRef`1<StardewValley.Objects.Hat>>::get_Value()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "!0 Netcode.NetFieldBase`2<StardewValley.Objects.Ring,Netcode.NetRef`1<StardewValley.Objects.Ring>>::get_Value()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "!0 Netcode.NetFieldBase`2<StardewValley.ProposalResponse,Netcode.NetEnum`1<StardewValley.ProposalResponse>>::get_Value()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "!0 Netcode.NetFieldBase`2<StardewValley.ProposalType,Netcode.NetEnum`1<StardewValley.ProposalType>>::get_Value()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "!0 Netcode.NetFieldBase`2<StardewValley.Tool,Netcode.NetRef`1<StardewValley.Tool>>::get_Value()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "!0 Netcode.NetFieldBase`2<System.Boolean,Netcode.NetBool>::get_Value()",
+      "reason": "Read existing native value only; fix36 reuses this exact query for host bed/readiness speech facts (ADR 40). No writes, input, or sleep intent inference."
+    },
+    {
+      "member": "!0 Netcode.NetFieldBase`2<System.Int32,Netcode.NetInt>::get_Value()",
+      "reason": "Read existing native value only; fix36 reuses this exact query for host bed/readiness speech facts (ADR 40). No writes, input, or sleep intent inference."
+    },
+    {
+      "member": "!0 Netcode.NetFieldBase`2<System.Int64,Netcode.NetLong>::get_Value()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "!0 Netcode.NetFieldBase`2<System.Single,Netcode.NetFloat>::get_Value()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "!0 Netcode.NetFieldBase`2<System.String,Netcode.NetString>::get_Value()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "!0 Netcode.NetList`2<StardewValley.MapSeat,Netcode.NetRef`1<StardewValley.MapSeat>>::get_Item(System.Int32)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "!0 Netcode.NetList`2<StardewValley.Quests.Quest,Netcode.NetRef`1<StardewValley.Quests.Quest>>::get_Item(System.Int32)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "Microsoft.Xna.Framework.Color StardewValley.Farmer::GetPantsColor()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "Microsoft.Xna.Framework.Color StardewValley.Menus.DiscreteColorPicker::getColorFromSelection(System.Int32)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "Microsoft.Xna.Framework.GameWindow StardewValley.InstanceGame::get_Window()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "Microsoft.Xna.Framework.Graphics.SpriteFont StardewValley.Menus.TextBox::get_Font()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "Microsoft.Xna.Framework.Input.GamePadState StardewValley.InputState::GetGamePadState()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "Microsoft.Xna.Framework.Input.KeyboardState StardewValley.InputState::GetKeyboardState()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "Microsoft.Xna.Framework.Input.Keys StardewValley.Options::getFirstKeyboardKeyFromInputButtonList(StardewValley.InputButton[])",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "Microsoft.Xna.Framework.Input.Keys StardewValley.Utility::mapGamePadButtonToKey(Microsoft.Xna.Framework.Input.Buttons)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "Microsoft.Xna.Framework.Input.MouseState StardewValley.InputState::GetMouseState()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "Microsoft.Xna.Framework.Point StardewValley.Buildings.Building::getMailboxPosition()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "Microsoft.Xna.Framework.Point StardewValley.Farmer::getMailboxPosition()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "Microsoft.Xna.Framework.Rectangle StardewValley.Buildings.Building::getRectForAnimalDoor(StardewValley.GameData.Buildings.BuildingData)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "Microsoft.Xna.Framework.Rectangle StardewValley.Character::GetBoundingBox()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "Microsoft.Xna.Framework.Rectangle StardewValley.Character::nextPosition(System.Int32)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "Microsoft.Xna.Framework.Rectangle StardewValley.Farmer::nextPositionHalf(System.Int32)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "Microsoft.Xna.Framework.Rectangle StardewValley.Object::GetBoundingBox()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "Microsoft.Xna.Framework.Rectangle StardewValley.TerrainFeatures.TerrainFeature::getBoundingBox()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "Microsoft.Xna.Framework.Rectangle StardewValley.Utility::getRectangleCenteredAt(Microsoft.Xna.Framework.Vector2,System.Int32)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "Microsoft.Xna.Framework.Vector2 StardewValley.Character::GetGrabTile()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "Microsoft.Xna.Framework.Vector2 StardewValley.Character::GetToolLocation(System.Boolean)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "Microsoft.Xna.Framework.Vector2 StardewValley.Character::getStandingPosition()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "Microsoft.Xna.Framework.Vector2 StardewValley.Locations.MineShaft::get_tileBeneathLadder()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "Microsoft.Xna.Framework.Vector2 StardewValley.Object::get_TileLocation()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "Microsoft.Xna.Framework.Vector2 StardewValley.TerrainFeatures.TerrainFeature::get_Tile()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "Netcode.NetDictionary`5/KeysCollection<!0,!1,!2,!3,!4> Netcode.NetDictionary`5<System.Int64,StardewValley.FarmAnimal,Netcode.NetRef`1<StardewValley.FarmAnimal>,StardewValley.SerializableDictionary`2<System.Int64,StardewValley.FarmAnimal>,StardewValley.Network.NetLongDictionary`2<StardewValley.FarmAnimal,Netcode.NetRef`1<StardewValley.FarmAnimal>>>::get_Keys()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "Netcode.NetDictionary`5/PairsCollection<!0,!1,!2,!3,!4> Netcode.NetDictionary`5<Microsoft.Xna.Framework.Point,System.String,Netcode.NetString,StardewValley.SerializableDictionary`2<Microsoft.Xna.Framework.Point,System.String>,StardewValley.Network.NetPointDictionary`2<System.String,Netcode.NetString>>::get_Pairs()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "Netcode.NetDictionary`5/PairsCollection<!0,!1,!2,!3,!4> Netcode.NetDictionary`5<Microsoft.Xna.Framework.Vector2,StardewValley.TerrainFeatures.TerrainFeature,Netcode.NetRef`1<StardewValley.TerrainFeatures.TerrainFeature>,StardewValley.SerializableDictionary`2<Microsoft.Xna.Framework.Vector2,StardewValley.TerrainFeatures.TerrainFeature>,StardewValley.Network.NetVector2Dictionary`2<StardewValley.TerrainFeatures.TerrainFeature,Netcode.NetRef`1<StardewValley.TerrainFeatures.TerrainFeature>>>::get_Pairs()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "Netcode.NetDictionary`5/ValuesCollection<!0,!1,!2,!3,!4> Netcode.NetDictionary`5<System.Int64,StardewValley.FarmAnimal,Netcode.NetRef`1<StardewValley.FarmAnimal>,StardewValley.SerializableDictionary`2<System.Int64,StardewValley.FarmAnimal>,StardewValley.Network.NetLongDictionary`2<StardewValley.FarmAnimal,Netcode.NetRef`1<StardewValley.FarmAnimal>>>::get_Values()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "Netcode.NetDictionary`5/ValuesCollection<!0,!1,!2,!3,!4> Netcode.NetDictionary`5<System.Int64,System.Int32,Netcode.NetInt,StardewValley.SerializableDictionary`2<System.Int64,System.Int32>,StardewValley.Network.NetLongDictionary`2<System.Int32,Netcode.NetInt>>::get_Values()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "Netcode.NetList`2/Enumerator<!0,!1> Netcode.NetList`2<StardewValley.Warp,Netcode.NetRef`1<StardewValley.Warp>>::GetEnumerator()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "Netcode.NetObjectShrinkList`1/Enumerator<!0> Netcode.NetObjectShrinkList`1<StardewValley.Chunk>::GetEnumerator()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "Netcode.NetObjectShrinkList`1<StardewValley.Chunk> StardewValley.Debris::get_Chunks()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Buildings.Building StardewValley.GameLocation::getBuildingAt(Microsoft.Xna.Framework.Vector2)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Characters.Horse StardewValley.Farmer::get_mount()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Crop StardewValley.TerrainFeatures.HoeDirt::get_crop()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Event StardewValley.Game1::get_CurrentEvent()",
+      "reason": "native value query; ADR-60 also observes the current event ID/command in NativeDayTransition, without invoking or completing the event"
+    },
+    {
+      "member": "StardewValley.Farm StardewValley.Game1::getFarm()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.FarmAnimal StardewValley.Utility::GetBestHarvestableFarmAnimal(System.Collections.Generic.IEnumerable`1<StardewValley.FarmAnimal>,StardewValley.Tool,Microsoft.Xna.Framework.Rectangle)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Farmer StardewValley.Characters.Horse::get_rider()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Farmer StardewValley.Game1::get_MasterPlayer()",
+      "reason": "Read existing native value only; fix36 reuses this exact query for host bed/readiness speech facts (ADR 40). No writes, input, or sleep intent inference."
+    },
+    {
+      "member": "StardewValley.Farmer StardewValley.Game1::get_player()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Farmer StardewValley.Locations.FarmHouse::get_owner()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Farmer StardewValley.Network.NetFarmerRef::get_Value()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.FarmerSprite StardewValley.Farmer::get_FarmerSprite()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.FarmerTeam StardewValley.Farmer::get_team()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.GameData.Buildings.BuildingData StardewValley.Buildings.Building::GetData()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.GameData.Crops.HarvestMethod StardewValley.Crop::GetHarvestMethod()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.GameData.FarmAnimals.FarmAnimalData StardewValley.FarmAnimal::GetAnimalData()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.GameData.Machines.MachineData StardewValley.Object::GetMachineData()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.GameData.Tools.ToolData StardewValley.Tool::GetToolData()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.GameData.Tools.ToolUpgradeData StardewValley.Internal.ShopBuilder::GetToolUpgradeData(StardewValley.GameData.Tools.ToolData,StardewValley.Farmer)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.GameLocation StardewValley.Buildings.Building::GetIndoors()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.GameLocation StardewValley.Game1::get_currentLocation()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.GameLocation StardewValley.GameLocation::GetRootLocation()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.GameLocation StardewValley.Object::get_Location()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.IKeyboardSubscriber StardewValley.KeyboardDispatcher::get_Subscriber()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Inventories.Inventory StardewValley.Farmer::get_Items()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Item StardewValley.Debris::get_item()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Item StardewValley.Farmer::get_CurrentItem()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Item StardewValley.Farmer::get_CursorSlotItem()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Item StardewValley.Farmer::get_TemporaryItem()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Item StardewValley.Inventories.Inventory::get_Item(System.Int32)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Item StardewValley.Menus.MenuWithInventory::get_heldItem()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.ItemTypeDefinitions.ParsedItemData StardewValley.CraftingRecipe::GetItemData(System.Boolean)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.ItemTypeDefinitions.ParsedItemData StardewValley.ItemRegistry::GetData(System.String)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.KeyboardDispatcher StardewValley.Game1::get_keyboardDispatcher()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Menus.ClickableComponent StardewValley.Menus.IClickableMenu::getCurrentlySnappedComponent()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Menus.IClickableMenu StardewValley.Game1::get_activeClickableMenu()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Menus.IClickableMenu StardewValley.Menus.GameMenu::GetCurrentPage()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Menus.IClickableMenu StardewValley.Menus.IClickableMenu::GetChildMenu()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Menus.IClickableMenu StardewValley.Menus.IClickableMenu::GetParentMenu()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Menus.IClickableMenu StardewValley.Menus.TitleMenu::get_subMenu()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Menus.TextEntryMenu StardewValley.Game1::get_textEntry()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Minigames.IMinigame StardewValley.Game1::get_currentMinigame()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.NPC StardewValley.Game1::getCharacterFromName(System.String,System.Boolean,System.Boolean)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.NPC StardewValley.GameLocation::doesPositionCollideWithCharacter(Microsoft.Xna.Framework.Rectangle,System.Boolean)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.NPC StardewValley.GameLocation::getCharacterFromName(System.String)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.NPC StardewValley.GameLocation::isCharacterAtTile(Microsoft.Xna.Framework.Vector2)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Network.FarmerCollection StardewValley.Game1::getOnlineFarmers()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Network.FarmerCollection/Enumerator StardewValley.Network.FarmerCollection::GetEnumerator()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Network.NetBundles StardewValley.Network.NetWorldState::get_Bundles()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Network.OverlaidDictionary StardewValley.GameLocation::get_Objects()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Object StardewValley.Farmer::get_ActiveObject()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Object StardewValley.GameLocation::getObjectAtTile(System.Int32,System.Int32,System.Boolean)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Object StardewValley.Tools.FishingRod::GetBait()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Options StardewValley.Game1::get_options()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Proposal StardewValley.FarmerTeam::GetIncomingProposal()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Proposal StardewValley.FarmerTeam::GetOutgoingProposal()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Stats StardewValley.Game1::get_stats()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Tool StardewValley.Farmer::get_CurrentTool()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.Warp StardewValley.GameLocation::getWarpFromDoor(Microsoft.Xna.Framework.Point,StardewValley.Character)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "StardewValley.WorldDate StardewValley.Game1::get_Date()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean Netcode.NetCollection`1<StardewValley.Buildings.Building>::Contains(!0)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean Netcode.NetCollection`1<StardewValley.NPC>::Contains(!0)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean Netcode.NetDictionary`5<Microsoft.Xna.Framework.Point,System.String,Netcode.NetString,StardewValley.SerializableDictionary`2<Microsoft.Xna.Framework.Point,System.String>,StardewValley.Network.NetPointDictionary`2<System.String,Netcode.NetString>>::ContainsKey(!0)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean Netcode.NetDictionary`5<Microsoft.Xna.Framework.Vector2,StardewValley.TerrainFeatures.TerrainFeature,Netcode.NetRef`1<StardewValley.TerrainFeatures.TerrainFeature>,StardewValley.SerializableDictionary`2<Microsoft.Xna.Framework.Vector2,StardewValley.TerrainFeatures.TerrainFeature>,StardewValley.Network.NetVector2Dictionary`2<StardewValley.TerrainFeatures.TerrainFeature,Netcode.NetRef`1<StardewValley.TerrainFeatures.TerrainFeature>>>::ContainsKey(!0)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean Netcode.NetDictionary`5<Microsoft.Xna.Framework.Vector2,StardewValley.TerrainFeatures.TerrainFeature,Netcode.NetRef`1<StardewValley.TerrainFeatures.TerrainFeature>,StardewValley.SerializableDictionary`2<Microsoft.Xna.Framework.Vector2,StardewValley.TerrainFeatures.TerrainFeature>,StardewValley.Network.NetVector2Dictionary`2<StardewValley.TerrainFeatures.TerrainFeature,Netcode.NetRef`1<StardewValley.TerrainFeatures.TerrainFeature>>>::TryGetValue(!0,!1&)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean Netcode.NetDictionary`5<System.Int64,StardewValley.FarmAnimal,Netcode.NetRef`1<StardewValley.FarmAnimal>,StardewValley.SerializableDictionary`2<System.Int64,StardewValley.FarmAnimal>,StardewValley.Network.NetLongDictionary`2<StardewValley.FarmAnimal,Netcode.NetRef`1<StardewValley.FarmAnimal>>>::TryGetValue(!0,!1&)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean Netcode.NetDictionary`5<System.Int64,System.Int32,Netcode.NetInt,StardewValley.SerializableDictionary`2<System.Int64,System.Int32>,StardewValley.Network.NetLongDictionary`2<System.Int32,Netcode.NetInt>>::TryGetValue(!0,!1&)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean Netcode.NetDictionary`5<System.String,StardewValley.Friendship,Netcode.NetRef`1<StardewValley.Friendship>,StardewValley.SerializableDictionary`2<System.String,StardewValley.Friendship>,StardewValley.Network.NetStringDictionary`2<StardewValley.Friendship,Netcode.NetRef`1<StardewValley.Friendship>>>::TryGetValue(!0,!1&)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean Netcode.NetHashSet`1<System.Int32>::Contains(!0)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean Netcode.NetHashSet`1<System.String>::Contains(!0)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean Netcode.NetList`2<StardewValley.MapSeat,Netcode.NetRef`1<StardewValley.MapSeat>>::Contains(!0)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean Netcode.NetList`2<StardewValley.Quests.Quest,Netcode.NetRef`1<StardewValley.Quests.Quest>>::Contains(!0)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean Netcode.NetList`2<StardewValley.Warp,Netcode.NetRef`1<StardewValley.Warp>>::Contains(!0)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean Netcode.NetList`2<System.Int64,Netcode.NetLong>::Contains(!0)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.AnimalHouse::isFull()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Buildings.Building::doesTileHaveProperty(System.Int32,System.Int32,System.String,System.String,System.String&)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Buildings.Building::get_isCabin()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Buildings.Building::get_isMoving()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Buildings.Building::isTilePassable(Microsoft.Xna.Framework.Vector2)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Buildings.Building::isUnderConstruction(System.Boolean)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Buildings.Building::occupiesTile(Microsoft.Xna.Framework.Vector2,System.Boolean)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Character::get_IsMonster()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Character::get_IsVillager()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Character::get_SimpleNonVillagerNPC()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Character::isMoving()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.CraftingRecipe::doesFarmerHaveIngredientsInInventory(System.Collections.Generic.IList`1<StardewValley.Item>)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Event::canPlayerUseTool()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Event::get_playerControlSequence()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.FarmAnimal::CanGetProduceWithTool(StardewValley.Tool)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.FarmAnimal::CanLiveIn(StardewValley.Buildings.Building)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.FarmAnimal::isAdult()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Farmer::IsSitting()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Farmer::get_CanMove()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Farmer::get_HasTownKey()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Farmer::get_IsMale()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Farmer::get_UsingTool()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Farmer::get_canReleaseTool()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Farmer::hasBuff(System.String)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Farmer::hasOrWillReceiveMail(System.String)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Farmer::hasQuest(System.String)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Farmer::isRidingHorse()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.FarmerSprite::get_PauseForSingleAnimation()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.FarmerSprite::isPassingOut()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Friendship::IsDivorced()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Friendship::get_TalkedToToday()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Game1::IsFading()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Game1::get_HasDedicatedHost()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Game1::get_HostPaused()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Game1::get_IsClient()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Game1::get_IsMasterGame()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Game1::get_IsSaving()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Game1::get_IsServer()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Game1::get_fadeToBlack()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Game1::get_globalFade()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Game1::get_isWarping()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Game1::isFestival()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Game1::isOneOfTheseKeysDown(Microsoft.Xna.Framework.Input.KeyboardState,StardewValley.InputButton[])",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.GameLocation::AreStoresClosedForFestival()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.GameLocation::CanRefillWateringCanOnTile(System.Int32,System.Int32)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.GameLocation::InValleyContext()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.GameLocation::IsGreenRainingHere()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.GameLocation::IsWinterHere()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.GameLocation::canFishHere()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.GameLocation::get_IsOutdoors()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.GameLocation::get_IsTemporary()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.GameLocation::isTileFishable(System.Int32,System.Int32)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.GameLocation::isTileOnMap(Microsoft.Xna.Framework.Vector2)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.GameLocation::isTileOnMap(System.Int32,System.Int32)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.GameLocation::isTilePassable(Microsoft.Xna.Framework.Vector2)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.GameLocation::isTilePassable(xTile.Dimensions.Location,xTile.Dimensions.Rectangle)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.GameLocation::isWaterTile(System.Int32,System.Int32)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.ISalable::IsInfiniteStock()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.ISalable::get_IsRecipe()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.InstanceGame::get_IsActive()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Item::canBeGivenAsGift()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Item::canBeShipped()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Item::canBeTrashed()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Item::canStackWith(StardewValley.ISalable)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Item::get_IsRecipe()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Item::isPlaceable()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Locations.CommunityCenter::isJunimoNoteAtArea(System.Int32)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Locations.FarmHouse::get_IsOwnedByCurrentPlayer()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Locations.LibraryMuseum::isItemSuitableForDonation(StardewValley.Item)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Locations.LibraryMuseum::isTileSuitableForMuseumPiece(System.Int32,System.Int32)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.MapSeat::IsSittingHere(StardewValley.Farmer)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.MapSeat::OccupiesTile(System.Int32,System.Int32)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Menus.Bundle::IsValidItemForThisIngredientDescription(StardewValley.Item,StardewValley.Menus.BundleIngredientDescription)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Menus.Bundle::canAcceptThisItem(StardewValley.Item,StardewValley.Menus.ClickableTextureComponent)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Menus.ChatBox::isActive()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Menus.ClickableComponent::containsPoint(System.Int32,System.Int32)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Menus.ColorPicker::containsPoint(System.Int32,System.Int32)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Menus.IClickableMenu::HasDependencies()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Menus.IClickableMenu::IsActive()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Menus.IClickableMenu::isWithinBounds(System.Int32,System.Int32)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Menus.LetterViewerMenu::ShouldPlayExitSound()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Menus.LetterViewerMenu::ShouldShowInteractable()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Menus.LetterViewerMenu::get_HasQuestOrSpecialOrder()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Menus.LetterViewerMenu::itemsLeftToGrab()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Menus.LevelUpMenu::CanReceiveInput()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Menus.ReadyCheckDialog::isCancelable()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Menus.ShippingMenu::CanReceiveInput()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Menus.TextBox::get_Selected()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Monsters.Monster::isInvincible()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.NPC::CanReceiveGifts()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.NPC::get_IsInvisible()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.NPC::isBirthday()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Network.LocationWeather::get_IsDebrisWeather()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Network.LocationWeather::get_IsGreenRain()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Network.LocationWeather::get_IsLightning()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Network.LocationWeather::get_IsRaining()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Network.LocationWeather::get_IsSnowing()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Network.NetMutex::IsLockHeld()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Network.NetMutex::IsLocked()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Network.NetReady.ReadySynchronizer::IsReady(System.String)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Network.NetReady.ReadySynchronizer::IsReadyCheckCancelable(System.String)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Network.NetWitnessedLock::IsLocked()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Network.OverlaidDictionary::ContainsKey(Microsoft.Xna.Framework.Vector2)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Network.OverlaidDictionary::TryGetValue(Microsoft.Xna.Framework.Vector2,StardewValley.Object&)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.NewDaySynchronizer::hasInstance()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Object::IsBreakableStone()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Object::IsWeeds()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Object::get_CanBeGrabbed()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Object::get_CanBeSetDown()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Object::get_IsSpawnedObject()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Object::isForage()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Object::isPassable()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Object::isSapling()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Objects.CrabPot::IsValidCrabPotLocationTile(StardewValley.GameLocation,System.Int32,System.Int32)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Objects.CrabPot::NeedsBait(StardewValley.Farmer)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Objects.Furniture::IntersectsForCollision(Microsoft.Xna.Framework.Rectangle)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Options::doesInputListContain(StardewValley.InputButton[],Microsoft.Xna.Framework.Input.Keys)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Options::get_SnappyMenus()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Options::get_allowStowing()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Prop::isColliding(Microsoft.Xna.Framework.Rectangle)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.TerrainFeatures.HoeDirt::readyForHarvest()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.TerrainFeatures.TerrainFeature::isPassable(StardewValley.Character)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Tool::hasEnchantmentOfType<StardewValley.Enchantments.ReachingToolEnchantment>()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Tool::isScythe()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Tools.FishingRod::inUse()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Tools.WateringCan::get_IsBottomless()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Utility::HasAnyPlayerSeenEvent(System.String)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Utility::areThereAnyOtherAnimalsWithThisName(System.String)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Boolean StardewValley.Utility::tileWithinRadiusOfPlayer(System.Int32,System.Int32,System.Int32,StardewValley.Farmer)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Byte StardewValley.Game1::get_gameMode()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Collections.Generic.Dictionary`2/ValueCollection<Microsoft.Xna.Framework.Vector2,StardewValley.Object> StardewValley.Network.OverlaidDictionary::get_Values()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Collections.Generic.Dictionary`2<!0,!2> Netcode.NetDictionary`5<System.Int32,System.Boolean[],Netcode.NetArray`2<System.Boolean,Netcode.NetBool>,StardewValley.SerializableDictionary`2<System.Int32,System.Boolean[]>,StardewValley.Network.NetBundles>::get_FieldDict()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Collections.Generic.Dictionary`2<System.String,StardewValley.GameData.Minecarts.MinecartNetworkData> StardewValley.DataLoader::Minecarts(StardewValley.LocalizedContentManager)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Collections.Generic.Dictionary`2<System.String,StardewValley.GameData.Shops.ShopData> StardewValley.DataLoader::Shops(StardewValley.LocalizedContentManager)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Collections.Generic.IEnumerable`1<StardewValley.GameData.Shops.ShopOwnerData> StardewValley.Internal.ShopBuilder::GetCurrentOwners(StardewValley.GameData.Shops.ShopData)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Collections.Generic.IEnumerable`1<System.Collections.Generic.KeyValuePair`2<Microsoft.Xna.Framework.Vector2,StardewValley.Object>> StardewValley.Network.OverlaidDictionary::get_Pairs()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Collections.Generic.IEnumerator`1<StardewValley.Item> StardewValley.Inventories.Inventory::GetEnumerator()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Collections.Generic.IList`1<System.String> StardewValley.Game1::get_mailbox()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Collections.Generic.List`1/Enumerator<!0> Netcode.NetCollection`1<StardewValley.Buildings.Building>::GetEnumerator()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Collections.Generic.List`1/Enumerator<!0> Netcode.NetCollection`1<StardewValley.Debris>::GetEnumerator()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Collections.Generic.List`1/Enumerator<!0> Netcode.NetCollection`1<StardewValley.NPC>::GetEnumerator()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Collections.Generic.List`1/Enumerator<!0> Netcode.NetCollection`1<StardewValley.Objects.Furniture>::GetEnumerator()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Collections.Generic.List`1/Enumerator<!0> Netcode.NetCollection`1<StardewValley.TerrainFeatures.LargeTerrainFeature>::GetEnumerator()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Collections.Generic.List`1/Enumerator<!0> Netcode.NetCollection`1<StardewValley.TerrainFeatures.ResourceClump>::GetEnumerator()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Collections.Generic.List`1<Microsoft.Xna.Framework.Vector2> StardewValley.MapSeat::GetSeatPositions(System.Boolean)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Collections.Generic.List`1<StardewValley.FarmerSprite/AnimationFrame> StardewValley.AnimatedSprite::get_CurrentAnimation()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Collections.Generic.List`1<StardewValley.Menus.LoadGameMenu/MenuSlot> StardewValley.Menus.LoadGameMenu::get_MenuSlots()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Collections.Generic.List`1<System.Int32> StardewValley.Farmer::GetAllHairstyleIndices()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Collections.Generic.List`1<System.String> StardewValley.Menus.CharacterCustomization::GetValidPantsIds()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Collections.Generic.List`1<System.String> StardewValley.Menus.CharacterCustomization::GetValidShirtIds()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Collections.Generic.List`1<System.String> StardewValley.Tools.FishingRod::GetTackleQualifiedItemIDs()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Guid Netcode.NetCollection`1<StardewValley.NPC>::GuidOf(!0)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 Netcode.NetArray`2<StardewValley.Object,Netcode.NetRef`1<StardewValley.Object>>::get_Length()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 Netcode.NetArray`2<System.Boolean,Netcode.NetBool>::get_Length()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 Netcode.NetCollection`1<StardewValley.Buildings.Building>::get_Count()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 Netcode.NetCollection`1<StardewValley.Objects.Furniture>::get_Count()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 Netcode.NetCollection`1<StardewValley.TerrainFeatures.LargeTerrainFeature>::get_Count()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 Netcode.NetCollection`1<StardewValley.TerrainFeatures.ResourceClump>::get_Count()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 Netcode.NetDictionary`5<Microsoft.Xna.Framework.Vector2,StardewValley.TerrainFeatures.TerrainFeature,Netcode.NetRef`1<StardewValley.TerrainFeatures.TerrainFeature>,StardewValley.SerializableDictionary`2<Microsoft.Xna.Framework.Vector2,StardewValley.TerrainFeatures.TerrainFeature>,StardewValley.Network.NetVector2Dictionary`2<StardewValley.TerrainFeatures.TerrainFeature,Netcode.NetRef`1<StardewValley.TerrainFeatures.TerrainFeature>>>::get_Length()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 Netcode.NetDictionary`5<System.Int64,StardewValley.FarmAnimal,Netcode.NetRef`1<StardewValley.FarmAnimal>,StardewValley.SerializableDictionary`2<System.Int64,StardewValley.FarmAnimal>,StardewValley.Network.NetLongDictionary`2<StardewValley.FarmAnimal,Netcode.NetRef`1<StardewValley.FarmAnimal>>>::get_Length()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 Netcode.NetList`2<StardewValley.Enchantments.BaseEnchantment,Netcode.NetRef`1<StardewValley.Enchantments.BaseEnchantment>>::get_Count()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 Netcode.NetList`2<StardewValley.Item,Netcode.NetRef`1<StardewValley.Item>>::get_Count()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 Netcode.NetList`2<StardewValley.MapSeat,Netcode.NetRef`1<StardewValley.MapSeat>>::get_Count()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 Netcode.NetList`2<StardewValley.Quests.Quest,Netcode.NetRef`1<StardewValley.Quests.Quest>>::get_Count()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 Netcode.NetList`2<StardewValley.Warp,Netcode.NetRef`1<StardewValley.Warp>>::get_Count()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 Netcode.NetList`2<System.Int64,Netcode.NetLong>::get_Count()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 Netcode.NetPoint::get_X()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 Netcode.NetPoint::get_Y()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Buildings.Building::GetAdditionalTilePropertyRadius()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Character::get_FacingDirection()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Character::get_speed()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Debris::get_itemQuality()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Event::get_CurrentCommand()",
+      "reason": "native command-index value query, including ADR-60 NativeDayTransition facts; no command execution, skipping or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Farmer::GetPantsIndex()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Farmer::GetShirtIndex()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Farmer::freeSpotsInInventory()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Farmer::getItemCount(System.String)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Farmer::getItemCountInList(System.Collections.Generic.IList`1<StardewValley.Item>,System.String)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Farmer::getSkillNumberFromName(System.String)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Farmer::get_CurrentToolIndex()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Farmer::get_FishingLevel()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Farmer::get_MaxItems()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Farmer::get_MaxStamina()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Farmer::get_festivalScore()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Friendship::get_GiftsThisWeek()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Friendship::get_GiftsToday()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Friendship::get_Points()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Game1::getMouseX()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Game1::getMouseX(System.Boolean)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Game1::getMouseY()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Game1::getMouseY(System.Boolean)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Game1::getOldMouseX()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Game1::getOldMouseX(System.Boolean)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Game1::getOldMouseY()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Game1::getOldMouseY(System.Boolean)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Game1::get_CurrentMineLevel()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Game1::numberOfPlayers()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.GameLocation::getTileIndexAt(System.Int32,System.Int32,System.String,System.String)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.GameLocation::numberOfObjectsWithName(System.String)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.ISalable::get_Stack()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.ISalable::maximumStackSize()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Inventories.Inventory::CountId(System.String)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Inventories.Inventory::get_Count()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Item::get_Category()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Item::get_Quality()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Item::get_Stack()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Item::maximumStackSize()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Item::salePrice(System.Boolean)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Item::sellToStorePrice(System.Int64)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Locations.CommunityCenter::numberOfCompleteBundles()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Locations.MineShaft::get_lowestLevelReached()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Locations.MineShaft::get_mineLevel()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Menus.InventoryMenu::getInventoryPositionOfClick(System.Int32,System.Int32)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Menus.TextBox::get_Height()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Menus.TextBox::get_Width()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Menus.TextBox::get_X()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Menus.TextBox::get_Y()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Monsters.Monster::get_Health()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Monsters.Monster::get_MaxHealth()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Network.FarmerCollection::get_Count()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Network.NetReady.ReadySynchronizer::GetNumberReady(System.String)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Network.NetReady.ReadySynchronizer::GetNumberRequired(System.String)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Network.OverlaidDictionary::get_Length()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Object::get_Edibility()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Object::get_MinutesUntilReady()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Object::get_Price()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Objects.Furniture::getTilesWide()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Tool::get_AttachmentSlotsCount()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Tool::get_UpgradeLevel()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Tools.WateringCan::get_WaterLeft()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Warp::get_TargetX()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Warp::get_TargetY()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Warp::get_X()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Warp::get_Y()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.WorldDate::get_TotalDays()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int64 StardewValley.Farmer::get_UniqueMultiplayerID()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int64 StardewValley.Locations.FarmHouse::get_OwnerId()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Int64 StardewValley.Network.NetFarmerRef::get_UID()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Nullable`1<Microsoft.Xna.Framework.Vector2> StardewValley.MapSeat::GetSittingPosition(StardewValley.Farmer,System.Boolean)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Single StardewValley.Farmer::getMovementSpeed()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Single StardewValley.Farmer::get_Stamina()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Single StardewValley.Game1::get_fadeToBlackAlpha()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Single StardewValley.Game1::get_mouseCursorTransparency()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Single StardewValley.Options::get_uiScale()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Single StardewValley.Tool::get_AnimationSpeedModifier()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Single StardewValley.Utility::ModifyCoordinateForUIScale(System.Single)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Single StardewValley.Utility::ModifyCoordinateFromUIScale(System.Single)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String StardewValley.BellsAndWhistles.PlayerStatusList::GetStatusText(System.Int64,System.String)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String StardewValley.Character::get_Name()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String StardewValley.Character::get_displayName()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String StardewValley.FarmAnimal::GetDisplayName(System.String,System.Boolean)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String StardewValley.Farmer::GetPantsId()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String StardewValley.Farmer::GetShirtId()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String StardewValley.Farmer::get_spouse()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String StardewValley.Game1::getWeatherModificationsForDate(StardewValley.WorldDate,System.String)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String StardewValley.Game1::get_currentSeason()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String StardewValley.Game1::shortDayNameFromDayOfSeason(System.Int32)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String StardewValley.GameData.Buildings.BuildingData::GetActionAtTile(System.Int32,System.Int32)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String StardewValley.GameLocation::doesTileHaveProperty(System.Int32,System.Int32,System.String,System.String,System.Boolean)",
+      "reason": "native value/collection/geometry query; no input or game-state write. ADR-59 reuses the existing Buildings Action scan for named museum counters; no donation callback or new allowed member."
+    },
+    {
+      "member": "System.String StardewValley.GameLocation::get_Name()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String StardewValley.GameLocation::get_NameOrUniqueName()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String StardewValley.ISalable::get_Name()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String StardewValley.Item::get_Name()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String StardewValley.Item::get_TypeDefinitionId()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String StardewValley.ItemRegistry::QualifyItemId(System.String)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String StardewValley.ItemTypeDefinitions.ItemMetadata::get_QualifiedItemId()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String StardewValley.LocalizedContentManager::LoadString(System.String)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String StardewValley.LocalizedContentManager::LoadString(System.String,System.Object,System.Object)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String StardewValley.Locations.CommunityCenter::getAreaNameFromNumber(System.Int32)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String StardewValley.Locations.MineShaft::GetLevelName(System.Int32,System.Nullable`1<System.Int32>)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String StardewValley.Menus.ClickableComponent::get_ScreenReaderText()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String StardewValley.Menus.DialogueBox::getCurrentString()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String StardewValley.Menus.LevelUpMenu::getProfessionTitleFromNumber(System.Int32)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String StardewValley.Menus.ShippingMenu::getCategoryName(System.Int32)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String StardewValley.Menus.TextBox::get_Text()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String StardewValley.Network.LocationWeather::get_WeatherForTomorrow()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String StardewValley.Network.NetWorldState::get_WeatherForTomorrow()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String StardewValley.Object::get_Type()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String StardewValley.Warp::get_TargetName()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String[] StardewValley.ArgUtility::SplitBySpace(System.String)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.String[] StardewValley.Quests.Quest::GetRawQuestFields(System.String)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.UInt32 StardewValley.Stats::Get(System.String)",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.UInt32 StardewValley.Stats::get_MonstersKilled()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Collections.Generic.Dictionary`2<System.String,StardewValley.GameData.Locations.LocationData> StardewValley.DataLoader::Locations(StardewValley.LocalizedContentManager)",
+      "reason": "loads location data content through the existing content cache; no game-state write"
+    },
+    {
+      "member": "StardewValley.GameData.Locations.LocationData StardewValley.GameLocation::GetData()",
+      "reason": "looks up Game1.locationData with farm/passive-festival aliases; does not load a map or mutate location state"
+    },
+    {
+      "member": "System.Boolean StardewValley.GameLocation::get_IsFarm()",
+      "reason": "native location flag; GameData.xml omitted CanPlantHere defaults from this; observation only"
+    },
+    {
+      "member": "Netcode.NetDictionary`5/ValuesCollection<!0,!1,!2,!3,!4> Netcode.NetDictionary`5<Microsoft.Xna.Framework.Vector2,StardewValley.TerrainFeatures.TerrainFeature,Netcode.NetRef`1<StardewValley.TerrainFeatures.TerrainFeature>,StardewValley.SerializableDictionary`2<Microsoft.Xna.Framework.Vector2,StardewValley.TerrainFeatures.TerrainFeature>,StardewValley.Network.NetVector2Dictionary`2<StardewValley.TerrainFeatures.TerrainFeature,Netcode.NetRef`1<StardewValley.TerrainFeatures.TerrainFeature>>>::get_Values()",
+      "reason": "read-only enumeration of already-loaded terrain features for planted/tilled counts; no map mutation"
+    },
+    {
+      "member": "System.Int32 StardewValley.Locations.BusStop::get_TicketPrice()",
+      "reason": "native auto-property backing-field read; no action, payment or transport invocation"
+    },
+    {
+      "member": "System.Boolean StardewValley.Locations.IslandWest::IsQiWalnutRoomDoorUnlocked(System.Int32&)",
+      "reason": "reads synchronized walnut count and returns the native threshold result; no reward or unlock write"
+    },
+    {
+      "member": "Netcode.NetDictionary`5/KeysCollection<!0,!1,!2,!3,!4> Netcode.NetDictionary`5<System.String,StardewValley.Friendship,Netcode.NetRef`1<StardewValley.Friendship>,StardewValley.SerializableDictionary`2<System.String,StardewValley.Friendship>,StardewValley.Network.NetStringDictionary`2<StardewValley.Friendship,Netcode.NetRef`1<StardewValley.Friendship>>>::get_Keys()",
+      "reason": "read-only key enumeration wrapper over existing friendship data"
+    },
+    {
+      "member": "!0 Netcode.NetFieldBase`2<System.Int32,Netcode.NetIntDelta>::get_Value()",
+      "reason": "reads synchronized existing wallet value without Farmer.Money/GetMoney creating a separate-wallet account"
+    },
+    {
+      "member": "System.Boolean Netcode.NetDictionary`5<System.Int64,Netcode.NetIntDelta,Netcode.NetRef`1<Netcode.NetIntDelta>,StardewValley.SerializableDictionary`2<System.Int64,Netcode.NetIntDelta>,StardewValley.Network.NetLongDictionary`2<Netcode.NetIntDelta,Netcode.NetRef`1<Netcode.NetIntDelta>>>::TryGetValue(!0,!1&)",
+      "reason": "TryGetValue only: existing separate-wallet lookup; absence remains unknown, never inserts an account"
+    },
+    {
+      "member": "StardewValley.Network.NetStringDictionary`2<StardewValley.Network.LocationWeather,Netcode.NetRef`1<StardewValley.Network.LocationWeather>> StardewValley.Network.NetWorldState::get_LocationWeather()",
+      "reason": "returns existing synchronized weather dictionary; does not create per-location weather"
+    },
+    {
+      "member": "System.Boolean Netcode.NetDictionary`5<System.String,StardewValley.Network.LocationWeather,Netcode.NetRef`1<StardewValley.Network.LocationWeather>,StardewValley.SerializableDictionary`2<System.String,StardewValley.Network.LocationWeather>,StardewValley.Network.NetStringDictionary`2<StardewValley.Network.LocationWeather,Netcode.NetRef`1<StardewValley.Network.LocationWeather>>>::TryGetValue(!0,!1&)",
+      "reason": "lookup existing synchronized context weather only; no creation or update"
+    },
+    {
+      "member": "System.Boolean StardewValley.Locations.Forest::isWizardHouseUnlocked()",
+      "reason": "reads mail and bundle progression only in installed source; does not open the tower"
+    },
+    {
+      "member": "System.Int32 StardewValley.Farmer::getFriendshipHeartLevelForNPC(System.String)",
+      "reason": "reads existing friendship points and divides by points-per-heart; absent NPC returns zero"
+    },
+    {
+      "member": "System.Boolean StardewValley.Farmer::get_hasRustyKey()",
+      "reason": "reads master mailReceived HasRustyKey; setter is not called"
+    },
+    {
+      "member": "System.Int32 StardewValley.Locations.BoatTunnel::get_TicketPrice()",
+      "reason": "native auto-property backing-field read; no action, payment or transport invocation"
+    },
+    {
+      "member": "System.Int32 StardewValley.WorldDate::get_TotalWeeks()",
+      "reason": "calendar arithmetic over current date fields only"
+    },
+    {
+      "member": "System.String StardewValley.GameData.GenericSpawnItemData::get_ItemId()",
+      "reason": "data auto-property field read for catalog stock identity; no item spawned"
+    },
+    {
+      "member": "System.String StardewValley.GameData.GenericSpawnItemDataWithCondition::get_Condition()",
+      "reason": "data auto-property field read of a catalog game-state-query string (published as text); never evaluated or written"
+    },
+    {
+      "member": "Netcode.NetDictionary`5/PairsCollection<!0,!1,!2,!3,!4> Netcode.NetDictionary`5<System.String,StardewValley.Friendship,Netcode.NetRef`1<StardewValley.Friendship>,StardewValley.SerializableDictionary`2<System.String,StardewValley.Friendship>,StardewValley.Network.NetStringDictionary`2<StardewValley.Friendship,Netcode.NetRef`1<StardewValley.Friendship>>>::get_Pairs()",
+      "reason": "fix13c progress surface: IL-reviewed on the installed game (a local IL probe): read-only enumeration wrapper over existing friendship fields"
+    },
+    {
+      "member": "System.UInt32 StardewValley.Farmer::get_totalMoneyEarned()",
+      "reason": "fix13c progress surface: IL-reviewed on the installed game (a local IL probe): FarmerTeam.totalMoneyEarned net value read"
+    },
+    {
+      "member": "System.UInt32 StardewValley.Stats::get_IndividualMoneyEarned()",
+      "reason": "fix13c progress surface: IL-reviewed on the installed game (a local IL probe): Stats.Get dictionary read"
+    },
+    {
+      "member": "System.UInt32 StardewValley.Stats::get_CropsShipped()",
+      "reason": "fix13c progress surface: IL-reviewed on the installed game (a local IL probe): Stats.Get dictionary read"
+    },
+    {
+      "member": "System.UInt32 StardewValley.Stats::get_ItemsShipped()",
+      "reason": "fix13c progress surface: IL-reviewed on the installed game (a local IL probe): Stats.Get dictionary read"
+    },
+    {
+      "member": "System.UInt32 StardewValley.Stats::get_FishCaught()",
+      "reason": "fix13c progress surface: IL-reviewed on the installed game (a local IL probe): Stats.Get dictionary read"
+    },
+    {
+      "member": "System.UInt32 StardewValley.Stats::get_QuestsCompleted()",
+      "reason": "fix13c progress surface: IL-reviewed on the installed game (a local IL probe): Stats.Get dictionary read"
+    },
+    {
+      "member": "System.UInt32 StardewValley.Stats::get_ItemsCrafted()",
+      "reason": "fix13c progress surface: IL-reviewed on the installed game (a local IL probe): Stats.Get dictionary read"
+    },
+    {
+      "member": "System.UInt32 StardewValley.Stats::get_SeedsSown()",
+      "reason": "fix13c progress surface: IL-reviewed on the installed game (a local IL probe): Stats.Get dictionary read"
+    },
+    {
+      "member": "System.UInt32 StardewValley.Stats::get_ItemsForaged()",
+      "reason": "fix13c progress surface: IL-reviewed on the installed game (a local IL probe): Stats.Get dictionary read"
+    },
+    {
+      "member": "System.UInt32 StardewValley.Stats::get_DaysPlayed()",
+      "reason": "fix13c progress surface: IL-reviewed on the installed game (a local IL probe): Stats.Get dictionary read"
+    },
+    {
+      "member": "System.Int32 StardewValley.Farmer::get_HouseUpgradeLevel()",
+      "reason": "fix13c progress surface: IL-reviewed on the installed game (a local IL probe): houseUpgradeLevel net value read"
+    },
+    {
+      "member": "System.Int32 StardewValley.Farmer::get_deepestMineLevel()",
+      "reason": "fix13c progress surface: IL-reviewed on the installed game (a local IL probe): netDeepestMineLevel net value read"
+    },
+    {
+      "member": "System.Int32 StardewValley.Farmer::get_Level()",
+      "reason": "fix13c progress surface: IL-reviewed on the installed game (a local IL probe): sum of six skill-level net values / 2"
+    },
+    {
+      "member": "System.Boolean StardewValley.Farmer::get_hasSkullKey()",
+      "reason": "fix13c progress surface: IL-reviewed on the installed game (a local IL probe): MasterPlayer mailReceived Contains"
+    },
+    {
+      "member": "System.Boolean StardewValley.Farmer::isMarriedOrRoommates()",
+      "reason": "fix13c progress surface: IL-reviewed on the installed game (a local IL probe): team IsMarried / spouse friendship TryGetValue reads"
+    },
+    {
+      "member": "System.Boolean StardewValley.Farmer::hasCompletedCommunityCenter()",
+      "reason": "fix13c progress surface: IL-reviewed on the installed game (a local IL probe): six mailReceived Contains reads"
+    },
+    {
+      "member": "System.Boolean StardewValley.Game1::isLocationAccessible(System.String)",
+      "reason": "fix13c progress surface: IL-reviewed on the installed game (a local IL probe): mail/event flag Contains reads per location name"
+    },
+    {
+      "member": "System.Int32 StardewValley.Utility::getNumberOfFriendsWithinThisRange(StardewValley.Farmer,System.Int32,System.Int32,System.Boolean)",
+      "reason": "fix13c progress surface: IL-reviewed on the installed game (a local IL probe): ForEachVillager counting friendship points; callback only reads"
+    },
+    {
+      "member": "System.Int32 StardewValley.Utility::getGrandpaScore()",
+      "reason": "fix13c progress surface: IL-reviewed on the installed game (a local IL probe): Grandpa's scoring rule over existing farmer/team fields; returns an int, no state change"
+    },
+    {
+      "member": "System.Collections.Generic.Dictionary`2<System.String,System.String> StardewValley.DataLoader::Mail(StardewValley.LocalizedContentManager)",
+      "reason": "fix13c progress surface: IL-reviewed on the installed game (a local IL probe): Data/Mail content asset load, same as the allowlisted DataLoader.Shops/Locations"
+    },
+    {
+      "member": "System.Void StardewValley.CraftingRecipe::.ctor(System.String,System.Boolean)",
+      "reason": "fix13b crafting facts: builds the recipe object the CraftingPage itself builds (Data/CraftingRecipes fields; reads the actor's timesCrafted); cached per name, never added to the game"
+    },
+    {
+      "member": "Netcode.NetDictionary`5/KeysCollection<!0,!1,!2,!3,!4> Netcode.NetDictionary`5<System.String,System.Int32,Netcode.NetInt,StardewValley.SerializableDictionary`2<System.String,System.Int32>,StardewValley.Network.NetStringDictionary`2<System.Int32,Netcode.NetInt>>::get_Keys()",
+      "reason": "fix13b crafting facts: constructs a read-only key enumeration wrapper over Farmer.craftingRecipes; no write"
+    },
+    {
+      "member": "!0 Netcode.NetFieldBase`2<StardewValley.SpecialOrders.SpecialOrderStatus,Netcode.NetEnum`1<StardewValley.SpecialOrders.SpecialOrderStatus>>::get_Value()",
+      "reason": "ADR 38: existing synchronized value/collection enumeration for native progress evidence; no initialization, input or game-state write"
+    },
+    {
+      "member": "Netcode.NetDictionary`5/PairsCollection<!0,!1,!2,!3,!4> Netcode.NetDictionary`5<Microsoft.Xna.Framework.Vector2,System.String,Netcode.NetString,StardewValley.SerializableDictionary`2<Microsoft.Xna.Framework.Vector2,System.String>,StardewValley.Network.NetVector2Dictionary`2<System.String,Netcode.NetString>>::get_Pairs()",
+      "reason": "ADR 38: existing synchronized value/collection enumeration for native progress evidence; no initialization, input or game-state write"
+    },
+    {
+      "member": "Netcode.NetList`2/Enumerator<!0,!1> Netcode.NetList`2<StardewValley.Quests.Quest,Netcode.NetRef`1<StardewValley.Quests.Quest>>::GetEnumerator()",
+      "reason": "ADR 38: existing synchronized value/collection enumeration for native progress evidence; no initialization, input or game-state write"
+    },
+    {
+      "member": "Netcode.NetList`2/Enumerator<!0,!1> Netcode.NetList`2<StardewValley.SpecialOrders.SpecialOrder,Netcode.NetRef`1<StardewValley.SpecialOrders.SpecialOrder>>::GetEnumerator()",
+      "reason": "ADR 38: existing synchronized value/collection enumeration for native progress evidence; no initialization, input or game-state write"
+    },
+    {
+      "member": "Netcode.NetList`2/Enumerator<!0,!1> Netcode.NetList`2<System.String,Netcode.NetString>::GetEnumerator()",
+      "reason": "ADR 38: existing synchronized value/collection enumeration for native progress evidence; no initialization, input or game-state write"
+    },
+    {
+      "member": "System.Boolean Netcode.NetDictionary`5<System.Int64,System.Boolean,Netcode.NetBool,StardewValley.SerializableDictionary`2<System.Int64,System.Boolean>,StardewValley.Network.NetLongDictionary`2<System.Boolean,Netcode.NetBool>>::ContainsKey(!0)",
+      "reason": "ADR 38: existing synchronized value/collection enumeration for native progress evidence; no initialization, input or game-state write"
+    },
+    {
+      "member": "StardewValley.Network.NetVector2Dictionary`2<System.String,Netcode.NetString> StardewValley.Network.NetWorldState::get_MuseumPieces()",
+      "reason": "ADR 38: existing synchronized value/collection enumeration for native progress evidence; no initialization, input or game-state write"
+    },
+    {
+      "member": "System.Int32 StardewValley.Locations.CommunityCenter::getAreaNumberFromName(System.String)",
+      "reason": "fix35 / ADR 49: installed native string-to-area switch; no initialization or writes"
+    },
+    {
+      "member": "System.Boolean StardewValley.Locations.CommunityCenter::shouldNoteAppearInArea(System.Int32)",
+      "reason": "fix35 / ADR 49: installed native room progression predicate reads existing conversion dictionaries, synchronized bundle flags and completion counts; no initialization or writes; cold unavailable conversions remain unknown"
+    },
+    {
+      "member": "System.Int32 Netcode.NetList`2<System.String,Netcode.NetString>::get_Count()",
+      "reason": "native value/collection/geometry query; no input or game-state write"
+    },
+    {
+      "member": "System.Void StardewValley.Farmer::GetItemReceiveBehavior(StardewValley.Item,System.Boolean&,System.Boolean&)",
+      "reason": "ADR 137: pure native receipt classification; no inventory write or HUD notification."
+    },
+    {
+      "member": "System.Int32 StardewValley.GameLocation::GetHarvestSpawnedObjectQuality(StardewValley.Farmer,System.Boolean,Microsoft.Xna.Framework.Vector2,System.Random)",
+      "reason": "ADR 137: deterministic day/tile quality query with its own Random; no Game1.random or world mutation."
+    }
+  ],
+  "adapters": [
+    {
+      "key": "game_call|System.Void ArtiStardewBridge.ModEntry::DispatchGenericUiEdge(ArtiStardewBridge.ModEntry/UiMotorLease)|callvirt|System.Void StardewValley.Menus.IClickableMenu::receiveScrollWheelAction(System.Int32)",
+      "adr": "ADR-11",
+      "tier": "NativeDispatch.GenericEdge"
+    },
+    {
+      "key": "game_call|System.Void ArtiStardewBridge.ModEntry::DispatchGenericUiEdge(ArtiStardewBridge.ModEntry/UiMotorLease)|callvirt|System.Void StardewValley.Menus.IClickableMenu::performHoverAction(System.Int32,System.Int32)",
+      "adr": "ADR-11",
+      "tier": "NativeDispatch.GenericEdge"
+    },
+    {
+      "key": "game_call|System.Void ArtiStardewBridge.ModEntry::DispatchGenericUiEdge(ArtiStardewBridge.ModEntry/UiMotorLease)|callvirt|System.Void StardewValley.Menus.IClickableMenu::receiveRightClick(System.Int32,System.Int32,System.Boolean)",
+      "adr": "ADR-11",
+      "tier": "NativeDispatch.GenericEdge"
+    },
+    {
+      "key": "game_call|System.Void ArtiStardewBridge.ModEntry::DispatchGenericUiEdge(ArtiStardewBridge.ModEntry/UiMotorLease)|callvirt|System.Void StardewValley.Menus.IClickableMenu::receiveLeftClick(System.Int32,System.Int32,System.Boolean)",
+      "adr": "ADR-11",
+      "tier": "NativeDispatch.GenericEdge"
+    },
+    {
+      "key": "game_call|System.Void ArtiStardewBridge.ModEntry::DispatchGenericUiEdge(ArtiStardewBridge.ModEntry/UiMotorLease)|callvirt|System.Void StardewValley.Menus.IClickableMenu::receiveKeyPress(Microsoft.Xna.Framework.Input.Keys)",
+      "adr": "ADR-11",
+      "tier": "NativeDispatch.GenericEdge"
+    },
+    {
+      "key": "game_call|System.Void ArtiStardewBridge.ModEntry::DispatchGenericUiEdge(ArtiStardewBridge.ModEntry/UiMotorLease)|callvirt|System.Void StardewValley.Minigames.IMinigame::receiveKeyPress(Microsoft.Xna.Framework.Input.Keys)",
+      "adr": "ADR-11",
+      "tier": "NativeDispatch.GenericEdge"
+    },
+    {
+      "key": "game_call|System.Void ArtiStardewBridge.ModEntry/UiPadGamePort/<>c__DisplayClass3_1::<ApplyGeneric>b__1()|callvirt|System.Void StardewValley.Menus.TextBox::RecieveTextInput(System.String)",
+      "adr": "ADR-11",
+      "tier": "NativeMechanics"
+    }
+  ]
+}

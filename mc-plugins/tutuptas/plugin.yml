@@ -1,0 +1,17 @@
+name: TutupTas
+main: arti.tutuptas.TutupTas
+version: '1.0.0'
+api-version: '1.21'
+author: Bohan & Arti
+description: Menutup layar/GUI yang terbuka di klien seorang pemain (untuk layar tas di siaran).
+
+commands:
+  tutuptas:
+    description: Tutup layar yang terbuka di klien seorang pemain
+    usage: /<command> <pemain>
+    permission: tutuptas.use
+
+permissions:
+  tutuptas.use:
+    description: Boleh menutup layar pemain lain
+    default: op

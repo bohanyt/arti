@@ -1,0 +1,85 @@
+{
+  "protocol": 1,
+  "ev": "observation",
+  "seq": 4,
+  "player_id": -100000000000000001,
+  "screen_id": 1,
+  "payload": {
+    "session_id": "obs:demo:-100000000000000001:1",
+    "product": "scene",
+    "domain": "scene.current_location",
+    "kind": "delta",
+    "domain_revision": 2,
+    "provenance": "ACTIVE_SYNCED",
+    "authoritative": true,
+    "available": true,
+    "error": null,
+    "truncation": {
+      "truncated": false,
+      "observed_count": 4,
+      "sent_count": 4
+    },
+    "body": {
+      "upserts": {
+        "npc:Farm:Leah": {
+          "kind": "npc",
+          "category": "npc",
+          "internal_name": "Leah",
+          "display_name": "Leah",
+          "tile": {
+            "x": 19,
+            "y": 20
+          },
+          "pixel": {
+            "x": 1152,
+            "y": 1280
+          },
+          "facing": 2,
+          "moving": false,
+          "monster": null
+        },
+        "obj:Farm:20,10:(BC)12": {
+          "kind": "object",
+          "qualified_item_id": "(BC)12",
+          "name": "Keg",
+          "display_name": "Keg",
+          "tile": {
+            "x": 20,
+            "y": 10
+          },
+          "bounds": null,
+          "passable": false,
+          "grabbable": false,
+          "machine": true,
+          "ready_for_harvest": false,
+          "minutes_until_ready": 10,
+          "held_item": {
+            "qualified_item_id": "(O)346",
+            "stack": 1,
+            "name": "Beer"
+          }
+        },
+        "obj:Farm:3,3:(O)388": {
+          "kind": "object",
+          "qualified_item_id": "(O)388",
+          "name": "Wood",
+          "display_name": "Wood",
+          "tile": {
+            "x": 3,
+            "y": 3
+          },
+          "bounds": null,
+          "passable": false,
+          "grabbable": true,
+          "machine": false,
+          "ready_for_harvest": null,
+          "minutes_until_ready": null,
+          "held_item": null
+        }
+      },
+      "removes": [
+        "obj:Farm:12,8:(O)472"
+      ]
+    }
+  }
+}

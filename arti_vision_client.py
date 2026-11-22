@@ -1,0 +1,526 @@
+"""Vision provider chain — screenshot describe with failover + uptime counters."""
+
+from __future__ import annotations
+
+import os
+import threading
+import time
+from dataclasses import dataclass
+from typing import Any, Callable
+
+import arti_cloudflare_vision
+import arti_gemini_budget
+import arti_gemini_vision
+import arti_github_vision
+import arti_nvidia_client
+import arti_ollama_vision
+import arti_screen_context as sc
+from arti_screen_privacy import screen_privacy
+import arti_vision_capture
+import arti_vision_openai as oai
+import arti_zai_vision
+
+_vision_lock = threading.Lock()
+_last_uptime_log_ts = 0.0
+
+GROQ_VISION_URL = "https://api.groq.com/openai/v1/chat/completions"
+OPENROUTER_VISION_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+# Urutan dari log 9 jam 27 Agu 2026: Gemini Lite 160/167 (95%), OpenRouter
+# 6/9, Ollama 3/3. Google Gemma (3/13) dan Cloudflare (1/10) gagal karena
+# thinking memakan budget; keduanya diperbaiki 28 Agu dan lulus probe JSON
+# sintetis, tetapi tetap di belakang incumbent sampai ada sampel live baru.
+DEFAULT_CHAIN = [
+    "google_gemini_lite",
+    "openrouter",
+    "ollama",
+    "google_gemma",
+    "cloudflare",
+    "groq",
+    "zai",
+    "nvidia",
+]
+
+# GitHub Models pensiun total 30 Juli 2026 — ditolak paksa, bukan cuma dihapus
+# dari default. Alasan lengkap di arti_scouter_client.PROVIDER_PENSIUN dan
+# docs/MODEL-REGISTRY.md §2.1.
+PROVIDER_PENSIUN = {"github"}
+
+
+@dataclass
+class VisionUptime:
+    last_ok_ts: float = 0.0
+    last_provider: str = ""
+    consecutive_failures: int = 0
+    total_ok: int = 0
+    total_fail: int = 0
+    chain_fallback_count: int = 0
+
+
+vision_uptime = VisionUptime()
+
+
+def _vision_params(config: dict) -> tuple[int, float, int, int]:
+    max_tokens = int(config.get("vision_max_tokens", 256))
+    temperature = float(config.get("vision_temperature", 0.2))
+    scene_max = int(config.get("vision_scene_max_chars", 300))
+    ocr_max = int(config.get("vision_ocr_max_chars", 200))
+    return max_tokens, temperature, scene_max, ocr_max
+
+
+def _resolve_chain(config: dict) -> list[str]:
+    chain = list(config.get("vision_provider_chain") or DEFAULT_CHAIN)
+    import arti_codex_role as cr
+    if cr.is_enabled({**config, "codex_role": "vision"}):
+        chain = [n for n in chain if n != "codex"] + ["codex"]
+    out: list[str] = []
+    for name in chain:
+        if name == "cursor":
+            try:
+                import arti_cursor_agent as ca  # noqa: PLC0415
+
+                if not ca.is_available(config)[0]:
+                    continue
+            except Exception:  # noqa: BLE001
+                continue
+        if name in PROVIDER_PENSIUN:
+            continue
+        # Rem kuota Gemini (17 Agu 2026) — sama seperti rantai scouter:
+        # selagi jatah menit habis / istirahat pasca-429, nama Gemini keluar
+        # dari rantai giliran ini tanpa baris error. google_gemma hanya
+        # dilewati kalau model utama DAN cadangannya sama-sama tertahan
+        # (kuota Google per model, cadangan bisa saja masih segar).
+        if name == "google_gemini_lite":
+            m = config.get("vision_google_gemini_model") or "gemini-3.1-flash-lite"
+            if arti_gemini_budget.sedang_dibatasi(m, config):
+                continue
+        if name == "google_gemma":
+            # Default model utama & cadangan HARUS sama dengan
+            # _call_google_gemma — beda default = resolver menilai kuota
+            # model yang tidak akan pernah ditembak.
+            kandidat = [config.get("vision_google_gemma_model") or "gemma-4-26b-a4b-it"]
+            cadangan = config.get("vision_google_gemma_fallback_model", "gemma-4-31b-it")
+            if cadangan and cadangan != kandidat[0]:
+                kandidat.append(cadangan)
+            if all(
+                arti_gemini_budget.sedang_dibatasi(k, config) for k in kandidat
+            ):
+                continue
+        if name == "zai" and not (
+            config.get("zai_api_key") or os.environ.get("ZAI_API_KEY") or os.environ.get("ZHIPU_API_KEY")
+        ):
+            continue
+        if name == "ollama" and not (
+            config.get("ollama_api_key") or os.environ.get("OLLAMA_API_KEY")
+        ):
+            continue
+        out.append(name)
+    return out or ["groq"]
+
+
+def _record_success(provider: str) -> None:
+    vision_uptime.last_ok_ts = time.time()
+    vision_uptime.last_provider = provider
+    vision_uptime.consecutive_failures = 0
+    vision_uptime.total_ok += 1
+
+
+def _record_failure() -> None:
+    vision_uptime.consecutive_failures += 1
+    vision_uptime.total_fail += 1
+
+
+def _maybe_log_uptime() -> None:
+    global _last_uptime_log_ts
+    now = time.time()
+    if now - _last_uptime_log_ts < 60.0:
+        return
+    _last_uptime_log_ts = now
+    u = vision_uptime
+    print(
+        f"[Vision] uptime ok={u.total_ok} fail={u.total_fail} "
+        f"provider={u.last_provider or '-'} streak_fail={u.consecutive_failures} "
+        f"fallbacks={u.chain_fallback_count}"
+    )
+    if u.consecutive_failures >= 3:
+        print("[Vision] WARN: 3+ consecutive failures — check API keys / quotas")
+
+
+def _parse_raw(raw: str, config: dict) -> sc.ScreenSnapshot | None:
+    max_tokens, _, scene_max, ocr_max = _vision_params(config)
+    del max_tokens
+    snap = sc.parse_vision_response(raw, scene_max_chars=scene_max, ocr_max_chars=ocr_max)
+    if not snap.scene.strip() and not raw.strip():
+        return None
+    return snap
+
+
+ProviderFn = Callable[[str, str, dict], tuple[str, int]]
+
+
+def _call_codex(prompt: str, jpeg_b64: str, config: dict) -> tuple[str, int]:
+    import arti_codex_role as cr
+    text, ms, _ = cr.call(prompt, {**config, "codex_role": "vision"}, image_b64=jpeg_b64)
+    return text, ms
+
+
+def _call_cursor(prompt: str, jpeg_b64: str, config: dict) -> tuple[str, int]:
+    """Vision via sesi Cursor role 'vision' (composer-2.5, non-fast).
+
+    Terverifikasi spike_grok_vision 2026-08-01: UserMessage(text, images=
+    [SDKImage.from_file(...)]) — composer membaca screenshot dengan akurat.
+    SDKImage butuh path berkas, jadi b64 ditulis ke file sementara dulu.
+    """
+    import base64  # noqa: PLC0415
+    import tempfile  # noqa: PLC0415
+
+    import arti_cursor_agent as ca  # noqa: PLC0415 — lazy: modul tetap jalan tanpa SDK
+
+    fd, path = tempfile.mkstemp(suffix=".jpg", prefix="arti_vision_cursor_")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(base64.b64decode(jpeg_b64))
+        r = ca.send_task("vision", "", prompt, config, image_paths=[path])
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+    try:
+        import arti_api_telemetry as tel  # noqa: PLC0415
+
+        tel.record_call(
+            subsystem="vision", provider="cursor", model=r.model or "composer-2.5",
+            latency_ms=r.latency_ms, ok=bool(r.ok),
+            extra={} if r.ok else {"error_class": str(r.reason or "ProviderError")},
+            config=config,
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    if not r.ok:
+        raise RuntimeError(f"cursor vision gagal: {r.reason}")
+    return r.text or "", r.latency_ms
+
+
+def _call_nvidia(prompt: str, jpeg_b64: str, config: dict) -> tuple[str, int]:
+    max_tokens, temperature, _, _ = _vision_params(config)
+    return arti_nvidia_client.vision_chat(
+        prompt, jpeg_b64, config=config, max_tokens=max_tokens, temperature=temperature
+    )
+
+
+def _call_google_gemma(prompt: str, jpeg_b64: str, config: dict) -> tuple[str, int]:
+    max_tokens, temperature, _, _ = _vision_params(config)
+    model = config.get("vision_google_gemma_model", "gemma-4-26b-a4b-it")
+    try:
+        return arti_gemini_vision.vision_generate(
+            prompt, jpeg_b64, config=config, model=model, max_tokens=max_tokens, temperature=temperature
+        )
+    except Exception:
+        fallback = config.get("vision_google_gemma_fallback_model", "gemma-4-31b-it")
+        if fallback and fallback != model:
+            return arti_gemini_vision.vision_generate(
+                prompt,
+                jpeg_b64,
+                config=config,
+                model=fallback,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+        raise
+
+
+def _call_google_gemini_lite(prompt: str, jpeg_b64: str, config: dict) -> tuple[str, int]:
+    max_tokens, temperature, _, _ = _vision_params(config)
+    model = config.get("vision_google_gemini_model", "gemini-3.1-flash-lite")
+    return arti_gemini_vision.vision_generate(
+        prompt, jpeg_b64, config=config, model=model, max_tokens=max_tokens, temperature=temperature
+    )
+
+
+def _call_cloudflare(prompt: str, jpeg_b64: str, config: dict) -> tuple[str, int]:
+    max_tokens, temperature, _, _ = _vision_params(config)
+    return arti_cloudflare_vision.vision_chat(
+        prompt, jpeg_b64, config=config, max_tokens=max_tokens, temperature=temperature
+    )
+
+
+def _call_openrouter(prompt: str, jpeg_b64: str, config: dict) -> tuple[str, int]:
+    max_tokens, temperature, _, _ = _vision_params(config)
+    key = (config.get("openrouter_api_key") or os.environ.get("OPENROUTER_API_KEY") or "").strip()
+    model = config.get(
+        "vision_openrouter_model", "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
+    )
+    return oai.vision_chat(
+        OPENROUTER_VISION_URL,
+        key,
+        model,
+        prompt,
+        jpeg_b64,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        extra_headers={
+            "HTTP-Referer": "https://github.com/YOUR_USER/YOUR_REPO",
+            "X-Title": "Arti Vision",
+        },
+    )
+
+
+def _call_groq(prompt: str, jpeg_b64: str, config: dict) -> tuple[str, int]:
+    max_tokens, temperature, _, _ = _vision_params(config)
+    key = (config.get("groq_api_key") or os.environ.get("GROQ_API_KEY") or "").strip()
+    model = config.get("vision_groq_model", "qwen/qwen3.6-27b")
+    extra = None
+    if "qwen" in model.lower():
+        # qwen3.6 MENGABAIKAN trik prompt "/no_think". Tanpa param API ini, CoT-nya
+        # menghabiskan max_tokens (256 di jalur vision) dan content balik kosong.
+        # Terverifikasi probe 2026-07-31: tanpa ini keluarannya diawali "<think>".
+        extra = {"reasoning_effort": "none"}
+    return oai.vision_chat(
+        GROQ_VISION_URL,
+        key,
+        model,
+        prompt,
+        jpeg_b64,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        extra_payload=extra,
+    )
+
+
+def _call_github(prompt: str, jpeg_b64: str, config: dict) -> tuple[str, int]:
+    max_tokens, temperature, _, _ = _vision_params(config)
+    return arti_github_vision.vision_chat(
+        prompt, jpeg_b64, config=config, max_tokens=max_tokens, temperature=temperature
+    )
+
+
+def _call_zai(prompt: str, jpeg_b64: str, config: dict) -> tuple[str, int]:
+    max_tokens, temperature, _, _ = _vision_params(config)
+    return arti_zai_vision.vision_chat(
+        prompt, jpeg_b64, config=config, max_tokens=max_tokens, temperature=temperature
+    )
+
+
+def _call_ollama(prompt: str, jpeg_b64: str, config: dict) -> tuple[str, int]:
+    max_tokens, temperature, _, _ = _vision_params(config)
+    return arti_ollama_vision.vision_chat(
+        prompt, jpeg_b64, config=config, max_tokens=max_tokens, temperature=temperature
+    )
+
+
+_PROVIDERS: dict[str, ProviderFn] = {
+    "cursor": _call_cursor,
+    "codex": _call_codex,
+    "nvidia": _call_nvidia,
+    "google_gemma": _call_google_gemma,
+    "google_gemini_lite": _call_google_gemini_lite,
+    "cloudflare": _call_cloudflare,
+    "openrouter": _call_openrouter,
+    "groq": _call_groq,
+    # "github" sengaja tidak didaftarkan — pensiun 30 Juli 2026. Lihat catatan
+    # di arti_scouter_client._PROVIDERS: pintu dispatch adalah satu-satunya
+    # tempat yang menutup semua pemanggil, termasuk yang melewati _resolve_chain.
+    "zai": _call_zai,
+    "ollama": _call_ollama,
+}
+
+
+# --------------------------------------------------------------------------- #
+# GERBANG LAYAR-DIAM
+#
+# Arti menonton dirinya sendiri: layar nyaris tidak berubah, tapi vision tetap
+# dipanggil tiap giliran dan hasilnya disuntik ke prompt -> dia terus
+# mengomentari layar yang sama.
+# Gerbang ini memutus di HULU: kalau beda piksel < ambang, provider TIDAK
+# dipanggil sama sekali (hemat kuota Gemini juga) dan deskripsi lama dipakai.
+# `layar_diam_beruntun` dibaca bridge untuk berhenti menyuntik [LAYAR:].
+# --------------------------------------------------------------------------- #
+
+_sidik_terakhir: bytes | None = None
+layar_diam_beruntun = 0
+_diam_log_terakhir = 0.0
+
+
+def _tangkap_bergerbang(config: dict) -> tuple[str | None, bytes | None]:
+    """Tangkap layar; None kalau tidak layak dikirim ke provider."""
+    global _sidik_terakhir, layar_diam_beruntun, _diam_log_terakhir
+    try:
+        b64, _jpeg, sidik = arti_vision_capture.capture_dengan_sidik(config)
+    except Exception:  # noqa: BLE001 — capture gagal: jalur lama, jangan mati
+        b64, _ = arti_vision_capture.capture_jpeg_b64(config)
+        return b64, None
+
+    gelap = arti_vision_capture.layar_gelap(
+        sidik,
+        float(config.get("vision_gelap_luma_max", 12.0)),
+        float(config.get("vision_gelap_sebar_min", 6.0)),
+    )
+    # DUA metrik, gerbang buka kalau salah satu lolos:
+    # - sel_berubah (UTAMA): menangkap perubahan LOKAL (subtitle, popup) yang
+    #   nyaris tak menggeser rata-rata. Ukur nyata 20 Agu di layar Bohan:
+    #   derau layar diam 0,0-0,9% vs subtitle 1 baris 5,2%, popup kecil 3,1%.
+    # - beda rata-rata (cadangan): menangkap perubahan GLOBAL (ganti scene,
+    #   fade) yang bisa merata tanpa banyak sel melewati delta.
+    sel = arti_vision_capture.sel_berubah_persen(_sidik_terakhir, sidik)
+    beda = arti_vision_capture.beda_persen(_sidik_terakhir, sidik)
+    ambang_sel = float(config.get("vision_sel_berubah_min_persen", 2.0))
+    ambang = float(config.get("vision_beda_min_persen", 6.0))
+    diam = sel < ambang_sel and beda < ambang
+
+    if gelap or diam:
+        layar_diam_beruntun += 1
+        now = time.time()
+        if now - _diam_log_terakhir > 60.0:  # anti-spam log (pola VAD)
+            alasan = ("gelap/kosong" if gelap else
+                      f"sel {sel:.1f}%<{ambang_sel:.1f}% & beda {beda:.1f}%<{ambang:.0f}%")
+            print(f"[Vision] Layar diam ({alasan}) — provider dilewati "
+                  f"(x{layar_diam_beruntun})")
+            _diam_log_terakhir = now
+        return None, sidik
+
+    layar_diam_beruntun = 0
+    _sidik_terakhir = sidik
+    return b64, sidik
+
+
+def layar_sedang_diam(config: dict | None = None) -> bool:
+    """True kalau layar sudah beberapa kali berturut-turut tidak berubah —
+    bridge memakai ini untuk berhenti menyuntik [LAYAR:] ke prompt."""
+    cfg = config or {}
+    batas = int(cfg.get("vision_diam_stop_inject", 2))
+    return batas > 0 and layar_diam_beruntun >= batas
+
+
+def reset_gerbang_layar() -> None:
+    """Dipanggil saat sesi baru / vision di-toggle manual."""
+    global _sidik_terakhir, layar_diam_beruntun
+    _sidik_terakhir = None
+    layar_diam_beruntun = 0
+
+
+def describe_with_chain(
+    config: dict,
+    *,
+    prompt: str | None = None,
+    jpeg_b64: str | None = None,
+) -> tuple[sc.ScreenSnapshot | None, str]:
+    """Run vision chain; returns (snapshot, provider_name or '')."""
+    privacy_epoch = screen_privacy.epoch
+    if not screen_privacy.allows_screen(privacy_epoch):
+        return None, "privacy"
+    if not config.get("vision_enabled", config.get("screen_context_enabled", False)):
+        return None, ""
+    runtime_on = config.get("vision_runtime_on", False)
+    auto_until = float(config.get("vision_auto_until", 0))
+    if not runtime_on and time.time() >= auto_until:
+        return None, ""
+
+    captured_at = time.time()
+    user_prompt = prompt or sc.build_vision_prompt()
+    if jpeg_b64 is None:
+        jpeg_b64, _sidik = _tangkap_bergerbang(config)
+        if jpeg_b64 is None:
+            # Layar diam/gelap: JANGAN kembalikan snapshot lama. Dua pemanggil
+            # (screen_watcher_worker & scouter auto-vision) langsung mendorong
+            # apa pun yang balik ke ring lalu mencetak "Vision refresh via ..."
+            # — itu mendorong ulang snapshot yang sama (ring terisi duplikat)
+            # dan mengumumkan penyegaran yang TIDAK terjadi (aturan #3).
+            # None = tidak ada bahan baru; ring lama tetap utuh di tempatnya.
+            return None, "diam"
+
+    chain = _resolve_chain(config)
+    import arti_provider_health as _ph  # noqa: PLC0415
+
+    _boleh = _ph.usable([n for n in chain if n in _PROVIDERS],
+                        lambda n: _ph.chain_key(n, config, lane="vision"))
+
+    last_err = ""
+
+    acquired = _vision_lock.acquire(blocking=False)
+    if not acquired:
+        # No cached snapshot masquerading as a new capture, no lock-wait backlog.
+        return None, "busy"
+
+    try:
+        for idx, name in enumerate(chain):
+            # Re-check after capture/lock waits and before every fallback request.
+            if not screen_privacy.allows_screen(privacy_epoch):
+                return None, "privacy"
+            fn = _PROVIDERS.get(name)
+            if not fn:
+                continue
+            hkey = _ph.chain_key(name, config, lane="vision")
+            if name not in _boleh:
+                continue
+            if idx > 0:
+                vision_uptime.chain_fallback_count += 1
+            try:
+                print(f"[Vision] Trying {name}...")
+                raw, ms = fn(user_prompt, jpeg_b64, {**config, "_screen_privacy_epoch": privacy_epoch})
+                if not screen_privacy.allows_screen(privacy_epoch):
+                    return None, "privacy"
+                snap = _parse_raw(raw, config)
+                if snap is None:
+                    last_err = f"{name}: empty scene"
+                    print(f"[Vision] {name} parse fail ({ms}ms)")
+                    continue
+                if time.time() - captured_at > float(config.get("vision_stale_sec", 30.0)):
+                    return None, "stale"
+                snap.wall_ts = captured_at
+                snap.privacy_epoch = privacy_epoch
+                _ph.record_success(hkey)
+                _record_success(name)
+                _maybe_log_uptime()
+                print(f"[Vision] OK {name} ({ms}ms)")
+                return snap, name
+            except Exception as e:
+                last_err = f"{name}: {e}"
+                print(f"[Vision] {name} fail: {type(e).__name__}: {e}")
+                _ph.record_failure(hkey, _ph.classify(e))
+                if oai.is_rate_limit_error(e):
+                    continue
+                continue
+
+        _record_failure()
+        _maybe_log_uptime()
+        if last_err:
+            print(f"[Vision] All providers failed — last: {last_err}")
+        return None, ""
+    finally:
+        if acquired:
+            _vision_lock.release()
+
+
+def capture_and_describe(config: dict | None = None) -> tuple[sc.ScreenSnapshot | None, str]:
+    """Entry for screen_watcher_worker — no args, uses CONFIG dict."""
+    cfg = config or {}
+    return describe_with_chain(cfg)
+
+
+def make_watcher_fn(config: dict) -> Callable[[], tuple[sc.ScreenSnapshot | None, str]]:
+    """Closure for screen_watcher_worker."""
+
+    def _fn() -> tuple[sc.ScreenSnapshot | None, str]:
+        return describe_with_chain(config)
+
+    return _fn
+
+
+def refresh_if_stale(config: dict) -> tuple[sc.ScreenSnapshot | None, str]:
+    """On-demand describe when ring snapshot older than vision_stale_sec."""
+    if not screen_privacy.allows_screen():
+        return None, "privacy"
+    stale_sec = float(config.get("vision_stale_sec", 30))
+    latest = sc.screen_ring.latest()
+    if latest and (time.time() - latest.wall_ts) <= stale_sec:
+        return latest, vision_uptime.last_provider or "cached"
+    return describe_with_chain(config)
+
+
+def is_vision_fresh(config: dict) -> bool:
+    stale_sec = float(config.get("vision_stale_sec", 30))
+    latest = sc.screen_ring.latest()
+    if not latest or not latest.scene:
+        return False
+    return (time.time() - latest.wall_ts) <= stale_sec

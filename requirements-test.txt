@@ -1,0 +1,4 @@
+# Install after requirements.txt; test runner extensions only.
+pytest-xdist>=3.8,<4
+# contracts/*.json meta-validation + SCH goldens (WP C0)
+jsonschema>=4.18,<5

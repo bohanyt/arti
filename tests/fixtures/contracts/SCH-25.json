@@ -1,0 +1,10 @@
+{ "id": "SCH-25", "source": "R0-07 §15, §12", "schema": "host_status.schema.json",
+  "input": "host_status/2 waiting_on{kind: proposal} without proposal_id",
+  "cases": [
+    { "name": "proposal_without_id", "base": "host_status", "expect": "invalid", "keyword": "required",
+      "ops": [ { "op": "set", "path": "/waiting_on", "value": { "kind": "proposal", "since_frame": 1200, "since_ms": 1792999999000,
+                                                                "opener": "host", "proposal_sender_id": 1 } } ] },
+    { "name": "control_proposal_with_id", "base": "host_status", "expect": "valid",
+      "ops": [ { "op": "set", "path": "/waiting_on", "value": { "kind": "proposal", "since_frame": 1200, "since_ms": 1792999999000,
+                                                                "opener": "host", "proposal_sender_id": 1, "proposal_id": "prop-9" } } ] },
+    { "name": "control_none", "base": "host_status", "expect": "valid" } ] }

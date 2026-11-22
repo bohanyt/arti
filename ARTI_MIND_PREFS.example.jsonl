@@ -1,0 +1,4 @@
+{"v": 1, "id": "soul-1", "scope": "any", "text": "aku suka (satu sifat dari KEPRIBADIAN, kalimat pendek dengan suaranya)", "about": ["ngobrol"], "polarity": "like", "source": "soul", "pinned": true, "strength": 5}
+{"v": 1, "id": "soul-2", "scope": "any", "text": "aku penasaran sama (satu keinginan dari KEINGINAN)", "about": ["forage", "inspect"], "polarity": "like", "source": "soul", "pinned": true, "strength": 4}
+{"v": 1, "id": "example-trait-a", "scope": "any", "text": "aku punya sifat contoh A dari pemilik", "about": ["contoh"], "polarity": "like", "source": "owner", "pinned": true, "strength": 5}
+{"v": 1, "id": "example-trait-b", "scope": "stardew", "text": "aku punya sifat contoh B dari pemilik", "about": ["contoh"], "polarity": "like", "source": "owner", "pinned": true, "strength": 5}

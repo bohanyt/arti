@@ -1,0 +1,14 @@
+{ "v": "arti.unavailable_reasons/1",
+  "codes": {
+    "handoff_pending":            { "text": "menunggu serah-terima", "source": "spec §3.2 handoff step 4" },
+    "target_fenced":              { "text": "aksi sebelumnya pada target ini belum selesai", "source": "spec §3.3 target fence" },
+    "target_quarantined":         { "text": "hasil terakhir belum pasti — lihat dulu", "source": "spec §6.1 quarantine" },
+    "buried":                     { "text": "tertutup layar lain", "source": "spec §6.5 burial" },
+    "debt_disallows":             { "text": "menunggu proses sebelumnya selesai", "source": "spec §5.2 debt allows (own or native debt)" },
+    "foreign_debt":               { "text": "peti sedang dibuka pemain lain", "source": "spec §6.1 foreign debt" },
+    "not_actionable":             { "text": "layar ini belum bisa dipilih", "source": "spec §6.5 ui.actionable=false" },
+    "durable_io_degraded":        { "text": "penyimpanan catatan sedang gagal", "source": "spec §5.6" },
+    "pending_evidence_full":      { "text": "menunggu hasil aksi sebelumnya", "source": "R0-02 class A watermark" },
+    "pending_evidence_exhausted": { "text": "terlalu banyak hasil aksi yang belum pasti", "source": "R0-02 X2/X3" },
+    "capability_unsupported":     { "text": "belum bisa dilakukan sistem", "source": "adapter_unsupported_capability (spec §5.7 open_menu; R2a pagination)" }
+  } }

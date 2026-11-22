@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "arti:contracts/request.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["protocol", "op", "v", "request_id", "request_seq", "runtime_instance_id", "session_id", "owner_id",
+               "generation", "control_seq", "expected_player_id", "expected_screen_id", "deadline_unix_ms", "attempt_id",
+               "actor", "verb", "args", "pins", "payload_sha256"],
+  "properties": {
+    "protocol": { "const": 1 },
+    "op": { "const": "verb" },
+    "v": { "const": "arti.verb_request/1" },
+    "request_id": { "$ref": "common.schema.json#/$defs/Id" },
+    "request_seq": { "type": "integer", "minimum": 1 },
+    "runtime_instance_id": { "$ref": "common.schema.json#/$defs/Id" },
+    "session_id": { "$ref": "common.schema.json#/$defs/Id" },
+    "owner_id": { "$ref": "common.schema.json#/$defs/Id" },
+    "generation": { "$ref": "common.schema.json#/$defs/Gen" },
+    "control_seq": { "type": "integer", "minimum": 1 },
+    "expected_player_id": { "type": "integer" },
+    "expected_screen_id": { "type": "integer", "minimum": 0 },
+    "deadline_unix_ms": { "$ref": "common.schema.json#/$defs/WallMs" },
+    "attempt_id": { "$ref": "common.schema.json#/$defs/Id" },
+    "actor": { "$ref": "common.schema.json#/$defs/Actor" },
+    "verb": { "$ref": "common.schema.json#/$defs/VerbName" },
+    "args": { "type": "object" },
+    "pins": { "$ref": "verb.schema.json#/$defs/Pins" },
+    "payload_sha256": { "$ref": "common.schema.json#/$defs/Sha256" }
+  }
+}

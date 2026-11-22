@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>ArtiStardewBridge</AssemblyName>
+    <RootNamespace>ArtiStardewBridge</RootNamespace>
+    <Version>0.1.0</Version>
+    <TargetFramework>net6.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>10</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <EnableModDeploy>false</EnableModDeploy>
+    <EnableModZip>false</EnableModZip>
+    <EnableHarmony>true</EnableHarmony>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="../../contracts/il_d_rows.json" LogicalName="il_d_rows.json" />
+    <ProjectReference Include="../ArtiCore.Pure/ArtiCore.Pure.csproj" />
+    <PackageReference Include="System.Text.Json" Version="6.0.11" ExcludeAssets="runtime" />
+    <PackageReference Include="System.Text.Encodings.Web" Version="6.0.0" ExcludeAssets="runtime" />
+    <PackageReference Include="Pathoschild.Stardew.ModBuildConfig" Version="4.4.0" />
+  </ItemGroup>
+</Project>

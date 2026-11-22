@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "arti:contracts/reply.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["v", "decision_id", "offer_generation", "lane", "lane_generation", "provider", "model", "received_ms", "raw",
+               "parsed", "verdict"],
+  "properties": {
+    "v": { "const": "arti.reply/1" },
+    "decision_id": { "$ref": "common.schema.json#/$defs/Sha256" },
+    "offer_generation": { "$ref": "common.schema.json#/$defs/Gen" },
+    "lane": { "enum": ["force", "activity"] },
+    "lane_generation": { "type": "integer", "minimum": 0 },
+    "provider": { "enum": ["codex", "claude"] },
+    "model": { "type": "string", "maxLength": 64, "not": { "pattern": "astra" } },
+    "received_ms": { "$ref": "common.schema.json#/$defs/WallMs" },
+    "latency_ms": { "type": "integer", "minimum": 0 },
+    "raw": { "type": "string", "maxLength": 2048 },
+    "parsed": { "oneOf": [ { "$ref": "choice.schema.json" }, { "type": "null" } ] },
+    "verdict": { "enum": ["valid", "malformed", "unknown_id", "unavailable", "superseded", "material_changed",
+                          "decision_reply_late", "stale_lane", "capacity_exhausted"] }
+  }
+}

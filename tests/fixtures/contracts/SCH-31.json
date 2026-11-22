@@ -1,0 +1,8 @@
+{ "id": "SCH-31", "source": "R0-07 §15, §8.1", "schema": "occurrence_ring.schema.json",
+  "input": "ring record kind effect without attempt_id, or with facts.effect_kind wood_gain",
+  "cases": [
+    { "name": "effect_without_attempt_id", "base": "ring_file", "expect": "invalid", "keyword": "required",
+      "ops": [ { "op": "remove", "path": "/records/0/attempt_id" } ] },
+    { "name": "effect_kind_wood_gain", "base": "ring_file", "expect": "invalid", "keyword": "enum",
+      "ops": [ { "op": "set", "path": "/records/0/facts/effect_kind", "value": "wood_gain" } ] },
+    { "name": "control_effect_record", "base": "ring_file", "expect": "valid" } ] }

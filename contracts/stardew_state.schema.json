@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "arti:contracts/stardew_state.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema", "ts", "game_time", "location", "held", "energy", "hp", "pending_decision", "intent", "last_results",
+               "fresh", "date", "under_attack", "monsters_present", "intent_terms", "weather", "night", "shop_closed",
+               "run_id", "session_id"],
+  "properties": {
+    "schema": { "const": "arti.stardew_state/1" },
+    "ts": { "type": "number", "minimum": 0 },
+    "game_time": { "type": ["string", "null"], "maxLength": 32 },
+    "location": { "type": ["string", "null"], "maxLength": 80 },
+    "held": { "type": ["string", "null"], "maxLength": 80 },
+    "energy": { "type": ["number", "null"] }, "hp": { "type": ["integer", "null"] },
+    "pending_decision": { "oneOf": [ { "type": "null" }, { "type": "object", "additionalProperties": false,
+      "required": ["kind", "text", "since_ts", "receiver"],
+      "properties": { "kind": { "type": "string", "maxLength": 32 }, "text": { "type": "string", "maxLength": 200 },
+                      "since_ts": { "type": "number", "minimum": 0 },
+                      "receiver": { "type": ["string", "null"], "maxLength": 128 } } } ] },
+    "intent": { "type": ["string", "null"], "maxLength": 240 },
+    "last_results": { "type": "array", "maxItems": 3, "items": { "type": "string", "maxLength": 240 } },
+    "fresh": { "type": "boolean" },
+    "date": { "type": "array", "prefixItems": [ { "type": "integer" }, { "$ref": "common.schema.json#/$defs/Season" },
+                                                { "type": "integer" } ], "items": false, "minItems": 3 },
+    "under_attack": { "type": ["boolean", "null"] }, "monsters_present": { "type": ["boolean", "null"] },
+    "intent_terms": { "type": "array", "maxItems": 32, "items": { "type": "string", "maxLength": 80 } },
+    "weather": { "type": ["string", "null"], "maxLength": 16 },
+    "night": { "type": "boolean" }, "shop_closed": { "type": "boolean" },
+    "run_id": { "$ref": "common.schema.json#/$defs/Id" }, "session_id": { "$ref": "common.schema.json#/$defs/Id" }
+  }
+}

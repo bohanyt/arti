@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableModDeploy>false</EnableModDeploy>
+    <EnableModZip>false</EnableModZip>
+  </PropertyGroup>
+  <ItemGroup><PackageReference Include="Pathoschild.Stardew.ModBuildConfig" Version="4.4.0" /></ItemGroup>
+  <ItemGroup><Compile Include="../ArtiStardewBridge/Protocol/AtomicFileWriter.cs" Link="AtomicFileWriter.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="../ArtiStardewBridge/Protocol/NativeReadyChecks.cs" Link="NativeReadyChecks.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="../ArtiStardewBridge/Protocol/HostGiftSafety.cs" Link="HostGiftSafety.cs" /></ItemGroup>
+  <ItemGroup><Compile Include="../ArtiStardewBridge/Protocol/ExitWhenSafe.cs" Link="ExitWhenSafe.cs" /></ItemGroup>
+</Project>

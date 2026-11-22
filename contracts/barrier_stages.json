@@ -1,0 +1,15 @@
+{ "v": "arti.barrier_stages/1",
+  "barriers": [
+    { "kind": "warp_fade", "stages": ["start", "location_loaded", "control_restored"], "base_s": 60 },
+    { "kind": "event", "stages": ["command_index"], "base_s": 900 },
+    { "kind": "sleep_ready", "stages": ["local_ready", "all_ready"], "chains_to": "night", "base_s": 195 },
+    { "kind": "night", "stages": ["day_ending", "levelup", "shipping_summary", "ok_accepted", "outro", "save_menu", "first_draw",
+                                  "saved", "day_started", "control_restored"], "base_s": 600 },
+    { "kind": "passout_0200", "stages": ["collapse"], "chains_to": "night", "base_s": null },
+    { "kind": "passout_same_day", "stages": ["collapse", "bed_warp", "control_restored"], "base_s": 60 },
+    { "kind": "ko_recovery", "stages": ["killscreen", "revive_warp", "event_prose", "item_list", "control_restored"], "base_s": 180 },
+    { "kind": "festival_start", "stages": ["ready", "warp"], "chains_to": "warp_fade", "base_s": 300 },
+    { "kind": "festival_end", "stages": ["ready", "warp"], "chains_to": "warp_fade", "base_s": 300 },
+    { "kind": "host_pause", "stages": [], "base_s": null },
+    { "kind": "reconnect", "stages": [], "base_s": 30 }
+  ] }

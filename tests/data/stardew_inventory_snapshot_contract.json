@@ -1,0 +1,123 @@
+{
+  "protocol": 1,
+  "ev": "observation",
+  "seq": 4,
+  "player_id": -100000000000000001,
+  "screen_id": 1,
+  "payload": {
+    "session_id": "obs:demo:1:1",
+    "product": "progress",
+    "domain": "progress.inventory",
+    "kind": "snapshot",
+    "domain_revision": 1,
+    "provenance": "LOCAL_AUTHORITATIVE",
+    "authoritative": true,
+    "available": true,
+    "error": null,
+    "truncation": {
+      "truncated": false,
+      "observed_count": 11,
+      "sent_count": 11
+    },
+    "body": {
+      "facts": {
+        "meta:inventory": {
+          "kind": "meta",
+          "active_slot": 0,
+          "slot_count": 4
+        },
+        "slot:0": {
+          "kind": "slot",
+          "slot": 0,
+          "occupied": true,
+          "is_active": true,
+          "qualified_item_id": "(T)IridiumHoe",
+          "name": "Iridium Hoe",
+          "display_name": "Iridium Hoe",
+          "stack": 1,
+          "quality": 0,
+          "category": -99,
+          "type_definition": "(T)",
+          "type_token": "tool",
+          "tool_subtype": "Hoe",
+          "tool_upgrade_level": 2
+        },
+        "slot:1": {
+          "kind": "slot",
+          "slot": 1,
+          "occupied": false,
+          "is_active": false
+        },
+        "slot:2": {
+          "kind": "slot",
+          "slot": 2,
+          "occupied": true,
+          "is_active": false,
+          "qualified_item_id": "(O)276",
+          "name": "Parsnip",
+          "display_name": "Parsnip",
+          "stack": 8,
+          "quality": 2,
+          "category": -75,
+          "type_definition": "(O)",
+          "type_token": "object"
+        },
+        "slot:3": {
+          "kind": "slot",
+          "slot": 3,
+          "occupied": true,
+          "is_active": false,
+          "qualified_item_id": "(W)4",
+          "name": "Galaxy Sword",
+          "display_name": "Galaxy Sword",
+          "stack": 1,
+          "quality": 0,
+          "category": -98,
+          "type_definition": "(W)",
+          "type_token": "weapon",
+          "tool_subtype": "MeleeWeapon",
+          "tool_upgrade_level": 0,
+          "weapon_subtype": "sword"
+        },
+        "eq:hat": {
+          "kind": "equipment",
+          "location": "hat",
+          "occupied": true,
+          "qualified_item_id": "(H)15",
+          "name": "Straw Hat",
+          "display_name": "Straw Hat",
+          "stack": 1,
+          "quality": 0,
+          "category": -95,
+          "type_definition": "(H)",
+          "type_token": "hat"
+        },
+        "eq:shirt": {
+          "kind": "equipment",
+          "location": "shirt",
+          "occupied": false
+        },
+        "eq:pants": {
+          "kind": "equipment",
+          "location": "pants",
+          "occupied": false
+        },
+        "eq:boots": {
+          "kind": "equipment",
+          "location": "boots",
+          "occupied": false
+        },
+        "eq:left_ring": {
+          "kind": "equipment",
+          "location": "left_ring",
+          "occupied": false
+        },
+        "eq:right_ring": {
+          "kind": "equipment",
+          "location": "right_ring",
+          "occupied": false
+        }
+      }
+    }
+  }
+}

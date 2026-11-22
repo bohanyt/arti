@@ -1,0 +1,9 @@
+{
+  "Name": "ARTI deterministic HOST helper",
+  "Author": "bohan",
+  "Version": "0.1.0",
+  "Description": "Disposable rehearsal HOST only. Never installed on the farmhand.",
+  "UniqueID": "bohan.ArtiHostHelper",
+  "EntryDll": "ArtiHostHelper.dll",
+  "MinimumApiVersion": "4.0.0"
+}

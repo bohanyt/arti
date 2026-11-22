@@ -1,0 +1,166 @@
+{
+  "protocol": 1,
+  "ev": "observation",
+  "seq": 3,
+  "player_id": -100000000000000001,
+  "screen_id": 1,
+  "payload": {
+    "session_id": "obs:demo:-100000000000000001:1",
+    "product": "scene",
+    "domain": "scene.current_location",
+    "kind": "snapshot",
+    "domain_revision": 1,
+    "provenance": "ACTIVE_SYNCED",
+    "authoritative": true,
+    "available": true,
+    "error": null,
+    "truncation": {
+      "truncated": false,
+      "observed_count": 9,
+      "sent_count": 9
+    },
+    "body": {
+      "facts": {
+        "loc:Farm": {
+          "kind": "location",
+          "location_id": "Farm",
+          "location_kind": "Farm",
+          "is_outdoors": true,
+          "map_width": 80,
+          "map_height": 65
+        },
+        "warp:Farm:40,0-\u003EBusStop:0,22": {
+          "kind": "warp",
+          "source_tile": {
+            "x": 40,
+            "y": 0
+          },
+          "target_location": "BusStop",
+          "target_tile": {
+            "x": 0,
+            "y": 22
+          }
+        },
+        "door:Farm:64,15:FarmHouse": {
+          "kind": "door",
+          "tile": {
+            "x": 64,
+            "y": 15
+          },
+          "target_location": "FarmHouse",
+          "target_tile": null
+        },
+        "obj:Farm:12,8:(O)472": {
+          "kind": "object",
+          "qualified_item_id": "(O)472",
+          "name": "Parsnip",
+          "display_name": "Parsnip",
+          "tile": {
+            "x": 12,
+            "y": 8
+          },
+          "bounds": {
+            "x": 768,
+            "y": 512,
+            "width": 64,
+            "height": 64
+          },
+          "passable": false,
+          "grabbable": true,
+          "machine": false,
+          "ready_for_harvest": false,
+          "minutes_until_ready": 0,
+          "held_item": null
+        },
+        "obj:Farm:20,10:(BC)12": {
+          "kind": "object",
+          "qualified_item_id": "(BC)12",
+          "name": "Keg",
+          "display_name": "Keg",
+          "tile": {
+            "x": 20,
+            "y": 10
+          },
+          "bounds": null,
+          "passable": false,
+          "grabbable": false,
+          "machine": true,
+          "ready_for_harvest": true,
+          "minutes_until_ready": 0,
+          "held_item": {
+            "qualified_item_id": "(O)346",
+            "stack": 1,
+            "name": "Beer"
+          }
+        },
+        "tf:Farm:12,9:HoeDirt": {
+          "kind": "terrain",
+          "terrain_type": "HoeDirt",
+          "tile": {
+            "x": 12,
+            "y": 9
+          },
+          "passable": true,
+          "crop": {
+            "qualified_item_id": "(O)472",
+            "phase": 3,
+            "dead": false,
+            "watered": true,
+            "ready_for_harvest": false
+          },
+          "wild_tree": null,
+          "fruit_tree": null
+        },
+        "npc:Farm:Leah": {
+          "kind": "npc",
+          "category": "npc",
+          "internal_name": "Leah",
+          "display_name": "Leah",
+          "tile": {
+            "x": 18,
+            "y": 20
+          },
+          "pixel": {
+            "x": 1152,
+            "y": 1280
+          },
+          "facing": 2,
+          "moving": false,
+          "monster": null
+        },
+        "mon:Farm:eph-1": {
+          "kind": "monster",
+          "category": "monster",
+          "internal_name": "Green Slime",
+          "display_name": "Green Slime",
+          "tile": {
+            "x": 5,
+            "y": 6
+          },
+          "pixel": {
+            "x": 320,
+            "y": 384
+          },
+          "facing": 1,
+          "moving": true,
+          "monster": {
+            "ephemeral": true,
+            "health": 24,
+            "max_health": 24
+          }
+        },
+        "clump:Farm:8,14:600": {
+          "kind": "clump",
+          "clump_type": "stump",
+          "tile": {
+            "x": 8,
+            "y": 14
+          },
+          "width": 2,
+          "height": 2,
+          "parent_sheet_index": 600
+        }
+      }
+    }
+  }
+}

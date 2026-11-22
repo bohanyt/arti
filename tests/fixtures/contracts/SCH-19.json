@@ -1,0 +1,8 @@
+{ "id": "SCH-19", "source": "R0-07 §15, §9", "schema": "journal.schema.json",
+  "input": "journal ev: something_new",
+  "layer_note": "schema rejects the ev; routing the raw record to journal_rejects.jsonl + journal_reject is the journal writer (R2-S)",
+  "expect_ev": "journal_reject",
+  "cases": [
+    { "name": "unknown_ev", "base": "journal_refusal", "expect": "invalid", "keyword": "enum",
+      "ops": [ { "op": "set", "path": "/ev", "value": "something_new" } ] },
+    { "name": "control_refusal_ev", "base": "journal_refusal", "expect": "valid" } ] }

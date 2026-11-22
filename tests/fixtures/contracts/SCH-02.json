@@ -1,0 +1,18 @@
+{ "id": "SCH-02", "source": "R0-07 §15", "schema": "observation.schema.json",
+  "input": "night barrier + ui.kind levelup_profession without ui.levelup",
+  "cases": [
+    { "name": "levelup_profession_without_levelup", "base": "observation_hud", "expect": "invalid", "keyword": "required",
+      "ops": [ { "op": "set", "path": "/native/barrier", "value": { "kind": "night", "instance_id": "night-1", "stage": "levelup",
+                 "stage_index": 0, "opened_frame": 1100, "opened_ms": 1792999990000, "stage_since_ms": 1792999995000, "decisions_served": 0 } },
+               { "op": "set", "path": "/ui/kind", "value": "levelup_profession" },
+               { "op": "set", "path": "/ui/receiver_id", "value": "r-30" },
+               { "op": "set", "path": "/ui/menu_type", "value": "LevelUpMenu" },
+               { "op": "set", "path": "/ui/receiver_epoch", "value": 50 } ] },
+    { "name": "control_with_levelup_detail", "base": "observation_hud", "expect": "valid",
+      "ops": [ { "op": "set", "path": "/native/barrier", "value": { "kind": "night", "instance_id": "night-1", "stage": "levelup",
+                 "stage_index": 0, "opened_frame": 1100, "opened_ms": 1792999990000, "stage_since_ms": 1792999995000, "decisions_served": 0 } },
+               { "op": "set", "path": "/ui/kind", "value": "levelup_profession" },
+               { "op": "set", "path": "/ui/receiver_id", "value": "r-30" },
+               { "op": "set", "path": "/ui/menu_type", "value": "LevelUpMenu" },
+               { "op": "set", "path": "/ui/receiver_epoch", "value": 50 },
+               { "op": "set", "path": "/ui/levelup", "value": { "skill": "farming", "level": 5, "profession": true } } ] } ] }

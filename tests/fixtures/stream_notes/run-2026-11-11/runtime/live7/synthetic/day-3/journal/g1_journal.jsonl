@@ -1,0 +1,7 @@
+{"ev":"native_vitals","at":1794409200.0,"game":{"date":[1,"spring",3],"time":610,"location":"Cabin"},"hp":100}
+{"ev":"dialogue_read","at":1794409200.5,"text":"Joja is closed.","kind":"text_read"}
+{"ev":"generation_requested","at":1794409200.6,"generation_id":"synthetic-generation","request_index":1}
+{"ev":"native_vitals","at":1794409210.0,"game":{"date":[1,"spring",3],"time":620,"location":"Farm"},"hp":100}
+{"ev":"story_event","at":1794409300.0,"text":"meteor", "kind":"text_read"}
+{"ev":"text_read","text":"unstamped text must not be seen"}
+not-json

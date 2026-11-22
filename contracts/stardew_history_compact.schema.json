@@ -1,0 +1,17 @@
+{ "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "arti:contracts/stardew_history_compact.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["schema", "ts", "recent_events", "time_blocks", "summaries", "yesterday", "total_events", "prompt_block",
+               "run_id", "session_id"],
+  "properties": {
+    "schema": { "const": "arti.stardew_history_compact/1" },
+    "ts": { "type": "number", "minimum": 0 },
+    "recent_events": { "type": "array", "maxItems": 10, "items": { "$ref": "stardew_event.schema.json" } },
+    "time_blocks": { "type": "array", "maxItems": 17, "items": { "type": "string", "pattern": "^Sudah tercatat " } },
+    "summaries": { "type": "array", "maxItems": 17, "items": { "type": "object", "additionalProperties": false,
+      "required": ["block", "kind", "events", "count"],
+      "properties": { "block": { "enum": ["pagi", "siang", "malam", "older"] }, "kind": { "type": "string", "maxLength": 64 },
+                      "events": { "type": "integer", "minimum": 0 }, "count": { "type": "integer", "minimum": 0 } } } },
+    "yesterday": { "oneOf": [ { "type": "null" }, { "$ref": "stardew_day_memory.schema.json#/$defs/Yesterday" } ] },
+    "total_events": { "type": "integer", "minimum": 0 },
+    "prompt_block": { "type": "string", "maxLength": 1500 },
+    "run_id": { "$ref": "common.schema.json#/$defs/Id" }, "session_id": { "$ref": "common.schema.json#/$defs/Id" } } }

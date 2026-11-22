@@ -1,0 +1,9 @@
+{ "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "arti:contracts/rearm.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["v", "episode_id", "halt_seq", "entries_digest", "actor", "ts"],
+  "properties": { "v": { "const": "arti.rearm/1" },
+                  "episode_id": { "$ref": "common.schema.json#/$defs/Id" },
+                  "halt_seq": { "type": "integer", "minimum": 1 },
+                  "entries_digest": { "$ref": "common.schema.json#/$defs/Sha256" },
+                  "actor": { "enum": ["owner", "rig_operator"] },
+                  "ts": { "$ref": "common.schema.json#/$defs/WallMs" } } }

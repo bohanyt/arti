@@ -1,0 +1,9 @@
+{
+  "Name": "Arti Stardew Bridge",
+  "Author": "bohanyt",
+  "Version": "0.1.0",
+  "Description": "Read-only SMAPI eyes for ARTI over localhost NDJSON.",
+  "UniqueID": "bohanyt.ArtiStardewBridge",
+  "EntryDll": "ArtiStardewBridge.dll",
+  "MinimumApiVersion": "4.5.2"
+}

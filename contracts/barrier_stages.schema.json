@@ -1,0 +1,10 @@
+{ "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "arti:contracts/barrier_stages.schema.json",
+  "type": "object", "additionalProperties": false, "required": ["v", "barriers"],
+  "properties": { "v": { "const": "arti.barrier_stages/1" },
+    "barriers": { "type": "array", "minItems": 11, "maxItems": 11, "items": { "type": "object", "additionalProperties": false,
+      "required": ["kind", "stages", "base_s"],
+      "properties": { "kind": { "$ref": "common.schema.json#/$defs/BarrierKind" },
+                      "stages": { "type": "array", "maxItems": 16, "items": { "type": "string", "pattern": "^[a-z][a-z0-9_]{0,31}$" } },
+                      "chains_to": { "$ref": "common.schema.json#/$defs/BarrierKind" },
+                      "base_s": { "type": ["integer", "null"], "minimum": 1,
+                                  "$comment": "absolute base (spec §6.7 col. 4 second value); null = shares chains_to's or unbounded (host_pause)" } } } } } }

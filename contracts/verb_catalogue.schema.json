@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "arti:contracts/verb_catalogue.schema.json",
+  "type": "object", "additionalProperties": false, "required": ["v", "verbs", "choice_kinds"],
+  "properties": {
+    "v": { "const": "arti.verb_catalogue/1" },
+    "verbs": { "type": "object", "additionalProperties": false,
+      "required": ["observe", "move", "interact", "use", "select", "ui", "transfer", "run_controller"],
+      "patternProperties": { "^(observe|move|interact|use|select|ui|transfer|run_controller)$": { "$ref": "#/$defs/Entry" } } },
+    "choice_kinds": { "type": "object", "additionalProperties": false,
+      "required": ["activity", "resume", "ui", "interact", "answer", "transfer", "wait", "page", "observe"],
+      "patternProperties": { "^[a-z_]+$": { "type": "object", "additionalProperties": false, "required": ["verb", "does_template"],
+        "properties": { "verb": { "oneOf": [ { "$ref": "common.schema.json#/$defs/VerbName" }, { "type": "null" } ] },
+                        "does_template": { "type": "string", "maxLength": 120 } } } } }
+  },
+  "$defs": { "Entry": { "type": "object", "additionalProperties": false,
+    "required": ["description_id", "description", "offerable_as", "phases_ref"],
+    "properties": { "description_id": { "type": "string", "pattern": "^verb\\.[a-z_]+\\.v[0-9]+$" },
+                    "description": { "type": "string", "maxLength": 160 },
+                    "offerable_as": { "type": "array", "uniqueItems": true,
+                                      "items": { "enum": ["ui", "interact", "answer", "transfer", "observe"] } },
+                    "phases_ref": { "type": "string", "pattern": "^verb_phases\\.json#/verbs/[a-z_]+$" } } } }
+}

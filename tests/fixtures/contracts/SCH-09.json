@@ -1,0 +1,7 @@
+{ "id": "SCH-09", "source": "R0-07 §15, §5", "schema": "verb_result.schema.json",
+  "input": "verb_result/3 with executed:false, edges: 2",
+  "cases": [
+    { "name": "refused_with_edges", "base": "verb_result_refused", "expect": "invalid", "keyword": "const",
+      "ops": [ { "op": "set", "path": "/edges", "value": 2 } ] },
+    { "name": "control_refused", "base": "verb_result_refused", "expect": "valid" },
+    { "name": "control_executed", "base": "verb_result_ok", "expect": "valid" } ] }

@@ -1,0 +1,8 @@
+{ "id": "SCH-07", "source": "R0-07 §15, §3.3, §9.1", "schema": "reply.schema.json",
+  "input": "reply with model gpt-6-astra-…",
+  "cases": [
+    { "name": "astra_reply", "base": "reply_valid", "expect": "invalid", "keyword": "not",
+      "ops": [ { "op": "set", "path": "/model", "value": "gpt-6-astra-mini" } ] },
+    { "name": "astra_journal", "schema": "journal.schema.json", "base": "journal_refusal", "expect": "invalid", "keyword": "not",
+      "ops": [ { "op": "set", "path": "/model", "value": "gpt-6-astra-mini" } ] },
+    { "name": "control_luna_reply", "base": "reply_valid", "expect": "valid" } ] }

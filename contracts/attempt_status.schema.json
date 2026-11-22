@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "arti:contracts/attempt_status.schema.json",
+  "$defs": {
+    "Query": { "type": "object", "additionalProperties": false,
+      "required": ["query_id", "runtime_instance_id", "session_id", "owner_id", "generation", "request_seq", "request_id",
+                   "payload_sha256"],
+      "properties": { "query_id": { "$ref": "common.schema.json#/$defs/Id" },
+                      "runtime_instance_id": { "$ref": "common.schema.json#/$defs/Id" },
+                      "session_id": { "$ref": "common.schema.json#/$defs/Id" },
+                      "owner_id": { "$ref": "common.schema.json#/$defs/Id" },
+                      "generation": { "$ref": "common.schema.json#/$defs/Gen" },
+                      "request_seq": { "type": "integer", "minimum": 1 },
+                      "request_id": { "$ref": "common.schema.json#/$defs/Id" },
+                      "payload_sha256": { "$ref": "common.schema.json#/$defs/Sha256" } } },
+    "Answer": { "type": "object", "additionalProperties": false, "required": ["query_id", "status", "request_id", "answered_ms"],
+      "properties": { "query_id": { "$ref": "common.schema.json#/$defs/Id" },
+                      "request_id": { "$ref": "common.schema.json#/$defs/Id" },
+                      "status": { "enum": ["Settled", "Admitted", "Uncertain", "Fresh", "Compacted", "Archived",
+                                           "SequenceConflict", "IdentityMismatch", "Fault"] },
+                      "source": { "enum": ["live_row", "tombstone", "watermark", "none"] },
+                      "result": { "$ref": "verb_result.schema.json" },
+                      "answered_ms": { "$ref": "common.schema.json#/$defs/WallMs" } },
+      "allOf": [ { "if": { "properties": { "status": { "const": "Settled" } } }, "then": { "required": ["result"] },
+                   "else": { "not": { "required": ["result"] } } } ] }
+  }
+}

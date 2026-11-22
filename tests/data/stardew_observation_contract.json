@@ -1,0 +1,23 @@
+{
+  "session_id": "save:demo:epoch:1",
+  "product": "scene",
+  "domain": "scene.current_location",
+  "kind": "snapshot",
+  "domain_revision": 4,
+  "provenance": "ACTIVE_SYNCED",
+  "authoritative": true,
+  "available": true,
+  "error": null,
+  "truncation": {
+    "truncated": false,
+    "observed_count": 1,
+    "sent_count": 1
+  },
+  "body": {
+    "facts": {
+      "obj:Farm:12,8": {
+        "qualified_item_id": "(O)472"
+      }
+    }
+  }
+}

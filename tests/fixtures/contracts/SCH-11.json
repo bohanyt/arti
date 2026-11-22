@@ -1,0 +1,9 @@
+{ "id": "SCH-11", "source": "R0-07 §15, C2", "schema": "verb_result.schema.json",
+  "input": "legacy-form result.json (B1, MenuStepCommandResult)",
+  "layer_note": "the legacy shape is never validated against /3; a result without v = arti.verb_result/3 takes the legacy decoder path (B1 reader, WP-P1)",
+  "cases": [
+    { "name": "legacy_menu_step_result", "expect": "invalid", "decoder_path": "legacy",
+      "instance": { "protocol": 1, "ev": "menu_step_result", "op": "menu_step", "request_id": "r-legacy-1", "session_id": "sess-1",
+                    "runtime_instance_id": "rt-1", "request_seq": 3, "accepted": true, "status": "settled", "outcome": "COMPLETED",
+                    "success": true, "input_settled": true, "result_menu_type": "DialogueBox", "completed_unix_ms": 1793000000500 } },
+    { "name": "v3_result", "base": "verb_result_ok", "expect": "valid", "decoder_path": "v3" } ] }

@@ -1,0 +1,11 @@
+[
+  { "native": "ArmRejected", "arm": "N0_NOT_CONSUMED", "reason": "interrupted_before_edge", "native_code": "N0_NOT_CONSUMED" },
+  { "native": "ArmRejected", "arm": "PRECONDITION_UNAVAILABLE(MENU_OPEN)", "reason": "precondition_stale", "native_code": "MENU_OPEN" },
+  { "native": "CommandBusy", "arm": "BackgroundChestMenuDebt", "reason": "debt_active", "native_code": "CommandBusy", "debt_id": "chest:a2" },
+  { "native": "LeaseExpired", "reason": "lease_expired", "native_code": "LeaseExpired" },
+  { "native": "StaleControlSeq", "reason": "stale_control_seq", "native_code": "StaleControlSeq" },
+  { "native": "StopLatched", "reason": "stop_latched", "native_code": "StopLatched" },
+  { "native": "Expired", "reason": "not_admitted_deadline", "native_code": "Expired" },
+  { "native": "BindingMismatch", "reason": "binding_changed", "native_code": "BindingMismatch" },
+  { "native": "CommandBusy", "reason": "premotor_busy", "native_code": "CommandBusy" }
+]

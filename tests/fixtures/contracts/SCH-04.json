@@ -1,0 +1,9 @@
+{ "id": "SCH-04", "source": "R0-07 §15, §3.1", "schema": "offer.schema.json",
+  "input": "force offer containing a wait choice",
+  "cases": [
+    { "name": "force_with_wait", "base": "offer_force", "expect": "invalid",
+      "ops": [ { "op": "set", "path": "/choices/-", "value": { "id": "c4", "kind": "wait", "label": "Tunggu", "does": "tunggu sebentar" } } ] },
+    { "name": "control_activity_offer_with_wait", "base": "offer_force", "expect": "valid",
+      "ops": [ { "op": "set", "path": "/kind", "value": "activity" }, { "op": "set", "path": "/pending", "value": null },
+               { "op": "remove", "path": "/decision_id" },
+               { "op": "set", "path": "/choices/-", "value": { "id": "c4", "kind": "wait", "label": "Tunggu", "does": "tunggu sebentar" } } ] } ] }

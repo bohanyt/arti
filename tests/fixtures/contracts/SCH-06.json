@@ -1,0 +1,11 @@
+{ "id": "SCH-06", "source": "R0-07 §15, §3.2", "schema": "choice.schema.json",
+  "input": "model output {choice, decision_id} or free text",
+  "layer_note": "nothing executes: the adapter re-forces with feedback; the feedback object below is the offer-side shape",
+  "cases": [
+    { "name": "echo_token", "expect": "invalid", "keyword": "additionalProperties",
+      "instance": { "choice": "c7", "decision_id": "d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1" } },
+    { "name": "free_text", "expect": "invalid", "keyword": "type", "instance": "c7 beli parsnip" },
+    { "name": "control_choice_only", "expect": "valid", "instance": { "choice": "c7", "intent": "mau tidur" } },
+    { "name": "feedback_malformed", "schema": "offer.schema.json", "base": "offer_force", "expect": "valid",
+      "ops": [ { "op": "set", "path": "/feedback", "value": { "received": "c7 beli parsnip", "why_rejected": "malformed",
+                                                                "valid_ids": ["c1", "c2", "c3"] } } ] } ] }

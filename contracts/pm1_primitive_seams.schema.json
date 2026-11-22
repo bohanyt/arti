@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "arti:contracts/pm1_primitive_seams.schema.json",
+  "type": "object",
+  "required": ["question"],
+  "properties": {
+    "question": {"type": "object", "required": ["context", "buttons", "target_token", "options"]},
+    "move_through": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"type": "object"}},
+    "no_input_refusal": {"type": "object", "required": ["v", "not_executed", "native_lifecycle", "edges", "validity"]},
+    "ui_close": {"type": "object", "required": ["before", "after", "verdict"]},
+    "ui_sequence": {"type": "array", "minItems": 3, "items": {"type": "object", "required": ["before", "after", "verdict"]}}
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,6 @@
+{ "id": "SCH-23", "source": "R0-07 §15, §11.2", "schema": "stardew_event.schema.json",
+  "input": "the same outbox entry projected twice (core restart during TTS)",
+  "layer_note": "L1 here: the event_id formula yields the same id for the same (date, kind, occurrence); 6a EventStore.record() returns without appending on a known id (6a behaviour, R2c projection)",
+  "event_base": "stardew_event",
+  "occurrence": { "source_id": "occ:save-1:-123456", "kind": "occurrence", "occurrence_index": 7 },
+  "cases": [ { "name": "projected_event", "base": "stardew_event", "expect": "valid" } ] }

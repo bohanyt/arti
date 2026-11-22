@@ -1,0 +1,9 @@
+{ "id": "SCH-27", "source": "R0-07 §15, §4.4", "schema": "successors.schema.json",
+  "input": "successors.json with two rows of the same key; a row with answer_class final",
+  "cases": [
+    { "name": "published_file", "contract": "successors.json", "expect": "valid", "lint": "successors", "lint_clean": true },
+    { "name": "duplicate_key", "contract": "successors.json", "expect": "valid", "lint": "successors", "lint_clean": false,
+      "ops": [ { "op": "set", "path": "/rows/-", "value": { "key": { "receiver_class": "hud", "control_role": "chest", "gesture": "world_edge" },
+                                                            "answer_class": "terminal", "legal_successors": [] } } ] },
+    { "name": "answer_class_final", "contract": "successors.json", "expect": "invalid", "keyword": "enum",
+      "ops": [ { "op": "set", "path": "/rows/0/answer_class", "value": "final" } ] } ] }

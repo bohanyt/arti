@@ -1,0 +1,9 @@
+{ "id": "SCH-13", "source": "R0-07 §15, §7.2", "schema": "control.schema.json",
+  "input": "control.json kind: renew carrying cancel",
+  "cases": [
+    { "name": "renew_with_cancel", "base": "control_renew", "expect": "invalid",
+      "ops": [ { "op": "set", "path": "/cancel", "value": { "attempt_id": "a1", "request_id": "r-a1", "generation": 3, "reason": "supersede" } } ] },
+    { "name": "control_cancel_kind", "base": "control_renew", "expect": "valid",
+      "ops": [ { "op": "set", "path": "/kind", "value": "cancel" },
+               { "op": "set", "path": "/cancel", "value": { "attempt_id": "a1", "request_id": "r-a1", "generation": 3, "reason": "supersede" } } ] },
+    { "name": "control_renew", "base": "control_renew", "expect": "valid" } ] }

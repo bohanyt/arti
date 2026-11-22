@@ -1,0 +1,9 @@
+{ "id": "SCH-21", "source": "R0-07 §15, §13.2", "schema": "refusals.schema.json",
+  "input": "native reason not in native_map (test-only enum value)",
+  "csharp_enum": { "file": "stardew-mod/ArtiStardewBridge/Protocol/MenuStepCommandInbox.cs", "name": "CommandRejectReason",
+                   "not_a_reason": ["None"] },
+  "background_reasons": ["N0_NOT_CONSUMED", "LATCH_NOT_OWNED", "HOOK_INSTALL_UNCONFIRMED", "LATCH_INSTALL_UNCONFIRMED",
+                         "GAME_FIELD_ACCESS_UNAVAILABLE"],
+  "test_only_value": "TestOnlyUnmappedReason",
+  "expect": { "bucket_or_code": "defect-unclassified" },
+  "cases": [ { "name": "refusals_registry", "contract": "refusals.json", "expect": "valid" } ] }

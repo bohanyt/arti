@@ -1,0 +1,63 @@
+{
+  "receiverMaxLineBytes": 65536,
+  "maxPatchOps": 48,
+  "wireNewlineBytesCounted": 2,
+  "snapshotFamilyCaps": {
+    "warps": 16,
+    "doors": 16,
+    "objects": 40,
+    "terrain": 40,
+    "npcs": 16,
+    "monsters": 16,
+    "clumps": 16
+  },
+  "stringCapsUtf8": {
+    "identity": 32,
+    "location_kind": 16,
+    "name": 24,
+    "display_name": 24,
+    "tree_type": 24,
+    "clump_type": 24
+  },
+  "cases": {
+    "delta_escape_48": {
+      "jsonBytes": 25302,
+      "ndjsonCrlfBytes": 25304,
+      "truncated": false,
+      "kind": "delta"
+    },
+    "delta_mix_escape_48": {
+      "jsonBytes": 25302,
+      "ndjsonCrlfBytes": 25304,
+      "truncated": false,
+      "kind": "delta"
+    },
+    "delta_unicode_48": {
+      "jsonBytes": 25302,
+      "ndjsonCrlfBytes": 25304,
+      "truncated": false,
+      "kind": "delta"
+    },
+    "snapshot_escape": {
+      "jsonBytes": 60434,
+      "ndjsonCrlfBytes": 60436,
+      "truncated": false,
+      "kind": "snapshot"
+    },
+    "snapshot_mix_escape": {
+      "jsonBytes": 60594,
+      "ndjsonCrlfBytes": 60596,
+      "truncated": false,
+      "kind": "snapshot"
+    },
+    "snapshot_unicode": {
+      "jsonBytes": 60754,
+      "ndjsonCrlfBytes": 60756,
+      "truncated": false,
+      "kind": "snapshot"
+    }
+  },
+  "observedMaxJsonBytes": 60754,
+  "observedMaxNdjsonCrlfBytes": 60756,
+  "designGap": null
+}

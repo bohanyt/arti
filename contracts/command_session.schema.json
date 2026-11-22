@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "arti:contracts/command_session.schema.json",
+  "type": "object",
+  "required": [
+    "mod_tick",
+    "native_ms",
+    "acquired_ms",
+    "halt",
+    "rearmed",
+    "fenced_generation",
+    "input_idle",
+    "status_answers",
+    "claim_answers",
+    "cancel_answer",
+    "halt_notes",
+    "protocol",
+    "ev",
+    "session_id",
+    "runtime_instance_id",
+    "player_id",
+    "screen_id",
+    "input_busy",
+    "inflight_request_id",
+    "pad_outstanding_count"
+  ],
+  "properties": {
+    "mod_tick": {
+      "$ref": "session.schema.json#/properties/mod_tick"
+    },
+    "native_ms": {
+      "$ref": "session.schema.json#/properties/native_ms"
+    },
+    "acquired_ms": {
+      "$ref": "session.schema.json#/properties/acquired_ms"
+    },
+    "halt": {
+      "$ref": "session.schema.json#/properties/halt"
+    },
+    "rearmed": {
+      "$ref": "session.schema.json#/properties/rearmed"
+    },
+    "fenced_generation": {
+      "$ref": "session.schema.json#/properties/fenced_generation"
+    },
+    "input_idle": {
+      "$ref": "session.schema.json#/properties/input_idle"
+    },
+    "status_answers": {
+      "$ref": "session.schema.json#/properties/status_answers"
+    },
+    "claim_answers": {
+      "$ref": "session.schema.json#/properties/claim_answers"
+    },
+    "cancel_answer": {
+      "$ref": "session.schema.json#/properties/cancel_answer"
+    },
+    "halt_notes": {
+      "$ref": "session.schema.json#/properties/halt_notes"
+    },
+    "protocol": {
+      "const": 1
+    },
+    "ev": {
+      "const": "command_session"
+    },
+    "session_id": {
+      "$ref": "common.schema.json#/$defs/Id"
+    },
+    "runtime_instance_id": {
+      "$ref": "common.schema.json#/$defs/Id"
+    },
+    "player_id": {
+      "type": "integer"
+    },
+    "screen_id": {
+      "type": "integer"
+    },
+    "input_busy": {
+      "type": "boolean"
+    },
+    "inflight_request_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "pad_outstanding_count": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "$comment": "Existing protocol-1 session serializer shares v3 release/control field contracts; it does not publish the v3 version discriminator."
+}

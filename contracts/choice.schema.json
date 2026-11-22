@@ -1,0 +1,9 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "arti:contracts/choice.schema.json",
+  "type": "object", "additionalProperties": false, "required": ["choice"],
+  "properties": {
+    "choice": { "type": "string", "pattern": "^c([1-9]|1[0-9]|2[0-4])$" },
+    "intent": { "type": "string", "maxLength": 120 }
+  }
+}

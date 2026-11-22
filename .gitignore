@@ -1,0 +1,124 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# .NET / SMAPI build outputs
+stardew-mod/**/bin/
+stardew-mod/**/obj/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Tooling caches
+.hypothesis/
+.pytest_cache/
+.kiro/
+.hermes/
+
+# Venv
+venv/
+venv312/
+
+# --- Rahasia & identitas — JANGAN PERNAH di-commit ---
+.env
+vts_token.txt
+vts_token_*.txt
+config_local.json
+
+# --- Data pribadi streamer (repo publik pakai versi .example) ---
+ARTI_SOUL.md
+ARTI_VIEWERS.md
+ARTI_MOOD_STATE.json
+vault/
+PROGRESS.md
+
+# Arsip/backup vault — SALINAN dari vault/ yang di-ignore di atas, jadi isinya
+# sama pribadinya: percakapan stream, nama penonton, cerita pribadi. Tanpa baris
+# ini, `git add -A` akan menariknya masuk (archive/ sendiri tidak di-ignore).
+archive/vault-*/
+archive/hermes-vault-*/
+vault/**/*.bak-*
+vault/**/*.bak2-*
+
+# Runtime session data
+session_logs/
+transcripts/
+live_session.json
+data/session_manifest.json
+data/yt_thanked_paid.json
+data/yt_thanked_paid.json.*.tmp
+data/vault_rag.db
+data/vault_rag.db-*
+data/observer_rag.db
+data/observer_rag.db-*
+# Pola, bukan nama harfiah (audit 20 Agu): DB embedding baru
+# `vault_rag_qwen3.db` lolos karena aturan lama menyebut nama persis —
+# padahal isinya potongan vault, 127 kemunculan nama satu penonton.
+# Ganti model embedding = nama DB baru = celah yang sama terbuka lagi.
+data/*_rag*.db
+data/*_rag*.db-*
+# Laporan/keluaran yang MENYALIN isi vault atau dialog (aturan #6)
+data/dedup_vault_*.md
+data/dub_log.jsonl
+data/diary/
+# ARTI self + motivation state (owner-readable, written by bridge + post-live diary)
+arti-state/*
+!arti-state/README.md
+data/momen/
+data/panen/
+data/telemetry/
+
+# Test baselines yang di-generate ulang per mesin (bisa berisi nilai CONFIG lokal)
+tests/_baselines/module_constants_snapshot.json
+
+# Upstream agent-skills (local clone for skill copy; not committed)
+vendor/agent-skills/
+
+# Sampel payload Streamlabs (berisi nama viewer/channel) — diagnostik lokal
+data/streamlabs_events_sample.jsonl
+mc-bot/node_modules/
+
+# Cache suara refleks — hasil sintesis, dibangun ulang dengan
+# scripts/build_reflex_cache.py (voice per-mesin, biner, ~3MB)
+data/reflex/
+
+# Alat ukur harness Minecraft (perintah.txt/status.json/tas.json)
+tmp/
+
+# Livepath probe/scratch inside the checkout. An untracked .tmp/ made rejoin
+# refuse ("clean source required") on 2026-11-12. Tools' real scratch is
+# %LOCALAPPDATA%/ARTI/livepath-scratch; keep in-tree .tmp ignored too.
+.tmp/
+
+# Bahan mentah yang dilempar Bohan buat dianalisis (screenshot, potongan
+# terminal, hasil tes) — bisa memuat nama penonton. Hanya README yang di-commit.
+dump/*
+!dump/README.md
+
+# rekaman suara kucing (bisa besar, tidak perlu di git)
+data/kucing/rekaman/
+data/kucing/catatan_kucing.jsonl
+
+# token plugin VTS kucing (kelas rahasia, seperti .env)
+data/vts_kucing_token.txt
+data/latihan/
+
+# Kunci HMAC + artefak mentah pipeline kurasi fine-tune. Hanya hasil turunan
+# yang sudah disanitasi di finetune/curation/ yang boleh masuk git.
+data/finetune/
+
+# Telemetri Stardew mentah (10 Hz) — data runtime, bukan sumber.
+# Dipisah sejak awal supaya raw tidak pernah tercampur dengan pengalaman
+# semantik yang nanti punya provenance. Raw 10Hz BUKAN data fine-tune.
+data/stardew/

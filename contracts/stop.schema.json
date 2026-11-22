@@ -1,0 +1,12 @@
+{ "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "arti:contracts/stop.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["v", "stop_id", "cause", "scope", "save_id", "player_id", "created_ms", "writer"],
+  "properties": { "v": { "const": "arti.stop/1" },
+                  "stop_id": { "$ref": "common.schema.json#/$defs/Id" },
+                  "cause": { "$ref": "common.schema.json#/$defs/StopCause" },
+                  "scope": { "$ref": "common.schema.json#/$defs/StopScope" },
+                  "save_id": { "$ref": "common.schema.json#/$defs/Id" }, "player_id": { "type": "integer" },
+                  "created_ms": { "$ref": "common.schema.json#/$defs/WallMs" },
+                  "writer": { "enum": ["safety", "arti_stop", "launcher", "legacy"] },
+                  "reason": { "type": "string", "maxLength": 64 },
+                  "incident_id": { "$ref": "common.schema.json#/$defs/Id" } } }

@@ -1,0 +1,32 @@
+{ "v": "arti.verb_catalogue/1",
+  "verbs": {
+    "observe":        { "description_id": "verb.observe.v1", "description": "Lihat lagi sesuatu; tidak mengubah apa pun.",
+                        "offerable_as": ["observe"], "phases_ref": "verb_phases.json#/verbs/observe" },
+    "move":           { "description_id": "verb.move.v1", "description": "Jalan ke satu arah, ke pintu keluar, atau mendekati sesuatu.",
+                        "offerable_as": [], "phases_ref": "verb_phases.json#/verbs/move" },
+    "interact":       { "description_id": "verb.interact.v1",
+                        "description": "Pakai tangan pada sesuatu di dekatmu: buka, ambil, ajak bicara, atau makan yang dipegang.",
+                        "offerable_as": ["interact"], "phases_ref": "verb_phases.json#/verbs/interact" },
+    "use":            { "description_id": "verb.use.v1", "description": "Pakai alat atau barang yang dipegang pada satu petak atau benda.",
+                        "offerable_as": [], "phases_ref": "verb_phases.json#/verbs/use" },
+    "select":         { "description_id": "verb.select.v1", "description": "Pegang barang dari satu slot tas.",
+                        "offerable_as": [], "phases_ref": "verb_phases.json#/verbs/select" },
+    "ui":             { "description_id": "verb.ui.v1", "description": "Tekan satu tombol atau pilihan di layar yang sedang terbuka.",
+                        "offerable_as": ["ui", "answer"], "phases_ref": "verb_phases.json#/verbs/ui" },
+    "transfer":       { "description_id": "verb.transfer.v1", "description": "Pindahkan barang antara tas, peti, toko, atau tanah.",
+                        "offerable_as": ["transfer"], "phases_ref": "verb_phases.json#/verbs/transfer" },
+    "run_controller": { "description_id": "verb.run_controller.v1",
+                        "description": "Jalankan kendali otomatis yang dibatasi waktu: mancing, bertarung atau mundur, atau mengisi tenaga alat.",
+                        "offerable_as": [], "phases_ref": "verb_phases.json#/verbs/run_controller" }
+  },
+  "choice_kinds": {
+    "activity": { "verb": null, "does_template": "{activity_label}" },
+    "resume":   { "verb": null, "does_template": "lanjutkan {activity_label}" },
+    "ui":       { "verb": "ui", "does_template": "pilih \"{label}\"" },
+    "interact": { "verb": "interact", "does_template": "{verb_word} {target}" },
+    "answer":   { "verb": "ui", "does_template": "pilih \"{label}\"" },
+    "transfer": { "verb": "transfer", "does_template": "{op_word} {qty_word} {item}" },
+    "wait":     { "verb": null, "does_template": "tunggu sebentar" },
+    "page":     { "verb": null, "does_template": "halaman {i}/{n}" },
+    "observe":  { "verb": "observe", "does_template": "lihat lagi {target}" }
+  } }

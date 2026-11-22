@@ -1,0 +1,18 @@
+{ "id": "SCH-03", "source": "R0-07 §15, §2", "schema": "observation.schema.json",
+  "input": "observation body > 60 KiB",
+  "layer_note": "L1 checks the shape the mod must emit after truncation (loss flags, schema caps, one line <= 60 KiB C8). The native truncation itself is the C# half (Observer, R1 slice A/B).",
+  "max_c8_bytes": 61440,
+  "cases": [
+    { "name": "truncated_body_fits_one_line", "base": "observation_hud", "expect": "valid", "fits_line": true,
+      "ops": [ { "op": "set", "path": "/loss/text_truncated", "value": true },
+               { "op": "set", "path": "/loss/targets_truncated", "value": true },
+               { "op": "set", "path": "/ui/text", "value": [""] },
+               { "op": "string", "path": "/ui/text/0", "char": "a", "len": 240 },
+               { "op": "repeat", "path": "/ui/text", "count": 32 },
+               { "op": "repeat", "path": "/world/targets", "count": 48 } ] },
+    { "name": "text_over_32_items", "base": "observation_hud", "expect": "invalid", "keyword": "maxItems",
+      "ops": [ { "op": "set", "path": "/ui/text", "value": ["x"] }, { "op": "repeat", "path": "/ui/text", "count": 33 } ] },
+    { "name": "text_item_over_240_chars", "base": "observation_hud", "expect": "invalid", "keyword": "maxLength",
+      "ops": [ { "op": "set", "path": "/ui/text", "value": [""] }, { "op": "string", "path": "/ui/text/0", "char": "a", "len": 241 } ] },
+    { "name": "targets_over_64", "base": "observation_hud", "expect": "invalid", "keyword": "maxItems",
+      "ops": [ { "op": "repeat", "path": "/world/targets", "count": 65 } ] } ] }

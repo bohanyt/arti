@@ -1,0 +1,11 @@
+{ "id": "SCH-05", "source": "R0-07 §15, §3.1", "schema": "offer.schema.json",
+  "input": "offer with 25 choices, or an id c25, or no observe",
+  "cases": [
+    { "name": "twenty_five_choices", "base": "offer_force", "expect": "invalid", "keyword": "maxItems",
+      "ops": [ { "op": "repeat", "path": "/choices", "count": 24 },
+               { "op": "set", "path": "/choices/-", "value": { "id": "c24", "kind": "observe", "label": "Lihat lagi", "does": "lihat lagi layar" } } ] },
+    { "name": "id_c25", "base": "offer_force", "expect": "invalid", "keyword": "pattern",
+      "ops": [ { "op": "set", "path": "/choices/0/id", "value": "c25" } ] },
+    { "name": "no_observe", "base": "offer_force", "expect": "invalid", "keyword": "contains",
+      "ops": [ { "op": "remove", "path": "/choices/2" } ] },
+    { "name": "control_base", "base": "offer_force", "expect": "valid" } ] }

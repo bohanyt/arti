@@ -1,0 +1,8 @@
+{ "id": "SCH-10", "source": "R0-07 §15, §5", "schema": "verb_result.schema.json",
+  "input": "verb_result/3 not_executed.reason cancelled without cancel_reason",
+  "cases": [
+    { "name": "cancelled_without_reason", "base": "verb_result_refused", "expect": "invalid", "keyword": "required",
+      "ops": [ { "op": "set", "path": "/not_executed/reason", "value": "cancelled" } ] },
+    { "name": "control_cancelled_with_reason", "base": "verb_result_refused", "expect": "valid",
+      "ops": [ { "op": "set", "path": "/not_executed/reason", "value": "cancelled" },
+               { "op": "set", "path": "/not_executed/cancel_reason", "value": "supersede" } ] } ] }

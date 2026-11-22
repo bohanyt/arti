@@ -1,0 +1,22 @@
+﻿[
+  {"verb":"ui","wire":{"op":"menu_step","direction":"down"}},
+  {"verb":"use","wire":{"op":"water_once","tile_x":1,"tile_y":1}},
+  {"verb":"move","wire":{"op":"world_press","direction":"down","ticks":1}},
+  {"verb":"observe","wire":{"op":"inspect_tiles","center_x":1,"center_y":1,"radius":1}},
+  {"verb":"observe","wire":{"op":"inspect_context"}},
+  {"verb":"move","wire":{"op":"input_once","family":"world_key","primitive":"move_cardinal","args":{"direction":"down","ticks":1}}},
+  {"verb":"use","wire":{"op":"input_once","family":"world_key","primitive":"use_tool","args":{"ticks":1,"slot":0,"qualified_item_id":"(T)WateringCan","tile_x":1,"tile_y":1,"facing":2}}},
+  {"verb":"select","wire":{"op":"input_once","family":"select_item","primitive":"select_item","args":{"receiver_token":"toolbar","target_token":"slot:0","slot":0,"qualified_item_id":"(O)388","stack":1,"quality":0}}},
+  {"verb":"interact","wire":{"op":"input_once","family":"world_key","primitive":"world_interact","args":{"target_token":"chest:1","source_fact_id":"fact:1","tile_x":1,"tile_y":2,"actor_tile_x":1,"actor_tile_y":1,"facing":2,"kind":"chest"}}},
+  {"verb":"move","wire":{"op":"input_once","family":"world_key","primitive":"move_through","args":{"direction":"right","ticks":1,"kind":"bed","source_fact_id":"fact:1","target_token":"bed:1","tile_x":2,"tile_y":1,"actor_tile_x":1,"actor_tile_y":1}}},
+  {"verb":"transfer","wire":{"op":"input_once","family":"container_transfer","primitive":"container_transfer","args":{"receiver_token":"rcv:1","container_token":"chest:1","readback_token":"read:1","source_fact_id":"fact:1","target_token":"slot:0","slot":0,"qualified_item_id":"(O)388","stack":1,"quality":0,"owner_ceiling":1}}},
+  {"verb":"ui","wire":{"op":"input_once","family":"container_exit","primitive":"container_exit","args":{"receiver_token":"rcv:1","container_token":"chest:1","source_fact_id":"fact:1","readback_token":"read:1","target_token":"close:1"}}},
+  {"verb":"ui","wire":{"op":"input_once","family":"ui_key","primitive":"ui_key","args":{"receiver_token":"rcv:1","menu_type":"DialogueBox","kind":"dialogue","key":"advance","target_token":"uk:00000000000000000000000000000000"}}},
+  {"verb":"ui","wire":{"op":"input_once","family":"world_key","primitive":"pad_button","args":{"button":"Start"}}},
+  {"verb":null,"refusal":"adapter_unsupported_capability","wire":{"op":"input_once","family":"world_key","primitive":"chat_send","args":{"text":"Hello"}}},
+  {"verb":"ui","wire":{"op":"input_once","family":"ui_nav","primitive":"ui_nav","args":{"receiver_token":"rcv:1","menu_type":"GameMenu","context":"game_menu","target_token":"up:00000000000000000000000000000000","dir":"down"}}},
+  {"verb":"ui","wire":{"op":"input_once","family":"ui_press","primitive":"ui_press","args":{"receiver_token":"rcv:1","menu_type":"GameMenu","context":"game_menu","target_token":"up:00000000000000000000000000000000","btn":"A","snapped_id":0}}},
+  {"verb":"run_controller","wire":{"op":"input_once","family":"world_key","primitive":"reflex_fish","args":{"max_s":10,"cast_power":0.5,"treasure":false,"hook_retries":0}}},
+  {"verb":"run_controller","wire":{"op":"input_once","family":"world_key","primitive":"reflex_combat","args":{"max_s":10,"hp_floor_pct":30,"max_kills":1,"retreat":true}}},
+  {"verb":"run_controller","wire":{"op":"input_once","family":"world_key","primitive":"reflex_charge","args":{"target_level":1,"max_ticks":45}}}
+]

@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "arti:contracts/il_d_rows.schema.json",
+  "type": "object", "additionalProperties": false, "required": ["game_mvid", "rows"],
+  "properties": {
+    "game_mvid": {"type": "string", "format": "uuid"},
+    "rows": {"type": "array", "items": {"$ref": "#/$defs/row"}}
+  },
+  "$defs": {
+    "text": {"type": "string", "minLength": 1},
+    "row": {"type": "object", "additionalProperties": false,
+      "required": ["id", "source", "write", "replacement", "delete_phase", "reason", "reachability", "sites", "flags"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^D[1-9][0-9]*$"},
+        "source": {"$ref": "#/$defs/text"}, "write": {"$ref": "#/$defs/text"},
+        "replacement": {"$ref": "#/$defs/text"}, "delete_phase": {"$ref": "#/$defs/text"},
+        "reason": {"$ref": "#/$defs/text"}, "reachability": {"$ref": "#/$defs/text"},
+        "flags": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/text"}},
+        "sites": {"type": "array", "items": {"type": "object", "additionalProperties": false,
+          "required": ["key", "count", "file", "line"], "properties": {
+            "key": {"$ref": "#/$defs/text"}, "count": {"type": "integer", "minimum": 1},
+            "file": {"$ref": "#/$defs/text"}, "line": {"type": "integer", "minimum": 0},
+            "reason": {"$ref": "#/$defs/text"}
+          }}}
+      }}
+  }
+}

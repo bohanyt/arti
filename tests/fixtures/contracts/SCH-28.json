@@ -1,0 +1,8 @@
+{ "id": "SCH-28", "source": "R0-07 §15, §4.5; R0-05 §5.1", "schema": "barrier_stages.schema.json",
+  "input": "barrier_stages.json with 10 barriers, or chains_to night on ko_recovery",
+  "cases": [
+    { "name": "published_file", "contract": "barrier_stages.json", "expect": "valid", "lint": "barriers", "lint_clean": true },
+    { "name": "ten_barriers", "contract": "barrier_stages.json", "expect": "invalid", "keyword": "minItems",
+      "ops": [ { "op": "remove", "path": "/barriers/10" } ] },
+    { "name": "ko_recovery_chains_to_night", "contract": "barrier_stages.json", "expect": "valid", "lint": "barriers", "lint_clean": false,
+      "ops": [ { "op": "set", "path": "/barriers/6/chains_to", "value": "night" } ] } ] }

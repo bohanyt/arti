@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "arti:contracts/il_read_allowlist.schema.json",
+  "type": "object", "additionalProperties": false, "required": ["game_mvid", "review", "queries", "adapters"],
+  "properties": {
+    "game_mvid": {"type": "string", "format": "uuid"},
+    "review": {"$ref": "#/$defs/text"},
+    "queries": {"type": "array", "items": {"type": "object", "additionalProperties": false,
+      "required": ["member", "reason"], "properties": {
+        "member": {"$ref": "#/$defs/text"}, "reason": {"$ref": "#/$defs/text"}
+      }}},
+    "adapters": {"type": "array", "items": {"type": "object", "additionalProperties": false,
+      "required": ["key", "adr", "tier"], "properties": {
+        "key": {"$ref": "#/$defs/text"}, "adr": {"const": "ADR-11"},
+        "tier": {"enum": ["NativeDispatch.GenericEdge", "NativeMechanics"]}
+      }}}
+  },
+  "$defs": {"text": {"type": "string", "minLength": 1}}
+}

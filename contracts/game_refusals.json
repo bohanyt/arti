@@ -1,0 +1,9 @@
+{ "v": "arti.game_refusals/1", "entries": {
+  "not_enough_money": { "source": "game", "game_signal": "shop purchase refused by the game (no stock/qty change after the edge)",
+                        "fact_check": "money_below_price", "persona_fact": "uang tidak cukup" },
+  "bag_full":         { "source": "precheck", "game_predicate": "Farmer.couldInventoryAcceptThisItem",
+                        "fact_check": "bag_no_room_for_item", "persona_fact": "tas penuh" },
+  "cant_place":       { "source": "precheck", "game_predicate": "Object.canBePlacedHere",
+                        "fact_check": "target_not_placeable", "persona_fact": "tidak bisa ditaruh di situ" },
+  "shop_closed":      { "source": "game", "game_signal": "the location's own closed/locked message after the edge",
+                        "fact_check": "target_closed", "persona_fact": "tokonya tutup" } } }

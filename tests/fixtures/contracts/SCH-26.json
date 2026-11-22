@@ -1,0 +1,7 @@
+{ "id": "SCH-26", "source": "R0-07 §15, §11.1", "schema": "stardew_state.schema.json",
+  "input": "6b reader on a v2 stardew_state.json with run_id/session_id",
+  "layer_note": "L1 here: the v2 state shape with the two additive keys. The 6b reader's status_block() is on a feature branch, not in this tree: reader half = M (not sampled) until R5 (bridge lead)",
+  "cases": [
+    { "name": "v2_state_with_run_session", "base": "stardew_state", "expect": "valid" },
+    { "name": "without_run_id", "base": "stardew_state", "expect": "invalid", "keyword": "required",
+      "ops": [ { "op": "remove", "path": "/run_id" } ] } ] }

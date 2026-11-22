@@ -1,0 +1,10 @@
+{
+  "Name": "ARTI S3 disposable cadence observer",
+  "Author": "ARTI local diagnostics",
+  "Version": "0.1.0",
+  "Description": "Opt-in bounded update/draw/present witness; not a production mod.",
+  "UniqueID": "local.ARTI.S3CadenceObserver",
+  "EntryDll": "ArtiStardewBridge.S3Observer.dll",
+  "MinimumApiVersion": "4.5.2",
+  "Dependencies": [{ "UniqueID": "bohanyt.ArtiStardewBridge", "IsRequired": true }]
+}

@@ -1,0 +1,11 @@
+{ "id": "SCH-08", "source": "R0-07 §15, §4.1", "schema": "verb.schema.json",
+  "input": "ui{gesture: scroll} without notches; ui{gesture: press_a, text}",
+  "cases": [
+    { "name": "scroll_without_notches", "base": "verb_ui_press", "expect": "invalid",
+      "ops": [ { "op": "set", "path": "/args/gesture", "value": "scroll" } ] },
+    { "name": "press_a_with_text", "base": "verb_ui_press", "expect": "invalid",
+      "ops": [ { "op": "set", "path": "/args/text", "value": "halo" } ] },
+    { "name": "control_scroll_with_notches", "base": "verb_ui_press", "expect": "valid",
+      "ops": [ { "op": "set", "path": "/args/gesture", "value": "scroll" }, { "op": "set", "path": "/args/notches", "value": 3 },
+               { "op": "set", "path": "/pins/row_key", "value": "receiver.role:scroll" } ] },
+    { "name": "control_press_a", "base": "verb_ui_press", "expect": "valid" } ] }

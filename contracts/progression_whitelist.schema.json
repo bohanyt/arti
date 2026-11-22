@@ -1,0 +1,11 @@
+{ "$schema": "https://json-schema.org/draft/2020-12/schema", "$id": "arti:contracts/progression_whitelist.schema.json",
+  "type": "object", "additionalProperties": false, "required": ["v", "entries"],
+  "properties": { "v": { "const": "arti.progression_whitelist/1" },
+    "entries": { "type": "array", "minItems": 5, "maxItems": 5, "items": { "type": "object", "additionalProperties": false,
+      "required": ["entry", "menu_type", "op", "dwell_s", "holds"],
+      "properties": { "entry": { "enum": ["a", "b", "c", "d", "e"] },
+                      "menu_type": { "type": "string", "maxLength": 96 },
+                      "op": { "enum": ["a_prose_advance", "b_info_ok", "c_shipping_ok", "d_levelup_ok", "e_item_list_ok"] },
+                      "dwell_s": { "oneOf": [ { "type": "integer", "minimum": 1 }, { "const": "reading" } ] },
+                      "holds": { "type": "array", "uniqueItems": true,
+                                 "items": { "enum": ["ii_scope_all", "iii_claimed"] } } } } } } }

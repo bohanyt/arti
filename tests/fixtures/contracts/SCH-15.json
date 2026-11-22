@@ -1,0 +1,6 @@
+{ "id": "SCH-15", "source": "R0-07 §15, §8.1", "schema": "occurrence_ring.schema.json",
+  "input": "ring file with 600 records",
+  "cases": [
+    { "name": "six_hundred_records", "base": "ring_file", "expect": "invalid", "keyword": "maxItems",
+      "ops": [ { "op": "repeat", "path": "/records", "count": 600 } ] },
+    { "name": "control_ring", "base": "ring_file", "expect": "valid" } ] }

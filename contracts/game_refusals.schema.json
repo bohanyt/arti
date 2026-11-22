@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "arti:contracts/game_refusals.schema.json",
+  "type": "object", "additionalProperties": false, "required": ["v", "entries"],
+  "properties": {
+    "v": { "const": "arti.game_refusals/1" },
+    "entries": { "type": "object", "additionalProperties": false,
+      "patternProperties": { "^[a-z][a-z0-9_]{1,39}$": { "type": "object", "additionalProperties": false,
+        "required": ["source", "fact_check", "persona_fact"],
+        "properties": { "source": { "enum": ["game", "precheck"] },
+                        "game_predicate": { "type": "string", "pattern": "^[A-Za-z0-9_.]+$" },
+                        "game_signal": { "type": "string", "maxLength": 120 },
+                        "fact_check": { "enum": ["money_below_price", "bag_no_room_for_item", "target_not_placeable",
+                                                 "target_closed"] },
+                        "persona_fact": { "type": "string", "maxLength": 80 } },
+        "allOf": [ { "if": { "properties": { "source": { "const": "precheck" } } }, "then": { "required": ["game_predicate"] } },
+                   { "if": { "properties": { "source": { "const": "game" } } }, "then": { "required": ["game_signal"] } } ] } } }
+  }
+}

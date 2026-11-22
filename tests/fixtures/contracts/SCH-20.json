@@ -1,0 +1,7 @@
+{ "id": "SCH-20", "source": "R0-07 §15, §9.1", "schema": "journal.schema.json",
+  "input": "journal record with producer bucket: info on a refusal",
+  "layer_note": "the record is schema-valid; the vocab says refusal buckets come from the registry, so the writer drops the producer bucket and emits producer_bucket_ignored (R2-S)",
+  "expect_vocab": { "ev": "refusal", "bucket": "registry", "emit": "producer_bucket_ignored" },
+  "cases": [
+    { "name": "producer_bucket_on_refusal", "base": "journal_refusal", "expect": "valid",
+      "ops": [ { "op": "set", "path": "/bucket", "value": "info" } ] } ] }

@@ -1,0 +1,7 @@
+{
+  "v": "arti.session/3", "mod_tick": 1, "native_ms": 100, "acquired_ms": null,
+  "halt": null, "rearmed": null, "fenced_generation": 0,
+  "input_idle": { "core": null, "progression": null }, "status_answers": [],
+  "claim_answers": [{ "owner_id": "core-1", "claim_seq": 1, "receiver_epoch": 1, "result": "control_record_fault" }],
+  "cancel_answer": null, "halt_notes": []
+}

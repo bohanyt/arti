@@ -1,0 +1,269 @@
+{
+  "contract": "OBS-2B1 producer↔receiver recovery-policy matrix",
+  "start_commit": "0479d6f0f53d03bc1ae87c8341858f93d6f8c1b8",
+  "classification_rule": "Classify C# vs RichObservationStore disagreement as BUG or CONTRACT_AMBIGUITY before any runtime change. This file plus the C#/Python executors are the matrix; they do not patch transport.",
+  "required_cause_ids": [
+    "revision_gap",
+    "truncated_delta",
+    "failed_ambiguous_delta",
+    "snapshot_failure",
+    "stale_ack",
+    "warp",
+    "reconnect_hello_epoch",
+    "return_to_title",
+    "overflow_49th_op",
+    "old_session_completion"
+  ],
+  "causes": [
+    {
+      "id": "revision_gap",
+      "mismatch": "ALIGNED",
+      "mismatch_note": "Producer never emits a gapped delta: SnapshotNeeded blocks ReserveDeltaRevision, and reserve always advances by one. Receiver fail-closes if a gap delta still arrives.",
+      "producer": {
+        "session": "same",
+        "baseline": "retain",
+        "pending": "n/a",
+        "next_kind": "snapshot",
+        "next_revision": "replace_may_skip",
+        "stale_resync": "n/a",
+        "recovery_id": "wait_snapshot_do_not_emit_gap_delta"
+      },
+      "receiver": {
+        "session": "same",
+        "baseline": "retain_unapplied",
+        "pending": "n/a",
+        "next_kind": "snapshot",
+        "next_revision": "replace_clears_stale",
+        "stale_resync": "yes",
+        "recovery_id": "same_session_snapshot_clears_stale",
+        "apply_reason": "revision_gap",
+        "accepted": false
+      }
+    },
+    {
+      "id": "truncated_delta",
+      "mismatch": "CONTRACT_AMBIGUITY",
+      "mismatch_note": "OBS-0 RichObservationStore accepts a truncated delta (apply sent ops, then stale/resync). OBS-2B1 live producer never sends one: TryBuildDelta treats truncation as overflow and requests a full snapshot instead. Both layers are doing what their docs say. Do not 'fix' either side in this slice.",
+      "producer": {
+        "session": "same",
+        "baseline": "invalidate",
+        "pending": "clear",
+        "next_kind": "snapshot",
+        "next_revision": "R_plus_1_after_last_reserve",
+        "stale_resync": "n/a",
+        "recovery_id": "never_send_truncated_live_delta"
+      },
+      "receiver": {
+        "session": "same",
+        "baseline": "apply_sent_then_stale",
+        "pending": "n/a",
+        "next_kind": "snapshot",
+        "next_revision": "replace_clears_stale",
+        "stale_resync": "yes",
+        "recovery_id": "same_session_snapshot_clears_stale",
+        "apply_reason": "truncated",
+        "accepted": true
+      }
+    },
+    {
+      "id": "failed_ambiguous_delta",
+      "mismatch": "ALIGNED",
+      "mismatch_note": "Delivery of a failed/faulted delta write is unknown. Producer abandons the client so the next hello opens a new session at revision 1 instead of emitting R+2 on the old session. Receiver: new-session snapshot is a resync, whether or not the old R+1 line landed.",
+      "producer": {
+        "session": "rotate",
+        "baseline": "invalidate",
+        "pending": "clear",
+        "next_kind": "snapshot",
+        "next_revision": "fresh_session_revision_1",
+        "stale_resync": "n/a",
+        "recovery_id": "new_hello_epoch"
+      },
+      "receiver": {
+        "session": "rotate",
+        "baseline": "replace",
+        "pending": "n/a",
+        "next_kind": "snapshot",
+        "next_revision": "fresh_session_revision_1",
+        "stale_resync": "no",
+        "recovery_id": "new_session_snapshot_is_resync",
+        "apply_reason": "",
+        "accepted": true
+      }
+    },
+    {
+      "id": "snapshot_failure",
+      "mismatch": "ALIGNED",
+      "mismatch_note": "OBS-1 already allows a failed full-snapshot send to consume a revision. Unlike a failed delta, the producer stays on the same session and retries a snapshot. Receiver replace-kinds may skip forward, so R then R+2 is not a gap.",
+      "producer": {
+        "session": "same",
+        "baseline": "retain",
+        "pending": "clear_on_next_stage",
+        "next_kind": "snapshot",
+        "next_revision": "R_plus_1_after_last_reserve",
+        "stale_resync": "n/a",
+        "recovery_id": "retry_snapshot_burn_revision"
+      },
+      "receiver": {
+        "session": "same",
+        "baseline": "replace",
+        "pending": "n/a",
+        "next_kind": "snapshot",
+        "next_revision": "replace_may_skip",
+        "stale_resync": "no",
+        "recovery_id": "snapshot_skip_forward_ok",
+        "apply_reason": "",
+        "accepted": true
+      }
+    },
+    {
+      "id": "stale_ack",
+      "mismatch": "ALIGNED",
+      "mismatch_note": "Ack is a local game-thread token, not a store message. A mismatched token mutates nothing. The receiver only changes if that NDJSON line already landed; recovery is the later snapshot opened by the cause that invalidated the token (warp/overflow/reconnect), not the stale ack itself.",
+      "producer": {
+        "session": "same",
+        "baseline": "retain",
+        "pending": "retain",
+        "next_kind": "unchanged",
+        "next_revision": "same_R",
+        "stale_resync": "n/a",
+        "recovery_id": "token_mismatch_noop"
+      },
+      "receiver": {
+        "session": "same",
+        "baseline": "retain",
+        "pending": "n/a",
+        "next_kind": "unchanged",
+        "next_revision": "same_R",
+        "stale_resync": "no",
+        "recovery_id": "token_mismatch_noop",
+        "apply_reason": "",
+        "accepted": false
+      }
+    },
+    {
+      "id": "warp",
+      "mismatch": "ALIGNED",
+      "mismatch_note": "Warp keeps the observation session, invalidates baseline+pending, and opens a snapshot. If an in-flight delta was already reserved, the replacement snapshot is the next revision (contiguous), never a reused R+1.",
+      "producer": {
+        "session": "same",
+        "baseline": "invalidate",
+        "pending": "clear",
+        "next_kind": "snapshot",
+        "next_revision": "R_plus_1_after_last_reserve",
+        "stale_resync": "n/a",
+        "recovery_id": "same_session_warp_snapshot"
+      },
+      "receiver": {
+        "session": "same",
+        "baseline": "replace",
+        "pending": "n/a",
+        "next_kind": "snapshot",
+        "next_revision": "replace_may_skip",
+        "stale_resync": "no",
+        "recovery_id": "snapshot_skip_forward_ok",
+        "apply_reason": "",
+        "accepted": true
+      }
+    },
+    {
+      "id": "reconnect_hello_epoch",
+      "mismatch": "ALIGNED",
+      "mismatch_note": "Reconnect increments epoch, BeginSession at revision 0, then snapshot revision 1. Receiver treats a new session_id snapshot as resync, not session_mismatch. A later delta for the retired session is session_superseded.",
+      "producer": {
+        "session": "rotate",
+        "baseline": "invalidate",
+        "pending": "clear",
+        "next_kind": "snapshot",
+        "next_revision": "fresh_session_revision_1",
+        "stale_resync": "n/a",
+        "recovery_id": "new_hello_epoch"
+      },
+      "receiver": {
+        "session": "rotate",
+        "baseline": "replace",
+        "pending": "n/a",
+        "next_kind": "snapshot",
+        "next_revision": "fresh_session_revision_1",
+        "stale_resync": "no",
+        "recovery_id": "new_session_snapshot_is_resync",
+        "apply_reason": "",
+        "accepted": true
+      }
+    },
+    {
+      "id": "return_to_title",
+      "mismatch": "CONTRACT_AMBIGUITY",
+      "mismatch_note": "Producer rotates epoch, clears SessionId, SnapshotNeeded=false, and invalidates the accumulator, with no observation on the wire. Receiver keeps the last DomainRecord until a later snapshot of a new session. There is no explicit end-of-session observation. Not patched here: OBS-0 has no title event.",
+      "producer": {
+        "session": "rotate",
+        "baseline": "invalidate",
+        "pending": "clear",
+        "next_kind": "none",
+        "next_revision": "zero_until_begin_session",
+        "stale_resync": "n/a",
+        "recovery_id": "begin_session_after_title"
+      },
+      "receiver": {
+        "session": "same",
+        "baseline": "retain",
+        "pending": "n/a",
+        "next_kind": "snapshot",
+        "next_revision": "fresh_session_revision_1",
+        "stale_resync": "no",
+        "recovery_id": "title_silent_until_new_snapshot",
+        "apply_reason": "",
+        "accepted": false
+      }
+    },
+    {
+      "id": "overflow_49th_op",
+      "mismatch": "CONTRACT_AMBIGUITY",
+      "mismatch_note": "Live runtime (RequestOverflowSnapshot) invalidates baseline+pending and opens a snapshot, so an in-flight 48-op delta cannot commit. SceneDeltaAccumulator.TryCommitDelta does not itself check RequiresSnapshot; that API hole is unreachable after Invalidate and is not patched in this slice. Producer never sends a 49-op or truncated live delta.",
+      "producer": {
+        "session": "same",
+        "baseline": "invalidate",
+        "pending": "clear",
+        "next_kind": "snapshot",
+        "next_revision": "R_plus_1_after_last_reserve",
+        "stale_resync": "n/a",
+        "recovery_id": "overflow_invalidate_then_snapshot"
+      },
+      "receiver": {
+        "session": "same",
+        "baseline": "replace",
+        "pending": "n/a",
+        "next_kind": "snapshot",
+        "next_revision": "replace_may_skip",
+        "stale_resync": "no",
+        "recovery_id": "snapshot_skip_forward_ok",
+        "apply_reason": "",
+        "accepted": true
+      }
+    },
+    {
+      "id": "old_session_completion",
+      "mismatch": "ALIGNED",
+      "mismatch_note": "A completion token from a retired session/epoch/request/revision is a no-op on the producer. If that line already reached the receiver, a later new-session snapshot retires the old epoch (session_superseded for subsequent old deltas).",
+      "producer": {
+        "session": "rotate",
+        "baseline": "invalidate",
+        "pending": "clear",
+        "next_kind": "snapshot",
+        "next_revision": "fresh_session_revision_1",
+        "stale_resync": "n/a",
+        "recovery_id": "token_mismatch_noop"
+      },
+      "receiver": {
+        "session": "rotate",
+        "baseline": "replace",
+        "pending": "n/a",
+        "next_kind": "snapshot",
+        "next_revision": "fresh_session_revision_1",
+        "stale_resync": "no",
+        "recovery_id": "old_session_delta_superseded",
+        "apply_reason": "session_superseded",
+        "accepted": false
+      }
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "arti:contracts/semantic_review_v2.schema.json",
+  "title": "PM-1 per-turn semantic review v2",
+  "type": "object",
+  "required": ["schema", "run", "transcript_sha256", "turns"],
+  "properties": {
+    "schema": {"const": "arti.free_play.semantic_review/2"},
+    "run": {"type": "string", "minLength": 1},
+    "transcript_sha256": {"$ref": "#/$defs/hash"},
+    "turns": {"type": "array", "minItems": 1, "items": {
+      "type": "object",
+      "required": ["turn_n", "reply_sha256", "claims_exhaustive", "claims"],
+      "properties": {
+        "turn_n": {"type": "integer"},
+        "reply_sha256": {"$ref": "#/$defs/hash"},
+        "claims_exhaustive": {"type": "boolean"},
+        "claims": {"type": "array", "items": {
+          "type": "object",
+          "required": ["claim", "verdict", "native_refs"],
+          "properties": {
+            "claim": {"type": "string", "minLength": 1},
+            "verdict": {"enum": ["supported", "contradicted", "unverifiable"]},
+            "native_refs": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+            "reason": {"type": "string", "minLength": 1}
+          },
+          "if": {"properties": {"verdict": {"const": "unverifiable"}}},
+          "then": {"required": ["reason"]},
+          "else": {"properties": {"native_refs": {"minItems": 1}}}
+        }}
+      }
+    }}
+  },
+  "$defs": {"hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+}

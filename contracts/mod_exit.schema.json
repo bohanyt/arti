@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "arti:contracts/mod_exit.schema.json",
+  "$comment": "R0-03 §2 mod_exit.json: native marker written in the mod's AppDomain.ProcessExit handler (best effort); read only by the mod at its next start (X6 check, R0-03 §8). Absent or naming another runtime_id = unclean exit. Not a v-tagged core record (R0-07 C1)",
+  "type": "object", "additionalProperties": false, "required": ["runtime_id", "ms"],
+  "properties": { "runtime_id": { "$ref": "common.schema.json#/$defs/Id" },
+                  "ms": { "$ref": "common.schema.json#/$defs/WallMs" } }
+}

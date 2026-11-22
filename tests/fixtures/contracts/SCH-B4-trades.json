@@ -1,0 +1,8 @@
+{
+  "id": "SCH-B4-trades",
+  "source": "R0-07 sold/bought item, qty, price; B4; xunit only",
+  "witnesses": [
+    { "kind": "sold", "target": "trade-1", "item": { "item_id": "(O)24", "qty": 2, "quality": 0 }, "qty": 2, "price": 35, "before": { "money": 100, "count": 4 }, "after": { "money": 170, "count": 2 }, "frame": 10 },
+    { "kind": "bought", "target": "trade-1", "item": { "item_id": "(O)24", "qty": 2, "quality": 0 }, "qty": 2, "price": 35, "before": { "money": 100, "count": 4 }, "after": { "money": 30, "count": 6 }, "frame": 10 }
+  ]
+}

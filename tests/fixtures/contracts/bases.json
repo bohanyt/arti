@@ -1,0 +1,191 @@
+{
+  "observation_hud": {
+    "v": "arti.observation/3",
+    "rev": { "frame": 1200, "scene": 3, "ui": 5, "inventory": 7, "player": 9, "host": 2 },
+    "captured_tick": 36000, "captured_ms": 1793000000000,
+    "identity": { "save_id": "save-1", "player_id": -123456, "is_main_player": false, "session_id": "sess-1", "runtime_id": "rt-1" },
+    "clock": { "date": { "year": 1, "season": "spring", "day": 5 }, "time_of_day": 930, "day_of_week": "fri", "weather": "sun",
+               "host_paused": false, "game_paused": false, "saving": false },
+    "player": { "tile": { "x": 64, "y": 15 }, "pos": { "x": 4096.0, "y": 960.0 }, "facing": "s", "hp": 100, "max_hp": 100,
+                "stamina": 270, "max_stamina": 270, "can_move": true, "using_tool": false, "held": null, "cursor": null },
+    "location": { "name": "Farm", "kind": "farm", "size": { "x": 80, "y": 65 },
+                  "exits": [ { "exit_id": "exit-1", "kind": "warp", "tile": { "x": 79, "y": 15 }, "target_name": "BusStop" } ],
+                  "is_own_home": false },
+    "ui": { "receiver_id": null, "receiver_epoch": 0, "menu_type": null, "kind": "hud", "owned_by": null,
+            "authority": { "holder": "none", "since_frame": 0 }, "controls": [], "prompt_digest": null, "options_digest": null,
+            "text": [], "text_loss": false, "page": null, "actionable": false, "stack": [], "parked": [] },
+    "inventory": { "slots": [ { "slot": 0, "item": { "item_id": "(T)Hoe", "name": "Hoe", "qty": 1, "quality": 0, "protected": true } } ],
+                   "money": 500, "fingerprint": "f00df00df00df00df00df00df00df00df00df00df00df00df00df00df00df00d" },
+    "world": { "targets": [ { "target_id": "tile:Farm:64,16", "kind": "tile", "tile": { "x": 64, "y": 16 }, "facts": { "tilled": false } } ],
+               "monsters": [], "npcs": [] },
+    "native": { "control_taken": null, "progress_marker": { "kind": "none", "value": 0 }, "barrier": null, "night_plan": null,
+                "nights": [], "debts": [], "journal": { "unresolved": 0, "cap": 64 }, "active_attempt": null,
+                "input_idle": { "core": null, "progression": null }, "halt": null, "rearmed": null, "halt_notes": [],
+                "fenced_generation": 0, "occurrences": { "first_seq": 0, "last_seq": 0, "tail": [] },
+                "proposals": { "outgoing": null, "incoming": null }, "window": { "state": "visible_inactive" },
+                "draw": { "count": 10, "last_ms": 1793000000000 } },
+    "host": { "waiting_on": { "kind": "none", "since_frame": null, "since_ms": null }, "ready_check": null, "saving": false, "paused": false },
+    "capabilities": { "backend": "background", "caps": ["pointer", "polledPad"] },
+    "loss": { "text_truncated": false, "targets_truncated": false, "snapshot_resync": false }
+  },
+  "offer_force": {
+    "v": "arti.offer/2", "offer_id": "offer-1",
+    "decision_id": "d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1",
+    "generation": 1, "kind": "force",
+    "state": { "location": "FarmHouse", "game_time": "Spring 5 22:30", "energy": 120, "hp": 100, "held": null, "money": 500,
+               "bag_free": 30, "weather": "sun", "minutes_to_0200": 210, "reserve_facts": [], "owner_recent": [], "yesterday": [] },
+    "pending": { "decision_id": "d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1", "receiver_kind": "question",
+                 "prompt_text": "Tidur sekarang?", "age_s": 3 },
+    "page": null,
+    "choices": [ { "id": "c1", "kind": "answer", "label": "Ya", "does": "pilih \"Ya\"" },
+                 { "id": "c2", "kind": "answer", "label": "Tidak", "does": "pilih \"Tidak\"" },
+                 { "id": "c3", "kind": "observe", "label": "Lihat lagi", "does": "lihat lagi layar" } ],
+    "last_results": [], "feedback": null
+  },
+  "reply_valid": {
+    "v": "arti.reply/1", "decision_id": "d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1", "offer_generation": 1,
+    "lane": "force", "lane_generation": 3, "provider": "codex", "model": "gpt-6-luna", "received_ms": 1793000001000,
+    "latency_ms": 900, "raw": "{\"choice\":\"c1\"}", "parsed": { "choice": "c1" }, "verdict": "valid"
+  },
+  "verb_ui_press": {
+    "verb": "ui", "args": { "receiver_id": "r-17", "control_id": "ctl-2", "gesture": "press_a" },
+    "pins": { "session_id": "sess-1", "player_id": -123456, "location": "FarmHouse", "receiver_epoch": 41,
+              "row_key": "receiver.callback:sleep", "control_order": 0,
+              "control_digest": "c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0" }
+  },
+  "verb_result_ok": {
+    "v": "arti.verb_result/3", "request_id": "r-a1", "attempt_id": "a1", "verb": "ui", "actor": "model", "client": "inbox",
+    "generation": 3, "executed": true, "not_executed": null, "delivered": true, "edges": 1, "released": true, "released_via": "release",
+    "release_receipt": { "attempt_id": "a1", "request_id": "r-a1", "client": "inbox", "tick": 36010, "frame": 1205,
+                         "ms": 1793000001500, "idle": true, "via": "release" },
+    "receiver_epoch_before": 41, "receiver_epoch_after": 42,
+    "validity": { "phase_at_end": "single_edge", "ended_by": "legal_successor", "adopted": [] },
+    "succession": { "edge": "closed", "authenticated": true, "via": "edge", "in_legal_set": true },
+    "transition_after": null, "barrier_after": null, "debts_after": [],
+    "closure": { "closed": true, "witness": ["CK-B"], "frame": 1205 }, "witnesses": [], "native_lifecycle": "settled",
+    "obs_revision_after": 1206, "obs_pending": false,
+    "timing": { "admit_tick": 36000, "first_edge_tick": 36002, "release_tick": 36010, "final_tick": 36010 }, "faults": []
+  },
+  "verb_result_refused": {
+    "v": "arti.verb_result/3", "request_id": "r-a2", "attempt_id": "a2", "verb": "interact", "actor": "activity", "client": "inbox",
+    "generation": 3, "executed": false,
+    "not_executed": { "reason": "debt_active", "native_code": "CommandBusy", "detail": "chest mutex held", "debt_id": "debt-4" },
+    "delivered": false, "edges": 0, "released": true, "released_via": "release",
+    "release_receipt": { "attempt_id": "a2", "request_id": "r-a2", "client": "inbox", "tick": 36001, "frame": 1201,
+                         "ms": 1793000000100, "idle": true, "via": "release" },
+    "receiver_epoch_before": 41, "receiver_epoch_after": 41,
+    "validity": { "phase_at_end": "pre_edge", "ended_by": "no_input", "adopted": [] },
+    "succession": null, "transition_after": null, "barrier_after": null, "debts_after": [],
+    "closure": { "closed": true, "witness": ["CK-R"], "frame": 1201 }, "witnesses": [], "native_lifecycle": "not_admitted",
+    "obs_revision_after": 1202, "obs_pending": false,
+    "timing": { "admit_tick": null, "first_edge_tick": null, "release_tick": 36001, "final_tick": 36001 }, "faults": []
+  },
+  "request_verb": {
+    "protocol": 1, "op": "verb", "v": "arti.verb_request/1", "request_id": "r-a1", "request_seq": 7, "runtime_instance_id": "rt-1",
+    "session_id": "sess-1", "owner_id": "core-1", "generation": 3, "control_seq": 4, "expected_player_id": -123456,
+    "expected_screen_id": 0, "deadline_unix_ms": 1793000001700, "attempt_id": "a1", "actor": "activity", "verb": "interact",
+    "args": { "target_id": "npc:n17" },
+    "pins": { "session_id": "sess-1", "player_id": -123456, "location": "Town", "receiver_epoch": 40, "row_key": "npc.held_giftable",
+              "target_instance": "npc:n17", "item_binding": { "item_id": "(O)66", "name": "Amethyst", "qty": 1, "quality": 0 } },
+    "payload_sha256": "a25f00a218aedb80c1c1db49d65ec018c3b6f16b4532414e5ac8e476e4b33f12"
+  },
+  "attempt_record": {
+    "v": "arti.attempt_record/1", "attempt_id": "a1", "request_id": "r-a1", "request_seq": 7, "runtime_id": "rt-1",
+    "session_id": "sess-1", "owner_id": "core-1", "generation": 3, "payload_sha256": "a25f00a218aedb80c1c1db49d65ec018c3b6f16b4532414e5ac8e476e4b33f12", "verb": "interact",
+    "args": { "target_id": "npc:n17" },
+    "pins": { "session_id": "sess-1", "player_id": -123456, "location": "Town", "receiver_epoch": 40, "row_key": "npc.held_giftable",
+              "target_instance": "npc:n17", "item_binding": { "item_id": "(O)66", "name": "Amethyst", "qty": 1, "quality": 0 } },
+    "before": { "frame": 1200, "inventory_fingerprint": "f00df00df00df00df00df00df00df00df00df00df00df00df00df00df00df00d",
+                "target_facts": { "h2_out_items": ["(O)66|0"], "h2_out_protected": false, "h2_area": "none", "h2_area_protected": false },
+                "receiver_epoch": 40 },
+    "activity_id": "act17", "decision_id": null, "occurrence_no": null, "offer_generation": null, "actor": "activity",
+    "admission_class": "A", "row_key": "npc.held_giftable", "possible_delta": ["held", "friendship"],
+    "fence_keys": ["interact|npc:n17"], "released_ms": null, "state": "recorded", "created_ms": 1793000000900
+  },
+  "control_renew": {
+    "protocol": 1, "v": "arti.control/2", "kind": "renew", "intent_rev": 12, "owner_id": "core-1", "generation": 3, "control_seq": 5,
+    "runtime_instance_id": "rt-1", "session_id": "sess-1", "expected_player_id": -123456, "expected_screen_id": 0
+  },
+  "stop_h1": {
+    "v": "arti.stop/1", "stop_id": "s1", "cause": "H1", "scope": "core", "save_id": "save-1", "player_id": -123456,
+    "created_ms": 1793000002000, "writer": "safety", "incident_id": "inc-1"
+  },
+  "stop_all_h3": {
+    "v": "arti.stop/1", "stop_id": "s2", "cause": "H3", "scope": "all", "save_id": "save-1", "player_id": -123456,
+    "created_ms": 1793000003000, "writer": "safety", "incident_id": "inc-2"
+  },
+  "halt_escalated": {
+    "v": "arti.halt/1", "state": "latched", "episode_id": "s1", "halt_seq": 2, "scope": "all", "since_ms": 1793000002050,
+    "entries": [
+      { "n": 1, "source": "stop", "stop_id": "s1", "stop_sha256": "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+        "cause": "H1", "scope": "core", "writer": "safety", "latched_ms": 1793000002050, "file_present": true },
+      { "n": 2, "source": "stop_all", "stop_id": "s2", "stop_sha256": "a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2a2",
+        "cause": "H3", "scope": "all", "writer": "safety", "latched_ms": 1793000003050, "file_present": true } ],
+    "entries_digest": "4b7d7f22c755fbc88d6a5a3b5c79ee0afc900bdbd0eab919468a568ad8d865bc"
+  },
+  "rearm_stale": {
+    "v": "arti.rearm/1", "episode_id": "s1", "halt_seq": 1, "entries_digest": "01c15ffb3fb089661f84ec9f892eef30645450f69b4860a719bd9f5de09ac892", "actor": "owner", "ts": 1793000003500
+  },
+  "ring_file": {
+    "v": "arti.occurrence_ring/1", "save_id": "save-1", "player_id": -123456, "runtime_id": "rt-1", "capacity": 512,
+    "first_seq": 1, "last_seq": 1,
+    "records": [ { "occ_seq": 1, "kind": "effect", "subject": "chest:c7", "frame": 1210, "tick": 36020, "wall_ms": 1793000001900,
+                   "runtime_id": "rt-1", "attempt_id": "a1",
+                   "facts": { "effect_kind": "item_moved", "subject": "chest:c7", "effect_frame": 1209, "item_id": "(O)388", "qty": 5 } } ]
+  },
+  "decision_pending_force": {
+    "v": "arti.accounting/1", "seq": 10, "ts_ms": 1793000000000, "run_id": "run-1", "session_id": "sess-1", "kind": "decision",
+    "occurrence_id": "1d4045ef8fb65122d5e7777a4ad10a581720d112be67211899bcacf7b36489f9", "source_id": "d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1",
+    "occurrence_index": [1, "pending"], "decision_id": "d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1",
+    "occurrence_no": 1, "generation": 1, "decision_state": "pending", "lane": "force", "first_seen_wall_ms": 1793000000000,
+    "cause": "open", "runtime_id": "rt-1", "receiver_id": "r-17", "presence_id": "p1",
+    "semantic_id": { "receiver_class": "DialogueBox", "prompt_digest": "b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
+                     "options_digest": "b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2" },
+    "receiver_state": "live", "own_successor": false,
+    "age_root": "d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1d1"
+  },
+  "decision_resolved_activity": {
+    "v": "arti.accounting/1", "seq": 30, "ts_ms": 1793000005000, "run_id": "run-1", "session_id": "sess-1", "kind": "decision",
+    "occurrence_id": "4cf93f75574a56d7ad88f459a65c555d08186863d68072fcbd2fc4203437bcd0", "source_id": "e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1",
+    "occurrence_index": [1, "resolved"], "decision_id": "e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1",
+    "occurrence_no": 17, "generation": 1, "decision_state": "resolved", "lane": "activity", "first_seen_wall_ms": 1793000000000,
+    "age_root": "e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1",
+    "save_id": "save-1", "player_id": -123456, "activity_seq": 17,
+    "via": "choice", "uncertain": false, "resolved_wall_ms": 1793000005000, "choice": "c3", "choice_kind": "activity",
+    "activity_id": "act17", "activity_binding": { "name": "walk_explore", "args": { "location": "Farm", "target": "tile:Farm:30,40" } }
+  },
+  "attempt_final_e2": {
+    "v": "arti.accounting/1", "seq": 20, "ts_ms": 1793000004000, "run_id": "run-1", "session_id": "sess-1", "kind": "attempt_final",
+    "occurrence_id": "91787332952e726011fac5e208a232aa7ce24403d38746180b05e669dbd2fa67", "source_id": "a1", "occurrence_index": 0, "attempt_id": "a1",
+    "evidence": { "value": "E2", "stage": "final", "reason": null, "outcome": "VERIFIED",
+                  "effect_keys": [ { "key": { "kind": "receiver_closed", "subject": "r-17", "frame": 1205 }, "source": "result",
+                                     "h5_arrival_ms": 1793000001500, "productive": true } ],
+                  "closure": { "closed": true, "witness": ["CK-B"], "frame": 1205 }, "quarantined": false,
+                  "settle_at_final": "SETTLED", "final_via": "normal", "released_ms": 1793000001500, "final_ms": 1793000003500 }
+  },
+  "journal_refusal": {
+    "v": "arti.journal/1", "seq": 5, "ts_ms": 1793000000100, "run_id": "run-1", "session_id": "sess-1", "core_sha": "30df6d82",
+    "ev": "refusal", "attempt_id": "a2", "code": "debt_active", "facts": { "code": "debt_active", "native_code": "CommandBusy" }
+  },
+  "host_status": {
+    "v": "arti.host_status/2", "kind": "helper", "utc_ms": 1793000000000, "heartbeat_seq": 42, "run_id": "run-1", "save_id": "save-1",
+    "host_id": 1, "farmhand_id": -123456, "game_version": "1.6.15",
+    "waiting_on": { "kind": "none", "since_frame": null, "since_ms": null }, "ready_check": null,
+    "host": { "location": "Farm", "tile": { "x": 10, "y": 12 }, "menu_type": null, "in_bed": false, "ready": false, "paused": false,
+              "time_of_day": 930, "date": { "year": 1, "season": "spring", "day": 5 } },
+    "peer": null, "gifts": null, "policy": null, "io": { "retries_total": 0, "last_error": null }, "host_stop": null
+  },
+  "stardew_state": {
+    "schema": "arti.stardew_state/1", "ts": 1793000000.5, "game_time": "Spring 5 09:30", "location": "Farm", "held": null,
+    "energy": 270, "hp": 100, "pending_decision": null, "intent": null, "last_results": [], "fresh": true, "date": [1, "spring", 5],
+    "under_attack": false, "monsters_present": false, "intent_terms": [], "weather": "sun", "night": false, "shop_closed": false,
+    "run_id": "run-1", "session_id": "sess-1"
+  },
+  "stardew_event": {
+    "schema": "arti.stardew_event/2", "ts": 1793000001.25, "game_time": "Spring 5 09:31", "date": [1, "spring", 5],
+    "kind": "gift_received", "facts": { "item": "Amethyst", "count": 1 }, "text": "Sudah tercatat dapat hadiah Amethyst.",
+    "tags": { "novel_today": true, "first_ever": false, "related_to_intent": false, "surprise": true, "danger": false },
+    "dedupe_key": "gift_received:Amethyst", "event_id": "2a0399ddd8c7c20331d2b974906fbfc5f2780915fdf21fc827930755b5a675c0", "speak_candidate": true, "valid_while": null,
+    "ttl_s": 120, "intent": null, "situation": "[Stardew] di Farm", "run_id": "run-1", "session_id": "sess-1"
+  }
+}

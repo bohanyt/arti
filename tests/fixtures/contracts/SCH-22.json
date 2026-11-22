@@ -1,0 +1,10 @@
+{ "id": "SCH-22", "source": "R0-07 §15, §13.2 evaluation, §14 fact_check", "schema": "game_refusals.schema.json",
+  "input": "game_refusal not_enough_money with money >= price in the admission snapshot",
+  "evaluations": [
+    { "name": "money_not_below_price", "native_code": "not_enough_money", "facts": { "money": 600, "price": 500 },
+      "expect_code": "refusal_fact_mismatch", "expect_bucket": "defect-sensing" },
+    { "name": "fact_absent", "native_code": "not_enough_money", "facts": { "money": 600 },
+      "expect_code": "refusal_fact_mismatch", "expect_bucket": "defect-sensing" },
+    { "name": "control_money_below_price", "native_code": "not_enough_money", "facts": { "money": 100, "price": 500 },
+      "expect_code": "game_refusal", "expect_bucket": "outcome-game" } ],
+  "cases": [ { "name": "game_refusals_seed", "contract": "game_refusals.json", "expect": "valid" } ] }

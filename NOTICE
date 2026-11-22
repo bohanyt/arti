@@ -1,0 +1,20 @@
+ARTI
+Copyright (c) 2026 bohan (bohanyt). Licensed under the MIT licence (see LICENSE).
+
+Third-party names and references
+--------------------------------
+
+This repository contains no third-party source code that is vendored or bundled. Dependencies are installed by
+their own package managers (requirements*.txt, mc-bot/package.json) and keep
+their own licences.
+
+- The Trakteer reader (arti_donations.py) talks to an unofficial overlay protocol. Its comments cite two
+  open-source client projects as references for that protocol, by project name: "trakteerdonate" (Python) and
+  "trakteer-websocket-wrapper" (TypeScript), and a public gist about the media fields. The Saweria reader cites
+  the open-source wrapper "saweria-api" (Node) the same way.
+- The Minecraft POV adapter (mc-bot/pov.js) patches a separately installed third-party viewer bundle
+  (prismarine-viewer, from mc-bot/package.json) in memory at runtime and serves it with the textures of that
+  local install. This repository ships none of that bundle or its textures.
+- Stardew Valley, SMAPI, VTube Studio, Minecraft, YouTube, Trakteer, Saweria, Streamlabs, OpenAI, Google and the
+  other products and services this code talks to are trademarks or products of their owners. This project is not
+  affiliated with any of them, and none of their assets are included.

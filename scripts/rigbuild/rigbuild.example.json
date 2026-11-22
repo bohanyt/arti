@@ -1,0 +1,15 @@
+{
+  "_comment": "Placeholder paths for scripts.rigbuild, not anyone's real layout. Copy this file, replace every path with your own and pass it with --config. Every path may use %VAR% environment variables.",
+  "rig_root": "C:\\ARTI\\rig",
+  "checkout": "C:\\ARTI\\arti",
+  "python312": "C:\\ARTI\\rig\\venv312\\Scripts\\python.exe",
+  "python311": "C:\\ARTI\\arti\\venv\\Scripts\\python.exe",
+  "dotnet": "C:\\ARTI\\rig\\dotnet\\dotnet.exe",
+  "game": "C:\\Program Files (x86)\\Steam\\steamapps\\common\\Stardew Valley",
+  "nuget_offline": "C:\\ARTI\\rig\\nuget-offline",
+  "receipts": "C:\\ARTI\\rig\\receipts",
+  "saves": "%APPDATA%\\StardewValley\\Saves",
+  "booking_like": "C:\\ARTI\\rig\\example-booking.json",
+  "savestates": "C:\\ARTI\\rig\\savestates",
+  "housekeeping_hold": "C:\\ARTI\\rig\\HOUSEKEEPING_HOLD"
+}

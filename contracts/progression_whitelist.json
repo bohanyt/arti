@@ -1,0 +1,8 @@
+{ "v": "arti.progression_whitelist/1",
+  "entries": [
+    { "entry": "a", "menu_type": "DialogueBox", "op": "a_prose_advance", "dwell_s": "reading", "holds": ["ii_scope_all", "iii_claimed"] },
+    { "entry": "b", "menu_type": "DialogueBox|LetterViewer", "op": "b_info_ok", "dwell_s": "reading", "holds": ["ii_scope_all", "iii_claimed"] },
+    { "entry": "c", "menu_type": "ShippingMenu", "op": "c_shipping_ok", "dwell_s": 10, "holds": ["ii_scope_all", "iii_claimed"] },
+    { "entry": "d", "menu_type": "LevelUpMenu", "op": "d_levelup_ok", "dwell_s": 6, "holds": ["ii_scope_all", "iii_claimed"] },
+    { "entry": "e", "menu_type": "ItemListMenu", "op": "e_item_list_ok", "dwell_s": 4, "holds": ["ii_scope_all", "iii_claimed"] }
+  ] }

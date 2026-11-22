@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <Version>0.1.0</Version>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableModDeploy>false</EnableModDeploy>
+    <EnableModZip>false</EnableModZip>
+    <EnableHarmony>true</EnableHarmony>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../ArtiStardewBridge/Protocol/AtomicFileWriter.cs" Link="AtomicFileWriter.cs" />
+    <PackageReference Include="Pathoschild.Stardew.ModBuildConfig" Version="4.4.0" />
+    <Compile Include="../ArtiStardewBridge/RenderTiming/SdlWindowBinding.cs" Link="SdlWindowBinding.cs" />
+  </ItemGroup>
+</Project>

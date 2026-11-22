@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "arti:contracts/pm1_golden_facts.schema.json",
+  "type": "object",
+  "required": [
+    "acquired_session",
+    "written_requests",
+    "menu_reads",
+    "domain_request_id",
+    "cleanup_request_id"
+  ],
+  "properties": {
+    "acquired_session": {
+      "$ref": "command_session.schema.json"
+    },
+    "written_requests": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "request_id",
+          "session_id",
+          "runtime_instance_id",
+          "expected_player_id",
+          "expected_screen_id",
+          "op",
+          "primitive"
+        ],
+        "properties": {
+          "request_id": {
+            "type": "string"
+          },
+          "session_id": {
+            "type": "string"
+          },
+          "runtime_instance_id": {
+            "type": "string"
+          },
+          "expected_player_id": {
+            "type": "integer"
+          },
+          "expected_screen_id": {
+            "type": "integer"
+          },
+          "op": {
+            "type": "string"
+          },
+          "primitive": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "menu_reads": {
+      "type": "array",
+      "minItems": 16,
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "required": [
+          "context",
+          "options",
+          "target_token"
+        ],
+        "properties": {
+          "context": {
+            "type": "string"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          },
+          "target_token": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "domain_request_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "cleanup_request_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "additionalProperties": false
+}

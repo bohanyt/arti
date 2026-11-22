@@ -1,0 +1,6 @@
+{ "id": "SCH-24", "source": "R0-07 §15, §11.4", "schema": "stardew_event.schema.json",
+  "input": "projected event kind hp_drop from v2",
+  "cases": [
+    { "name": "hp_drop_kind", "base": "stardew_event", "expect": "invalid", "keyword": "enum",
+      "ops": [ { "op": "set", "path": "/kind", "value": "hp_drop" } ] },
+    { "name": "control_gift_received", "base": "stardew_event", "expect": "valid" } ] }

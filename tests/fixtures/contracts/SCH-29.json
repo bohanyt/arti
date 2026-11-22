@@ -1,0 +1,9 @@
+{ "id": "SCH-29", "source": "R0-07 §15, §4.6", "schema": "progression_whitelist.schema.json",
+  "input": "progression_whitelist.json with a sixth entry f, or holds [i_profession]",
+  "cases": [
+    { "name": "published_file", "contract": "progression_whitelist.json", "expect": "valid" },
+    { "name": "sixth_entry_f", "contract": "progression_whitelist.json", "expect": "invalid",
+      "ops": [ { "op": "set", "path": "/entries/-", "value": { "entry": "f", "menu_type": "QuestLog", "op": "b_info_ok", "dwell_s": 4,
+                                                               "holds": ["ii_scope_all", "iii_claimed"] } } ] },
+    { "name": "holds_i_profession", "contract": "progression_whitelist.json", "expect": "invalid", "keyword": "enum",
+      "ops": [ { "op": "set", "path": "/entries/0/holds", "value": ["i_profession"] } ] } ] }

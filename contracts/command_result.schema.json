@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "arti:contracts/command_result.schema.json",
+  "oneOf": [
+    {
+      "$ref": "verb_result.schema.json"
+    },
+    {
+      "type": "object",
+      "required": [
+        "protocol",
+        "ev",
+        "op",
+        "request_id",
+        "session_id",
+        "accepted",
+        "status",
+        "success",
+        "press_count",
+        "cleanup_confirmed",
+        "completed_unix_ms"
+      ],
+      "properties": {
+        "protocol": {
+          "const": 1
+        },
+        "ev": {
+          "const": "command_result"
+        },
+        "op": {
+          "type": "string"
+        },
+        "request_id": {
+          "$ref": "common.schema.json#/$defs/Id"
+        },
+        "session_id": {
+          "$ref": "common.schema.json#/$defs/Id"
+        },
+        "accepted": {
+          "type": "boolean"
+        },
+        "status": {
+          "enum": [
+            "completed",
+            "rejected",
+            "interrupted",
+            "uncertain"
+          ]
+        },
+        "success": {
+          "type": "boolean"
+        },
+        "press_count": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "cleanup_confirmed": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "completed_unix_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "release_receipt": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "session.schema.json#/$defs/InputIdle"
+            }
+          ]
+        },
+        "closure": {
+          "$ref": "verb_result.schema.json#/properties/closure"
+        }
+      },
+      "not": {
+        "required": [
+          "v"
+        ]
+      }
+    }
+  ],
+  "$comment": "Existing command publication: v3 envelopes or protocol-1 serializer output. No wire fields are synthesized for validation."
+}

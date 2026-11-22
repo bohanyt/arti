@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="JsonSchema.Net" Version="[5.2.7]" />
+    <!-- SMAPI supplies the .NET 6 framework assemblies in its default load context. -->
+    <PackageReference Include="System.Text.Json" Version="6.0.11" ExcludeAssets="runtime" />
+    <PackageReference Include="System.Text.Encodings.Web" Version="6.0.0" ExcludeAssets="runtime" />
+    <EmbeddedResource Include="../../contracts/verb.schema.json;../../contracts/session.schema.json;../../contracts/common.schema.json;
+                               ../../contracts/halt.schema.json;../../contracts/stop.schema.json;../../contracts/rearm.schema.json;../../contracts/occurrence_ring.schema.json"
+                      LogicalName="%(Filename)%(Extension)" />
+    <EmbeddedResource Include="../../contracts/verb_phases.json" LogicalName="verb_phases.json" />
+    <EmbeddedResource Include="../../contracts/verb_phases.schema.json" LogicalName="verb_phases.schema.json" />
+    <EmbeddedResource Include="../../contracts/successors.json" LogicalName="successors.json" />
+    <EmbeddedResource Include="../../contracts/refusals.json" LogicalName="refusals.json" />
+    <EmbeddedResource Include="../../contracts/observation.schema.json;../../contracts/barrier_stages.json" LogicalName="%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>

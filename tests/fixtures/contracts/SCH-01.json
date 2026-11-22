@@ -1,0 +1,3 @@
+{ "id": "SCH-01", "source": "R0-07 §15", "schema": "observation.schema.json",
+  "input": "minimal HUD arti.observation/3 (ui.kind hud, empty stack, native.barrier null)",
+  "cases": [ { "name": "minimal_hud", "base": "observation_hud", "expect": "valid" } ] }

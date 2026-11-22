@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "arti:contracts/control.schema.json",
+  "type": "object", "additionalProperties": false,
+  "required": ["protocol", "v", "kind", "intent_rev", "owner_id", "generation", "control_seq", "runtime_instance_id",
+               "session_id", "expected_player_id", "expected_screen_id"],
+  "properties": {
+    "protocol": { "const": 1 },
+    "v": { "const": "arti.control/2" },
+    "kind": { "enum": ["acquire", "renew", "cancel", "release", "none"] },
+    "intent_rev": { "type": "integer", "minimum": 0 },
+    "owner_id": { "$ref": "common.schema.json#/$defs/Id" },
+    "generation": { "$ref": "common.schema.json#/$defs/Gen" },
+    "control_seq": { "type": "integer", "minimum": 0 },
+    "runtime_instance_id": { "$ref": "common.schema.json#/$defs/Id" },
+    "session_id": { "$ref": "common.schema.json#/$defs/Id" },
+    "expected_player_id": { "type": "integer" },
+    "expected_player_name": { "type": "string", "maxLength": 64 },
+    "expected_screen_id": { "type": "integer", "minimum": 0 },
+    "lease_ms": { "type": "integer", "minimum": 1500, "maximum": 4000, "description": "fix54I: measured ACQUIRE/RENEW lease length; absent = 1500 ms" },
+    "cancel": { "type": "object", "additionalProperties": false,
+                "required": ["attempt_id", "request_id", "generation", "reason"],
+                "properties": { "attempt_id": { "$ref": "common.schema.json#/$defs/Id" },
+                                "request_id": { "$ref": "common.schema.json#/$defs/Id" },
+                                "generation": { "$ref": "common.schema.json#/$defs/Gen" },
+                                "reason": { "$ref": "refusals.schema.json#/$defs/CancelReason" } } },
+    "claim": { "type": "object", "additionalProperties": false,
+               "required": ["receiver_epoch", "owner_id", "generation", "claim_seq"],
+               "properties": { "receiver_epoch": { "$ref": "common.schema.json#/$defs/Epoch" },
+                               "owner_id": { "$ref": "common.schema.json#/$defs/Id" },
+                               "generation": { "$ref": "common.schema.json#/$defs/Gen" },
+                               "claim_seq": { "type": "integer", "minimum": 1 } } },
+    "status_query": { "$ref": "attempt_status.schema.json#/$defs/Query" },
+    "fence": { "type": "object", "additionalProperties": false, "required": ["owner_id", "generation"],
+               "properties": { "owner_id": { "$ref": "common.schema.json#/$defs/Id" },
+                               "generation": { "$ref": "common.schema.json#/$defs/Gen" } } }
+  },
+  "allOf": [
+    { "if": { "properties": { "kind": { "const": "cancel" } } }, "then": { "required": ["cancel"] } },
+    { "if": { "properties": { "kind": { "enum": ["acquire", "renew", "release", "none"] } } },
+      "then": { "not": { "required": ["cancel"] } } }
+  ]
+}

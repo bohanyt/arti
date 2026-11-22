@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "arti:contracts/pm1_native_move.schema.json",
+  "type": "array", "minItems": 2, "maxItems": 2,
+  "items": {"type": "object", "required": ["distance", "target", "session"],
+    "properties": {"distance": {"enum": [1, 2]}, "target": {"type": "object"}, "session": {"type": "object"}},
+    "additionalProperties": false}
+}

@@ -1,0 +1,13 @@
+{ "id": "SCH-14", "source": "R0-07 §15, §7.5; R0-03 §2, §9 (T03-03..06)", "schema": "halt.schema.json",
+  "input": "stop.json (H1) latched (halt_seq 1) -> stop_all.json (H3, entry 2, halt_seq 2) -> rearm.json{episode_id, halt_seq 1, entries_digest of entry 1}",
+  "layer_note": "L1 here: shapes, digests, scope lint and the token-match predicate. The native latch/clear (A5) and the tool side (P2) own the behaviour.",
+  "files": { "stop.json": "stop_h1", "stop_all.json": "stop_all_h3" },
+  "halt_base": "halt_escalated", "rearm_base": "rearm_stale",
+  "expect": { "token_matches": false, "halt_note": "rearm_token_stale", "latch_kept": true, "entries": 2 },
+  "cases": [
+    { "name": "halt_two_entries", "base": "halt_escalated", "expect": "valid" },
+    { "name": "stop_h1", "schema": "stop.schema.json", "base": "stop_h1", "expect": "valid" },
+    { "name": "stop_all_h3", "schema": "stop.schema.json", "base": "stop_all_h3", "expect": "valid" },
+    { "name": "rearm_token", "schema": "rearm.schema.json", "base": "rearm_stale", "expect": "valid" },
+    { "name": "rearmed_state_without_rearmed", "base": "halt_escalated", "expect": "invalid", "keyword": "required",
+      "ops": [ { "op": "set", "path": "/state", "value": "rearmed" } ] } ] }

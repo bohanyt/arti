@@ -1,0 +1,16 @@
+{ "id": "SCH-12", "source": "R0-07 §15, §7.1, §7.6", "schema": "request.schema.json",
+  "input": "request op: verb, two field groups: (a) control_seq 4 vs 5; (b) delayed acquire; (c) publication crash",
+  "layer_note": "L1 here: v2 digest arithmetic, the acquire-derived deadline rule, the record/query shapes. Native admission + journal row (A1a, L1b) and the core publication-crash reconciliation (R2-X, L0) own the behavioural halves.",
+  "request_base": "request_verb", "record_base": "attempt_record",
+  "a_control_seq": [4, 5],
+  "b": { "t0_ms": 1793000001000, "acquired_ms": 1793000001700,
+         "copies": [ { "name": "acquire_derived", "deadline_unix_ms": 1793000002700, "expect": "admitted" },
+                     { "name": "pre_acquire_estimate", "deadline_unix_ms": 1793000002000, "expect": "Expired",
+                       "expect_code": "not_admitted_deadline" } ] },
+  "cases": [
+    { "name": "request_valid", "base": "request_verb", "expect": "valid" },
+    { "name": "record_valid", "schema": "attempt_record.schema.json", "base": "attempt_record", "expect": "valid" },
+    { "name": "c_record_has_no_control_seq", "schema": "attempt_record.schema.json", "base": "attempt_record", "expect": "invalid",
+      "keyword": "additionalProperties", "ops": [ { "op": "set", "path": "/control_seq", "value": 4 } ] },
+    { "name": "c_record_has_no_deadline", "schema": "attempt_record.schema.json", "base": "attempt_record", "expect": "invalid",
+      "keyword": "additionalProperties", "ops": [ { "op": "set", "path": "/deadline_unix_ms", "value": 1793000002700 } ] } ] }
