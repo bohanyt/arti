@@ -2,7 +2,7 @@
 
 *An Indonesian AI VTuber who talks with her streamer and chat, remembers, and is learning to play games by herself.*
 
-ARTI is not a chatbot glued to an avatar. She hears the streamer, reads YouTube chat, answers in her own voice through her own VTube Studio avatar, and remembers what happened in earlier streams. Her big ongoing challenge is playing a real game with her own hands, by her own choices. Right now that game is Stardew Valley: she joins her streamer's farm as a co-op farmhand and lives her own days there.
+ARTI is not a chatbot glued to an avatar. She hears the streamer, reads YouTube chat, answers in her own voice through her own VTube Studio avatar, and remembers what happened in earlier streams. Her big ongoing challenge is playing a real game with her own hands, by her own choices. Right now that game is Stardew Valley: she joins her streamer's farm as a co-op farmhand and lives her own days there. Stardew is the first game; more come after.
 
 **Watch her:** https://www.youtube.com/@bohanyt
 
@@ -15,7 +15,9 @@ ARTI is not a chatbot glued to an avatar. She hears the streamer, reads YouTube 
 | Her avatar in VTube Studio (expressions, reactions, subtitles) | Works on real streams |
 | Remembering earlier streams and what she did | Works; still growing |
 | Playing Stardew Valley by herself as a co-op farmhand | Experimental: she plays real sessions, but she is slow (about a minute per decision) and still gets stuck |
-| Minecraft player (Mineflayer bridge in `mc-bot/`) | Older integration, not the current focus |
+| Switching OBS scenes | In the bridge |
+| Reacting to donations | In the bridge |
+| Minecraft player (Mineflayer bridge in `mc-bot/`) | In the bridge; resting while she learns Stardew. More games come after |
 
 "Works on real streams" means it has run on her channel. A change that only passed its tests is not counted as proven.
 
