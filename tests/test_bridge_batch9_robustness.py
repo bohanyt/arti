@@ -459,7 +459,8 @@ def fake_turn(monkeypatch, reply="synthetic reply"):
 
 
 @pytest.mark.parametrize("failure", ["history", "speech_cancel", "speaking"])
-def test_failed_turn_finally_resets_mood_and_ptt(monkeypatch, failure):
+@pytest.mark.parametrize("owns_capture", [False, True])
+def test_failed_turn_finally_resets_mood_and_only_its_own_ptt(monkeypatch, failure, owns_capture):
     # Reuse the reactor harness that excludes all live startup effects.
     from tests.test_bridge_silent_death import _fake_reactor, _reactor
 
@@ -476,10 +477,13 @@ def test_failed_turn_finally_resets_mood_and_ptt(monkeypatch, failure):
             await vts.send_expression("ArtiSedih.exp3.json", True)
             raise RuntimeError("synthetic speaking error")
         monkeypatch.setattr(bridge.arti_expression_runtime, "apply_speaking", speaking)
-    bridge.voice_trigger_queue.put(bridge.VoiceTrigger("synthetic input", "mic"))
+    trigger = (bridge.VoiceTrigger("synthetic input", "ptt", ptt_generation=bridge._ptt_capture_generation)
+               if owns_capture else bridge.VoiceTrigger("synthetic input", "mic"))
+    bridge.voice_trigger_queue.put(trigger)
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(_reactor()())
-    assert not bridge.hotkey_active and bridge._pending_turn_id is None
+    assert bridge.hotkey_active is not owns_capture
+    assert bridge._pending_turn_id is None
     assert not bridge._brain_busy
     calls = [(call.args[0], call.args[1]) for call in vts.send_expression.call_args_list]
     assert ("ArtiSedih.exp3.json", True) in calls

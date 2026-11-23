@@ -20,6 +20,7 @@ def ptt(monkeypatch):
     monkeypatch.setattr(bridge, "_brain_busy", False)
     monkeypatch.setattr(bridge, "_stardew_ptt_epoch", None)
     monkeypatch.setattr(bridge, "_ptt_last_speech_at", 0.0, raising=False)
+    monkeypatch.setattr(bridge, "_ptt_capture_opened_at", None)
     monkeypatch.setitem(bridge.CONFIG, "ptt_auto_off_sec", 60.0)
     monkeypatch.setitem(bridge.CONFIG, "idle_motion_stop_hotkey", "")
     monkeypatch.setattr(bridge.time, "monotonic", lambda: clock[0])
@@ -113,7 +114,7 @@ def test_ptt_toggle_off_after_speech_does_not_cut_arti(ptt, monkeypatch, backend
     monkeypatch.setattr(bridge, "current_api_task", api)
     bridge.init_global_hotkey()
     callbacks[0]()  # ON while Arti speaks
-    assert bridge.hotkey_active and bridge._ptt_on_mid_turn
+    assert bridge.hotkey_active
     assert stopped == [] and not bridge.tts_stop_flag
     wall[0] += 5.0
     callbacks[0]()  # OFF after talking: priority queue, no cut
@@ -164,7 +165,7 @@ def test_ptt_on_keeps_current_audio(ptt, monkeypatch):
     monkeypatch.setattr(bridge, "request_asr_stream_restart", lambda *a: None)
     bridge._ptt_attention_pause()
     assert stopped == [] and not bridge.tts_stop_flag
-    assert bridge._ptt_on_mid_turn
+    assert bridge.hotkey_active
 
 
 @pytest.mark.parametrize("interrupt_at", ["during-sentence", "during-gap"])
@@ -282,6 +283,68 @@ def test_mid_turn_ptt_keeps_hotkey_and_next_turn_can_speak(ptt, monkeypatch):
     assert spoken == ["Satu.", "Dua.", "Tiga."] and bridge.hotkey_active
     assert not bridge.tts_stop_flag
     ended.assert_awaited_once()
-    asyncio.run(bridge._handle_voice_trigger(trigger, [], "synthetic"))
+    captured = bridge.VoiceTrigger("synthetic", "ptt", ptt_generation=bridge._ptt_capture_generation)
+    asyncio.run(bridge._handle_voice_trigger(captured, [], "synthetic"))
     assert spoken == ["Satu.", "Dua.", "Tiga."] * 2
     assert not bridge.hotkey_active and ended.await_count == 2
+
+
+def test_native_viewer_playback_and_old_replies_yield_to_current_capture(ptt, monkeypatch):
+    monkeypatch.setattr(bridge, "hotkey_active", False)
+    old = bridge._ptt_capture_generation
+    token = bridge._viewer_floor_revision.set(bridge.speech_control.owner_revision)
+    try:
+        bridge._toggle_owner_capture()
+        assert not bridge._speech_playback_allowed(bridge.speech_control.epoch)
+        bridge._finish_reply_ptt(bridge.VoiceTrigger("chat", "yt_chat", "viewer"))
+        bridge._finish_reply_ptt(bridge.VoiceTrigger("earlier reply", "ptt", ptt_generation=old))
+        assert bridge.hotkey_active
+        bridge._finish_reply_ptt(bridge.VoiceTrigger("current reply", "ptt",
+                                                   ptt_generation=bridge._ptt_capture_generation))
+        assert not bridge.hotkey_active
+    finally:
+        bridge._viewer_floor_revision.reset(token)
+
+
+@pytest.mark.parametrize("buffered", [False, True])
+def test_continuous_ptt_releases_viewer_gate_at_absolute_deadline(ptt, monkeypatch, buffered):
+    from arti_live_safety import SpeechControl
+
+    clock, _ = ptt
+    monkeypatch.setattr(bridge, "speech_control", SpeechControl())
+    monkeypatch.setattr(bridge, "voice_trigger_queue", queue.Queue())
+    monkeypatch.setattr(bridge, "voice_trigger_buffer", bridge.arti_voice_queue.VoiceTriggerQueue())
+    monkeypatch.setattr(bridge, "hotkey_active", False)
+    monkeypatch.setattr(bridge, "_media_playback_until", 0.0)
+    monkeypatch.setattr(bridge, "_game_live", lambda: True)
+    monkeypatch.setitem(bridge.CONFIG, "voice_queue_enabled", buffered)
+    monkeypatch.setitem(bridge.CONFIG, "mic_priority_mark", True)
+    monkeypatch.setitem(bridge.CONFIG, "media_watch_mode", False)
+    assert bridge.queue_voice_trigger("Arti, kenapa tadi ke sungai?", "mic_pasif")
+    bridge._toggle_owner_capture()
+    for interval in (30, 30, 30, 29):
+        clock[0] += interval
+        bridge._note_ptt_speech()
+        bridge._maybe_auto_off_ptt()
+    assert bridge.hotkey_active and bridge._viewer_ptt_gate_closed()
+    assert bridge.queue_voice_trigger(bridge.chat_media.PendingChat("viewer's message"), "yt_chat", "viewer")
+    if buffered:
+        assert bridge._dequeue_buffered_trigger_if_brain_ready() is None
+    else:
+        with pytest.raises(queue.Empty):
+            bridge._dequeue_preserved_legacy_trigger()
+    clock[0] += 1
+    bridge._note_ptt_speech()
+    assert bridge.hotkey_active and not bridge._viewer_ptt_gate_closed()
+    token = bridge._viewer_floor_revision.set(bridge.speech_control.owner_revision)
+    try:
+        assert bridge._speech_playback_allowed(bridge.speech_control.epoch)
+        assert bridge.queue_voice_trigger("Kenapa?", "ptt", ptt_generation=bridge._ptt_capture_generation)
+        assert not bridge._speech_playback_allowed(bridge.speech_control.epoch)
+    finally:
+        bridge._viewer_floor_revision.reset(token)
+    dequeue = bridge._dequeue_buffered_trigger_if_brain_ready if buffered else bridge._dequeue_preserved_legacy_trigger
+    assert dequeue().trigger_type == "ptt"
+    bridge._brain_busy = False
+    assert dequeue().trigger_type == "yt_chat"
+    assert bridge.hotkey_active

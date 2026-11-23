@@ -35,6 +35,8 @@ internal static class NativeFestivalFishing
 
 internal sealed partial class BackgroundMoveRuntime
 {
+    internal const string FestivalTimerRelease = "FESTIVAL_TIMER_END";
+
     // A contained policy is no longer Armed, so Busy/empty overrides alone
     // cannot certify festival cleanup. Keep the actual permanent decision.
     internal string? FestivalContainmentFault => this.policy?.Decision?.FailFastMessage;

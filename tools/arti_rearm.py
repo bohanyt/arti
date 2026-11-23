@@ -28,6 +28,8 @@ from arti_stardew_command import lease_state  # noqa: E402
 STOP_FILES = ("stop.json", "stop_all.json")
 REARM_WAIT_S = 5.0  # R0-03 §9.1 R6, §13 item 11
 POLL_S = 0.1
+STOP_GUARDS_MAX = 32  # contracts/rearm.schema.json `stop_guards.maxItems`
+TOKEN_MAX_BYTES = 4096  # the native's bound on rearm.json (ActionOwnerRecordPoller / MenuStepCommandInbox.MaxRequestBytes)
 
 
 def _read(path):
@@ -121,6 +123,17 @@ def archive_owned_record(path, value, *, reason):
     return True
 
 
+def watchdog_token_ok(token):
+    """A watchdog token names every guarded stop as an absolute path, within the schema's count and the
+    native's byte bound; otherwise it is never published (the native would refuse it and the lock stays)."""
+    guards = token.get("stop_guards")
+    if (not isinstance(guards, list) or not 1 <= len(guards) <= STOP_GUARDS_MAX
+            or not all(isinstance(p, str) and p and Path(p).is_absolute() for p in guards)):
+        return False
+    raw = json.dumps(token, ensure_ascii=False, separators=(",", ":")).encode("utf-8")  # as ipc.create_json_once writes it
+    return len(raw) <= TOKEN_MAX_BYTES
+
+
 def _watchdog_rearm(folder, token, check_stops, sleep, wait_s):
     path = folder / "rearm.json"
     check_stops()
@@ -149,10 +162,12 @@ def _watchdog_rearm(folder, token, check_stops, sleep, wait_s):
 
 
 def rearm(folder, actor, confirm, *, sentinels=(), out=print, sleep=time.sleep, wait_s=REARM_WAIT_S, automatic=False,
-          watchdog_stop_check=None):
+          watchdog_stop_check=None, stop_guards=None):
     """Return rearmed | sentinels_archived | nothing_to_rearm | unconfirmed_stop_file | declined | timeout.
 
-    `confirm(halt, notes) -> bool`; `halt` is None when only LIVE7_STOP sentinels are shown (ADR-19 item 1)."""
+    `confirm(halt, notes) -> bool`; `halt` is None when only LIVE7_STOP sentinels are shown.
+    A watchdog re-arm (`watchdog_stop_check`) needs `stop_guards`: the token carries them and the native
+    stats each one when it consumes the token; without a valid list nothing is written."""
     if actor not in ("owner", "rig_operator"):
         raise ValueError(actor)
     folder, sentinels = Path(folder), [Path(p) for p in sentinels]
@@ -200,6 +215,10 @@ def rearm(folder, actor, confirm, *, sentinels=(), out=print, sleep=time.sleep, 
                  "entries_digest": digest, "actor": actor, "ts": int(time.time() * 1000)}
         if watchdog_stop_check is not None:
             if not automatic or raws or shown or not confirm(halt, notes):
+                return "declined"
+            token["stop_guards"] = list(stop_guards) if isinstance(stop_guards, (list, tuple)) else None
+            if not watchdog_token_ok(token):
+                out("declined: a watchdog token must name every guarded stop; nothing written")
                 return "declined"
             return _watchdog_rearm(folder, token, watchdog_stop_check, sleep, wait_s)
         if automatic:

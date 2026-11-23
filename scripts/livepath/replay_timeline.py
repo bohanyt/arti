@@ -130,6 +130,9 @@ class ReplayTrigger:
     stardew_voice_epoch: int | None = None
     owner_marked: bool = True
     rotation_rank: int = 0
+    owner_reply_required: bool = False
+    ptt_generation: int | None = None
+    host_story_retry: bool = False
 
 
 def read_session(path, session_date=None):
@@ -562,7 +565,7 @@ def metrics(owners, audio, counts, active, chats=()):
     all_waits = list(by_event.values())
     answered_chat = set()
     for a, b, kind, event in audio:
-        if event is not None and b > a:
+        if event is not None and b > a and not event.data.get('chat_acknowledgement'):
             answered_chat.update(event.data.get('chat_ids', []))
     active_sec = sum(b-a for a, b in windows)
     play_lines = sum(kind in GAME_KINDS and b > a and is_active(a) for a, b, kind, e in audio)
@@ -642,6 +645,8 @@ class Replay:
         event = self.inputs.get(id(raw)) if raw is not None else next((e for e in session.events
             if e.turn_id == trigger.turn_id and e.queued_at == trigger.queued_at), None)
         event = self.selected_events.get((trigger.trigger_type, trigger.turn_id)) or event
+        if event is not None and isinstance(trigger.text, Q.CombinedChat):
+            event = replace(event, data={**event.data, 'chat_acknowledgement': True})
         key = (f'{session.path.name}:{event.line}' if event else
                f'{session.path.name}:{trigger.trigger_type}:{round(self.now, 1)}')
         provider = ('codex' if config.get('codex_agent_enabled') and config.get('codex_primary_voice')
@@ -688,7 +693,9 @@ class Replay:
     def normalize(self, item):
         return ReplayTrigger(text=item.text, trigger_type=item.trigger_type, viewer_name=item.viewer_name,
                   queued_at=item.enqueued_at, turn_id=item.turn_id, stardew_voice_epoch=None,
-                  owner_marked=item.owner_marked, rotation_rank=item.rotation_rank)
+                  owner_marked=item.owner_marked, rotation_rank=item.rotation_rank,
+                  owner_reply_required=item.owner_reply_required, ptt_generation=item.ptt_generation,
+                  host_story_retry=item.host_story_retry)
 
     def capture_removed(self, reason, before):
         remaining = {id(x) for x in self.q._items}
@@ -727,8 +734,12 @@ class Replay:
         for item in self.q._items:
             key = (item.trigger_type, item.turn_id)
             if id(item) not in merged:
-                self.inputs[id(item)] = event
-                self.selected_events[key] = event
+                target = event
+                prior = self.selected_events.get(key)
+                if prior is not None and isinstance(item.text, Q.CombinedChat):
+                    target = replace(event, data={**event.data, 'chat_ids': [*prior.data.get('chat_ids', ()), chat_id]})
+                self.inputs[id(item)] = target
+                self.selected_events[key] = target
             elif getattr(item, '_merged_n', 1) > merged[id(item)]:
                 target = self.selected_events[key]
                 target.data['chat_ids'].append(chat_id)
@@ -783,9 +794,14 @@ class Replay:
             owner_marked=marked)
         self.capture_removed("replaced", before)
         if accepted:
-            item = next(i for i in self.q._items if i.turn_id == self.current_id)
-            self.inputs[id(item)] = event
-            self.selected_events[(item.trigger_type, item.turn_id)] = event
+            for item in self.q._items:
+                if item.turn_id == self.current_id or (
+                    isinstance(item.text, Q.CombinedOwnerQuestions)
+                    and all(item is not old for old in before)
+                ):
+                    self.inputs[id(item)] = event
+                    self.selected_events[(item.trigger_type, item.turn_id)] = event
+                    break
 
     async def session(self, session, config, journals):
         if not config.get('voice_queue_enabled', True):
@@ -872,8 +888,9 @@ class Replay:
                                 self.audio[-1] = (a, min(b, self.now), kind, e)
                             self.counts['cancelled'][state[0].trigger_type] += 1
                             self.discard(state, 'media_hold' if media_interrupt or media_blocked else 'owner_control')
-                            self.b._retain_chat_trigger(state[0])
-                            AB.finish(self.b, state[0])
+                            if self.b.speech_control.allows(state[4]):
+                                self.b._retain_chat_trigger(state[0])
+                                AB.finish(self.b, state[0])
                             state = None
                             self.b._brain_busy = self.b.tts_is_playing = False
                 elif tag == "native":
@@ -920,7 +937,8 @@ class Replay:
                     self.b.tts_is_playing = False
                     schedule(self.now+state[2].cleanup, "done", state)
                 elif tag == "done" and state is data:
-                    AB.finish(self.b, state[0])
+                    if self.b.speech_control.allows(state[4]):
+                        AB.finish(self.b, state[0])
                     state = None
                     self.b._brain_busy = self.b.tts_is_playing = False
                 elif tag == "tick":
@@ -933,7 +951,9 @@ class Replay:
                         pool = tuple(self.q._items)
                         use_desk = AD.enabled(config) and not (config.get('media_watch_mode') and (
                             replay_policy.chat_media.watch_held(config, self.now) or self.q.depth_for('video')))
-                        trigger = await AB.dequeue(self.b) if use_desk else self.b._dequeue_buffered_trigger_if_brain_ready()
+                        trigger = self.b._dequeue_buffered_trigger_if_brain_ready(owner_only=use_desk)
+                        if use_desk and trigger is None:
+                            trigger = await AB.dequeue(self.b)
                         if use_desk:
                             for item in pool:
                                 if item.trigger_type in {"own_play", "read_in_game"} and self.now-item.enqueued_at > AD.GAME_TTL_SEC:

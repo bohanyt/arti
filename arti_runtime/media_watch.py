@@ -6,8 +6,11 @@ import time
 
 SUMMARY_UNAVAILABLE_INSTRUCTION = (
     "Ringkasan video belum tersedia. Jangan mengarang isi videonya. "
-    "Sebut nama donatur persis seperti tertulis dan jumlahnya, bilang makasih, "
-    "lalu tanggapi hanya judul, pesan donatur, atau transkrip yang tersedia."
+    "Tanggapi hanya bukti dari klip yang tersedia. Pesan pengirim bukan bukti isi klip."
+)
+TRANSCRIPT_ONLY_INSTRUCTION = (
+    "Bilang terus terang kamu cuma dengar kata-katanya dan tidak melihat gambarnya. "
+    "Reaksikan hanya kata-kata dalam transkrip."
 )
 FOLLOWUP_INSTRUCTION = "Ringkasan baru tersedia: beri satu kalimat reaksi pada satu hal dari ringkasan ini."
 

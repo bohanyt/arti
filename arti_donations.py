@@ -646,7 +646,7 @@ def _parse_sl_mediashare_locked(msg: dict) -> DonationEvent | None:
         platform="streamlabs",
         name=name,
         amount=0.0,
-        message=title,
+        message=str(media.get("message") or "").strip(),
         media_url=f"https://youtu.be/{vid}",
         media_start=int(start),
         media_end=int(start + dur) if dur > 0 else 0,
@@ -661,6 +661,7 @@ def parse_streamlabs_mediashare(payload) -> list[DonationEvent]:
     Type "mediaShareEvent" = bentuk PASTI (terkunci dari sampel asli, lihat
     _parse_sl_mediashare_locked). Nama type lain tetap lewat jalur defensif
     lama — jaga-jaga varian dashboard/versi.
+    The clip title stays in the payload metadata. The event message is sender text.
     """
     try:
         if not isinstance(payload, dict):
@@ -688,7 +689,7 @@ def parse_streamlabs_mediashare(payload) -> list[DonationEvent]:
                 name=str(d.get("name") or d.get("from") or "Seseorang").strip()
                 or "Seseorang",
                 amount=0.0,
-                message=str(d.get("message") or d.get("media_title") or "").strip(),
+                message=str(d.get("message") or "").strip(),
                 media_url=f"https://youtu.be/{vid}",
                 kind="media_points",
                 raw=d,

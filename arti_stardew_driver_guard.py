@@ -35,6 +35,7 @@ class ActiveCycle(NamedTuple):
     cycle_dir: Path  # <run>/live7/<cycle>
     run_dir: Path    # the run folder = Live7 help dir of that cycle
     mtime: float = 0.0  # cycle_state.json mtime (else supervisor.lock mtime)
+    status: str = ""
 
 
 def _key(path: Path) -> str:
@@ -182,7 +183,7 @@ def _active_cycle(cycle_dir: Path, now: float) -> ActiveCycle | None:
         mtime = _mtime(state_path)
         if mtime is None:
             mtime = _mtime(lock) or 0.0
-        return ActiveCycle(cycle_dir, run_dir, mtime)
+        return ActiveCycle(cycle_dir, run_dir, mtime, str((state or {}).get("status") or "").strip().lower())
     except Exception:  # noqa: BLE001
         return None
 
@@ -228,7 +229,7 @@ def active_live7_run_dir(config: dict, now: float | None = None) -> str | None:
 _DEFAULT_LIVE_CACHE_SEC = 5.0
 _MIN_REFRESH_SEC = 0.5
 _live_cache_lock = threading.Lock()
-_live_cache: dict = {"key": None, "at": 0.0, "value": False, "config": None}
+_live_cache: dict = {"key": None, "at": 0.0, "value": False, "playing": False, "config": None}
 _refresher: threading.Thread | None = None
 _refresher_stop: threading.Event | None = None  # per-thread stop flag
 _refresher_shutdown = False  # stop_live_refresher() ran: never restart
@@ -256,10 +257,12 @@ def _refresh_live_cache(config: dict | None = None, now: float | None = None) ->
         with _live_cache_lock:
             cfg = config if config is not None else (_live_cache["config"] or {})
         key = _live_key(cfg)
-        value = active_live7_run_dir(cfg, now=now) is not None
+        cycles = active_live7_cycles(cfg, now=now)
+        value = bool(cycles)
+        playing = value and cycles[0].status in {"active", "running"}
         with _live_cache_lock:
             _live_cache.update(key=key, at=time.time() if now is None else now,
-                               value=value)
+                               value=value, playing=playing)
         return value
     except Exception:  # noqa: BLE001 — advisory; unreadable = not active
         return False
@@ -313,7 +316,7 @@ def _reset_live_cache() -> None:
     global _refresher_shutdown
     stop_live_refresher()
     with _live_cache_lock:
-        _live_cache.update(key=None, at=0.0, value=False, config=None)
+        _live_cache.update(key=None, at=0.0, value=False, playing=False, config=None)
     with _refresher_lock:
         _refresher_shutdown = False
     _refresher_wake.clear()
@@ -324,13 +327,22 @@ def live7_cycle_active(config: dict, now: float | None = None) -> bool:
     thread (every `stardew_live_cache_sec`, default 5 s). Never scans on the
     caller's thread and never raises. Until the first refresh for this run-dir
     set lands, the answer is False (`now` is accepted for compatibility)."""
+    return _cached_cycle_fact(config, "value")
+
+
+def live7_cycle_playing(config: dict) -> bool:
+    """Use the same off-thread scan, with only active and running as play."""
+    return _cached_cycle_fact(config, "playing")
+
+
+def _cached_cycle_fact(config: dict, field: str) -> bool:
     try:
         cfg = config or {}
         key = _live_key(cfg)
         with _live_cache_lock:
             _live_cache["config"] = cfg
             hit = _live_cache["key"] == key
-            value = bool(_live_cache["value"])
+            value = bool(_live_cache[field])
         _ensure_refresher()
         if hit:
             return value

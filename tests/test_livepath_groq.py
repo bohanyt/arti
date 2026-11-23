@@ -1,5 +1,6 @@
 """Probe the checked-out router/trimmer; never import the bridge or call providers."""
 import ast
+from functools import partial
 import json
 import re
 
@@ -64,17 +65,31 @@ def test_probe_preserves_router_round_robin_state(capsys):
 
 
 def test_probe_calls_actual_checked_out_functions(capsys):
-    tree = ast.parse((rehearse.ROOT / "arti_bridge.py").read_text(encoding="utf-8"))
+    tree = ast.parse((rehearse.ROOT / "arti_runtime/groq_chat.py").read_text(encoding="utf-8"))
     names = {"pick_groq_model", "_trim_llm_payload", "_split_stardew_status", "_remove_system_prompt_block"}
     nodes = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in names]
     cfg = dict(groq_models=["fast", "strong"], groq_model_fast="fast", groq_model_strong="strong",
                smart_groq_routing=True, groq_prompt_char_soft_cap=10000)
-    scope = dict(CONFIG=cfg, re=re, SOUL_MARKER="\n\n[JIWA ARTI]", _SYSTEM_PROMPT_BLOCK_MARKERS=())
+    assert {node.name for node in nodes} == names
+    scope = {}
     exec(compile(ast.Module(body=nodes, type_ignores=[]), "checked-out-groq", "exec"), scope)
+
+    def pick(*args, **kwargs):
+        return scope["pick_groq_model"](*args, **kwargs, default_config=cfg, pick_groq_model=pick)
+
+    trim = partial(
+        scope["_trim_llm_payload"],
+        _split_stardew_status=partial(scope["_split_stardew_status"], config=cfg, re=re),
+        _remove_system_prompt_block=partial(
+            scope["_remove_system_prompt_block"], re=re,
+            _SYSTEM_PROMPT_BLOCK_MARKERS=(), _SYSTEM_PROMPT_KEEP_MARKERS=(),
+        ),
+        _SYSTEM_PROMPT_BLOCK_MARKERS=(), SOUL_MARKER="\n\n[JIWA ARTI]", re=re,
+    )
     system = "x" * 20000 + "\n[NATIVE_FACTS] present\n[KINI] farm\n[JIWA ARTI] soul"
     user = "[Pesan/Panggilan Sekarang:] kenapa?"
-    expected_s, expected_u = scope["_trim_llm_payload"](system, user)
-    bridge.groq_probe("turn", "kenapa?", cfg, system, user, scope["pick_groq_model"], scope["_trim_llm_payload"])
+    expected_s, expected_u = trim(system, user)
+    bridge.groq_probe("turn", "kenapa?", cfg, system, user, pick, trim)
     event = row(capsys)
     assert event["event"] == "groq_probe"
     assert event["model"] == "fast" and event["size_forced_fast"] is True

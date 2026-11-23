@@ -16,24 +16,10 @@ COMMAND = "bungkam"
 def bungkam(bridge) -> None:
     # Toggle ON (the first press).
     bridge.arti_executors.note_user_cancel()  # a cancel after this is the user's, not a timeout
-    bridge.clear_trigger_queue()
     bridge._ptt_attention_pause()
     # Toggle OFF within 2 s: bungkam.
     bridge.arti_executors.note_user_cancel()
-    bridge.tts_stop_flag = True
+    bridge._stop_voice_now(ptt=True)
     print("\n⚫⚫ [DOUBLE TOGGLE] Bungkam! (rehearsal script)")
     bridge._cancel_lamp_fallback()
     bridge.start_idle_animation()
-    task = bridge.current_api_task
-    if task and not task.done():
-        task.cancel()
-        print("[Cancel] API call dibatalkan.")
-    if bridge.tts_is_playing:
-        try:
-            with bridge._sd_gerbang:
-                bridge.sd.stop()
-            print("[Cancel] TTS dihentikan.")
-        except Exception:  # noqa: BLE001 — same as the handler: a stop that fails leaves the flag to end playback
-            pass
-        bridge.request_asr_stream_restart("toggle OFF + stop TTS")
-    bridge.clear_trigger_queue()

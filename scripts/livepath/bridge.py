@@ -16,7 +16,7 @@ import time
 
 # Mabar (owner plays HOST and talks to her): the owner's mic and her VTS avatar are part of the session.
 MABAR_PERIPHERALS = frozenset({
-    "asr_enabled", "vts_enabled", "youtube_chat_enabled", "ssn_chat_enabled", "donation_enabled",
+    "asr_enabled", "vts_enabled", "youtube_chat_enabled", "ssn_chat_enabled", "donation_enabled", "vision_enabled",
 })
 
 
@@ -41,9 +41,18 @@ def load_config(path: Path) -> dict:
         raise ValueError("chat: SSN already carries YouTube; use SSN or the video id, not both")
     if cfg.get("ssn_chat_enabled") and cfg.get("ssn_session_source") not in ("app", "file"):
         raise ValueError("SSN chat needs ssn_session_source app or file")
-    if mabar and (cfg.get("web_lookup_enabled") or cfg.get("web_lookup_codex_enabled")
-                  or cfg.get("codex_web_search") != "disabled"):
-        raise ValueError("mabar: no internet lookups (owner 2026-11-10)")
+    if mabar:
+        if cfg.get("vision_runtime_on_start") or cfg.get("vision_background_poll"):
+            raise ValueError("mabar vision starts off and captures on demand")
+        if cfg.get("codex_web_search") != "disabled" or cfg.get("host_web_topic_enabled"):
+            raise ValueError("mabar search is restricted to the isolated Codex lookup role")
+        if cfg.get("web_lookup_enabled") or cfg.get("web_lookup_codex_enabled"):
+            if (cfg.get("web_lookup_provider_chain") != ["codex"]
+                    or cfg.get("web_lookup_regex_enabled") is not False
+                    or any(cfg.get(key) is not True for key in (
+                        "web_lookup_enabled", "web_lookup_codex_enabled", "web_lookup_model_decides",
+                        "web_lookup_announce", "codex_agent_enabled"))):
+                raise ValueError("mabar lookup requires model choice, a spoken notice, and Codex only")
     if cfg.get("tts_engine") != "supertone" or cfg.get("supertonic_use_cuda") is not True:
         raise ValueError("rehearsal requires GPU Supertone")
     return cfg

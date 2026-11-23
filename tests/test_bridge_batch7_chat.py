@@ -126,6 +126,14 @@ def test_nonempty_poll_resets_empty_counter(monkeypatch):
 
 
 def test_previous_session_id_is_captured_before_wizard_save(monkeypatch, tmp_path):
+    from arti_runtime import startup_wizard
+
+    def save_from_wizard(*, config, save_live_session, **dependencies):
+        assert config is bridge.CONFIG and save_live_session is bridge.save_live_session
+        save_live_session()
+        return True
+
+    monkeypatch.setattr(startup_wizard, "startup_wizard", save_from_wizard)
     path = tmp_path / "live_session.json"
     path.write_text(json.dumps({"youtube_video_id": "previous-ID"}), encoding="utf-8")
     monkeypatch.setattr(bridge, "LIVE_SESSION_PATH", str(path))
@@ -134,6 +142,6 @@ def test_previous_session_id_is_captured_before_wizard_save(monkeypatch, tmp_pat
     monkeypatch.setattr(bridge, "resolve_asr_input_device", lambda: (None, "fake mic"))
     assert bridge.load_live_session()
     bridge.CONFIG["youtube_video_id"] = "new-video-ID"
-    bridge.save_live_session()
+    assert bridge.startup_wizard() is True
     assert bridge._previous_youtube_video_id == "previous-ID"
     assert json.loads(path.read_text(encoding="utf-8"))["youtube_video_id"] == "new-video-ID"

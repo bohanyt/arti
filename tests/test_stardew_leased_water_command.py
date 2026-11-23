@@ -12,6 +12,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import arti_stardew_command as C  # noqa: E402
+from tests._fake_mod_files import read_json_retry, replace_retry, unlink_retry  # noqa: E402
 
 SESSION = {
     "protocol": 1,
@@ -61,15 +62,15 @@ class FakeMod:
         path = self.folder / C.NAMA_REQUEST
         while not self.stop.is_set():
             if path.exists():
-                request = json.loads(path.read_text(encoding="utf-8"))
+                request = read_json_retry(path)
                 self.requests.append(request)
-                path.unlink()
+                unlink_retry(path)
                 if self.result is not None:
                     result = dict(self.result)
                     result.setdefault("request_id", request["request_id"])
                     tmp = self.folder / (C.NAMA_RESULT + ".tmp")
                     tmp.write_text(json.dumps(result), encoding="utf-8")
-                    tmp.replace(self.folder / C.NAMA_RESULT)
+                    replace_retry(tmp, self.folder / C.NAMA_RESULT)
                 return
             time.sleep(0.005)
 

@@ -5136,6 +5136,11 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
             # ADR 243: her raw hands on every page she can move on, after every branch of the day plan.
             raw, self._live7_raw_use_why = raw_hands.world_block(snapshot, facts, context)
             calls = raw_hands.merge(calls, raw)
+        if (S._g(snapshot, "event_movement") or {}).get("is_festival") is True:
+            from arti_stardew_event_control import festival_walk_calls
+            here = S._wave1_xy(S._g(S._g(snapshot, "motor"), "tile"))
+            size = self._festival_map_size(S._g(snapshot, "movement_context"))
+            calls = festival_walk_calls(calls, here, size)
         self._live7_last_world_calls = [c for c in calls if c.name not in ("cek_jurnal", "inventori", "ui_action")]
         return noted(calls, session.campaign.live.harvest_fact)
 

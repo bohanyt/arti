@@ -218,6 +218,7 @@ class SkillSession:
     campaign_offer: object | None = None
     campaign_start: str | None = None
     model_pick: tuple | None = None   # Live7 WP4: (SkillCall, request_index) of the last model choice, until started
+    festival_leave_pick: tuple | None = None  # (chosen trip, festival id) from the decision's own page
     choice_feedback: dict | None = None  # last rejected boundary choice; facts for a fresh offer, never permission
     boundary_page: tuple | None = None
     boundary_budget: int = 16128
@@ -2249,8 +2250,14 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
             # model remedy started through the plan); a resumed leg/hop is "plan" even when its run says by=model.
             pick = getattr(session, "model_pick", None) if resume is None else None
             model = resume is None and (by == "model" or pick is not None and pick[0] == call)
+            if model and (leave := getattr(session, "festival_leave_pick", None)) and leave[0] == call:
+                from arti_stardew_event_control import festival_free_roam
+                movement = self._event_movement_offer(self._binding_view()[1])
+                if festival_free_roam(movement) and movement.get("festival_id") == leave[1]:
+                    run.state["festival_leave_chosen"] = leave[1]
             if model:
                 session.model_pick = None
+                session.festival_leave_pick = None
             self._journal({"ev": "skill_chosen", "session_id": session.session_id, "skill": call.name, "arg": call.arg,
                            "by": by, "chooser": "model" if model else "plan",
                            "request_index": pick[1] if model and pick is not None else None})
@@ -3644,8 +3651,10 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
                     # close (worker hook order); a results-pending tick must not hand that chest back as a new choice.
                     and not self._goods_store_rule_due()):
                 generic_view = self._live7_unknown_ui_view(generic_session)
+                from arti_stardew_generic_ui import unexpected_festival_leave
                 if (generic_view is not None and not self._live7_routine_owns_ready_check(generic_session, generic_view)
-                        and (generic_view.generic or generic_run.state.get("mail_attachment_wait"))):
+                        and (generic_view.generic or generic_run.state.get("mail_attachment_wait")
+                             or unexpected_festival_leave(generic_view, generic_run))):
                     handled = self._live7_generic_ui(generic_session)
                     if handled == "unsafe":
                         return self._live7_uncertain_ui(generic_session, "generic_ui_readback_unconfirmed")
@@ -4338,6 +4347,7 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
         self._skill_last_provider_error = None  # fix57: (type, code) of this boundary's provider_error, for live7
         with self._lock:
             session.model_pick = None  # Live7 WP4: a pick links only to this boundary's own request
+            session.festival_leave_pick = None
             own = (self._active is not None
                    and self._active.goal_id in {r.goal_id for r in session.runs} | {session.goal_id})
         if not own and session is self._skill_session and session.status == "active":
@@ -4685,6 +4695,10 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
             index = lookup(request.generation_id) if callable(lookup) else None
             with self._lock:
                 session.model_pick = (choice, index if type(index) is int else None)
+                from arti_stardew_event_control import festival_free_roam
+                movement = getattr(request.snapshot, "event_movement", None)
+                if choice.name == "pergi_ke" and festival_free_roam(movement) and movement.get("festival_id"):
+                    session.festival_leave_pick = (choice, movement["festival_id"])
         return choice
 
     @staticmethod
@@ -4750,16 +4764,18 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
         from arti_stardew_runtime import (_encoded_provider_request, _decision_provider_extra_payload,
             _provider_input_token_upper_bound, _skill_prompt_token_estimate, _STARDEW_DECISION_REQUEST_MAX_BYTES,
             _STARDEW_DECISION_INPUT_TOKEN_HARD_BOUND, _STARDEW_DECISION_INPUT_TOKEN_RESERVE,
-            _STARDEW_PROTECTED_INPUT_TOKEN_BOUND, _protected_decision_context)
+            _STARDEW_PROTECTED_INPUT_TOKEN_BOUND, _protected_decision_context, _protected_reserve_exceeded)
         model = getattr(getattr(self._provider, "policy", None), "model", "")
         encoded = _encoded_provider_request(model, messages, _decision_provider_extra_payload(True, messages=messages))
         scale = _page_budget.for_request(retry).scale
-        ui_bound = (_STARDEW_PROTECTED_INPUT_TOKEN_BOUND if generic is not None and _protected_decision_context(
-            request.snapshot, trial_owner_authorized=getattr(self._provider, "trial_owner_authorized", False))
-            else _STARDEW_DECISION_INPUT_TOKEN_HARD_BOUND) * scale
+        trial_owner = getattr(self._provider, "trial_owner_authorized", False)
+        protected = _protected_decision_context(request.snapshot, trial_owner_authorized=trial_owner)
+        ui_bound = (_STARDEW_PROTECTED_INPUT_TOKEN_BOUND if generic is not None and protected
+                    else _STARDEW_DECISION_INPUT_TOKEN_HARD_BOUND) * scale
         if (len(encoded) > min(budget, _STARDEW_DECISION_REQUEST_MAX_BYTES * scale)
                 or skills.encoded_render_bytes(messages) > budget
                 or _provider_input_token_upper_bound(encoded) > ui_bound - (512 * scale if generic is not None else 0)
+                or _protected_reserve_exceeded(retry, encoded, trial_owner)
                 or _skill_prompt_token_estimate(encoded) > _STARDEW_DECISION_INPUT_TOKEN_RESERVE * scale
                 or (_page_budget.for_request(retry) != _page_budget.DEFAULT and (
                     not _page_budget.fits_page(messages, budget=_page_budget.for_request(retry))

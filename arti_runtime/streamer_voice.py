@@ -3,9 +3,12 @@ from __future__ import annotations
 
 import math
 import re
+import time
 
 from arti_live_safety import is_backstage
 from arti_wake import is_arti_wake_call
+
+OWNER_DUPLICATE_WAIT_SEC = 60.0
 
 
 def addressed(text, config):
@@ -37,13 +40,15 @@ class Transcript(str):
 class PassiveGate:
     def __init__(self):
         self.previous = ""
+        self.previous_at = 0.0
 
-    def reject(self, text, config, *, allow_short=False):
+    def reject(self, text, config, *, allow_short=False, dedup_addressed=False):
         current = normalized(text)
-        duplicate = bool(current and current == self.previous)
-        self.previous = current
-        # A name-addressed owner event must survive even repeated/short calls.
-        if addressed(text, config):
+        now = time.monotonic()
+        duplicate = bool(current and current == self.previous and now - self.previous_at < OWNER_DUPLICATE_WAIT_SEC)
+        if not duplicate:
+            self.previous, self.previous_at = current, now
+        if addressed(text, config) and not (dedup_addressed and duplicate):
             return None
         if duplicate:
             return "duplicate"
@@ -57,6 +62,12 @@ class PassiveGate:
         if getattr(text, "avg_logprob", None) is not None and text.avg_logprob < -1.0:
             return "low_confidence"
         return None
+
+    def answered(self, text):
+        """Let an owner repeat a question after its reply was heard."""
+        lines = getattr(text, "lines", (text,))
+        if not lines or any(self.previous == normalized(line) for line in lines):
+            self.previous = ""
 
 
 def natural_intent(why):

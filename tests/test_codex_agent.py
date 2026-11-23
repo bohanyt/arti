@@ -250,7 +250,16 @@ def test_urutan_lapis_codex_sebelum_groq_di_kedua_jalur():
     """Composer gagal ATAU sesi dingin -> Luna dulu, baru Groq."""
     import ast
 
-    function = next(node for node in ast.parse(_SRC_BRIDGE).body
+    tree = ast.parse(_SRC_BRIDGE)
+    wrappers = [
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "groq_chat_completion"
+    ]
+    assert len(wrappers) == 2
+    delegation = wrappers[-1].body[-1]
+    assert isinstance(delegation, ast.Return) and isinstance(delegation.value, ast.Call)
+    assert ast.unparse(delegation.value.func) == "groq_chat.groq_chat_completion"
+    function = next(node for node in tree.body
                     if isinstance(node, ast.AsyncFunctionDef) and node.name == "_cursor_reply_with_fallback")
     for penanda in ("sesi belum hangat — mencoba Luna lalu fallback Groq",
                     "— fallback Groq"):
@@ -273,7 +282,7 @@ def test_urutan_lapis_codex_sebelum_groq_di_kedua_jalur():
                 if (isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name)
                         and target.value.id == "arti_codex_agent" and target.attr == "send_turn"):
                     calls.append((node.lineno, node.col_offset, "codex"))
-                elif isinstance(target, ast.Name) and target.id == "groq_chat_completion":
+                elif isinstance(target, ast.Name) and target.id == wrappers[-1].name:
                     calls.append((node.lineno, node.col_offset, "groq"))
         order = [provider for _, _, provider in sorted(calls)]
         assert "codex" in order and "groq" in order, penanda

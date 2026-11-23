@@ -20,7 +20,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from arti_runtime.media_watch import FOLLOWUP_INSTRUCTION
+from arti_runtime.media_watch import FOLLOWUP_INSTRUCTION, TRANSCRIPT_ONLY_INSTRUCTION
 
 
 FLOORS = {"meta": 8, "captions": 5, "audio": 20, "frames": 20, "vision": 10}
@@ -429,7 +429,8 @@ class ClipRace:
     def prompt(self):
         with self.lock:
             job = self.job
-            title = str(self.meta.get("title") or "")
+            has_vision = self.winner == "gemini" or self._ready("vision")
+            title = str(self.meta.get("title") or "") if has_vision else ""
             message = re.sub(r"https?://\S+", "", job.message or "").strip()
             parts = ["judul"] if title else []
             evidence = []
@@ -451,11 +452,14 @@ class ClipRace:
                 "Reaksikan satu hal yang didukung bahan ini. Jangan mengarang isi video, "
                 "suara, identitas, atau kejadian yang tidak tersedia. Judul dan pesan bukan bukti isi video."
             )
-            if not evidence:
+            if self.transcript and not has_vision:
+                instruction += " " + TRANSCRIPT_ONLY_INSTRUCTION
+            elif not evidence:
                 instruction += (" Bilang jujur dalam satu baris pendek bahwa kali ini kamu tidak bisa "
-                                "melihat klipnya dengan baik. Tanggapi pesan atau judul bila ada.")
+                                "melihat klipnya dengan baik. Tanggapi pesan donatur bila ada.")
+            title_line = f"Judul: {title}\n" if title else ""
             return (f"[VIDEO MEDIA SHARE] Donatur: {job.viewer}; jumlah: {job.donation_label}.\n"
-                    f"Judul: {title}\nPesan donatur: {message}\nYang kamu punya: {have}.\n"
+                    f"{title_line}Pesan donatur: {message}\nYang kamu punya: {have}.\n"
                     + "\n".join(evidence) + "\n" + instruction)
 
     def build(self):

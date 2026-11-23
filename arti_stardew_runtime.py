@@ -1286,16 +1286,17 @@ class FakeDecisionProvider:
 def _protected_decision_context(snap: DecisionContextSnapshot, *, trial_owner_authorized: bool = False) -> bool:
     # Route effects can withdraw movement/action offers (menu, seating or phase
     # transition). Their original receipt still needs the same 512-token reserve.
-    action = snap.working_memory.last_action
-    return snap.working_memory.play_mode == "local_activity" and (
-        (snap.routine_objective or {}).get("kind") == "extras_animals"
-        or snap.event_movement is not None or snap.event_actions is not None
-        or snap.festival_reflex is not None
+    memory = getattr(snap, "working_memory", None)
+    action = getattr(memory, "last_action", None)
+    return getattr(memory, "play_mode", None) == "local_activity" and (
+        (getattr(snap, "routine_objective", None) or {}).get("kind") == "extras_animals"
+        or getattr(snap, "event_movement", None) is not None or getattr(snap, "event_actions", None) is not None
+        or getattr(snap, "festival_reflex", None) is not None
         # Festival talk withdraws event movement offers while the menu is up.
         # Retain its reserve after the first A replaces the route receipt;
         # ordinary event UI retains its existing wire/render contract.
         or trial_owner_authorized is True
-            and (snap.ui_pad_target or {}).get("view", {}).get("g3", {}).get("event", {}).get("festival") is True
+            and (getattr(snap, "ui_pad_target", None) or {}).get("view", {}).get("g3", {}).get("event", {}).get("festival") is True
         or action is not None and "event_action" in (action.before or {}))
 
 
@@ -1566,9 +1567,10 @@ class ProductionDecisionProvider:
             # Skills tahap 1 boundary: skills only, no buttons (flag off: never set, this path is unreachable).
             play = request.snapshot.working_memory.play_mode == "local_activity"
             generic_ui = "unknown_ui" in request.skill_offer
-            ui_bound = (_page_budget.scaled(_STARDEW_PROTECTED_INPUT_TOKEN_BOUND) if generic_ui and _protected_decision_context(
-                request.snapshot, trial_owner_authorized=self.trial_owner_authorized) else
-                _page_budget.scaled(_STARDEW_DECISION_INPUT_TOKEN_HARD_BOUND))
+            protected = _protected_decision_context(request.snapshot, trial_owner_authorized=self.trial_owner_authorized)
+            ui_bound = _page_budget.scaled(
+                (_STARDEW_PROTECTED_INPUT_TOKEN_BOUND if generic_ui and protected
+                 else _STARDEW_DECISION_INPUT_TOKEN_HARD_BOUND) - (512 if generic_ui else 0))
             def skill_fits(candidate):
                 if request.skill_offer.get("_game_text"):
                     from arti_runtime.game_text_delivery import inject
@@ -1582,14 +1584,15 @@ class ProductionDecisionProvider:
                     _decision_provider_extra_payload(play, messages=candidate))
                 return (len(encoded) <= min(_page_budget.scaled(_STARDEW_DECISION_REQUEST_MAX_BYTES),
                             request.skill_offer.get("render_budget", _page_budget.scaled(_STARDEW_DECISION_REQUEST_MAX_BYTES)))
-                        and _provider_input_token_upper_bound(encoded) <= ui_bound - (_page_budget.scaled(512) if generic_ui else 0)
+                        and _provider_input_token_upper_bound(encoded) <= ui_bound
+                        and not _protected_reserve_exceeded(request, encoded, self.trial_owner_authorized)
                         and _skill_prompt_token_estimate(encoded) <= _page_budget.scaled(_STARDEW_DECISION_INPUT_TOKEN_RESERVE))
             # ADR 41: preflight, provider start and reply validation render the SAME UI
             # request. Recomputing its page search can consume the native decision lease.
             # Exact presentation inputs key this one-request memo; motor fences stay live.
             # ADR 102 (a47: 4.8 s, three times before each provider call): a skill page takes the same memo.
             render_key = json.dumps([request.skill_offer, request.request_nonce, request.goal_id,
-                request.goal_revision, request.context_ref, request.reason, play, ui_bound,
+                request.goal_revision, request.context_ref, request.reason, play, ui_bound, protected,
                 self.policy.model, _page_budget.for_request(request).telemetry()], sort_keys=True, ensure_ascii=True, separators=(",", ":"))
             cached = getattr(self, "_ui_render_cache", None)
             if cached is not None and cached[0] == render_key:
@@ -1611,6 +1614,17 @@ class ProductionDecisionProvider:
                 whole_measure=lambda ms: _skills.encoded_render_bytes(ms)
                     + len(json.dumps(self.policy.model, ensure_ascii=True))
                     - len(json.dumps(STARDEW_DECISION_MODEL, ensure_ascii=True)))
+            if protected and generic_ui and not skill_fits(messages):
+                from arti_runtime.page_fact_selection import PageOffer
+                if (isinstance(render_request.skill_offer, PageOffer)
+                        and "unknown_ui" in render_request.skill_offer.source):
+                    # The selected page treats the native menu overview as its floor.
+                    # Use the existing menu pager to trim that floor and keep its controls.
+                    compact = dict(render_request.skill_offer.source,
+                                   render_budget=request.skill_offer.get("render_budget", _page_budget.ACTIVE.get().guard))
+                    compact.pop("_game_text", None)
+                    messages = _skills.render_skill_messages(
+                        _skills.replace_offer(render_request, compact), skill_fits, metrics=metrics)
             if request.skill_offer.get("_game_text"):
                 from arti_runtime.game_text_delivery import inject
                 messages = inject(messages, request.skill_offer["_game_text"])
@@ -6147,16 +6161,28 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
             facts["context_generation"], rec.player_id, rec.screen_id,
             facts["location_id"], facts["ui_revision"])
 
+    def _festival_map_size(self, pin):
+        rec = self._obs.get(pin.player_id, "scene.current_location") if pin is not None else None
+        if (rec is None or not rec.available or rec.stale or rec.requires_resync
+                or rec.session_id != pin.observation_session_id or rec.screen_id != pin.screen_id):
+            return 0, 0
+        # The temporary event map can be a local shadow. Its layer dimensions
+        # come from the farmer's own map and are static for the bound location.
+        return interact._location_size(rec.facts, pin.location)
+
     def _festival_exit(self, pin):
         """fix55A (ADR 77): interact.festival_exit from the same pinned event offer, nav grid and scene size."""
         try:
             offer = self._event_movement_offer(pin.player_id) if pin is not None else None
             if offer is None or offer.get("is_festival") is not True:
                 return None
+            from arti_stardew_event_control import festival_leave_chosen
+            run = self._skill_move_run(self._active)
+            if not festival_leave_chosen(run, offer):
+                return None
             motor = self._state.latest(pin.player_id)
             here = getattr(motor, "tile", None)
-            rec = self._obs.get(pin.player_id, "scene.current_location")
-            width, height = interact._location_size(getattr(rec, "facts", None) or {}, pin.location)
+            width, height = self._festival_map_size(pin)
             return interact.festival_exit(offer, self._nav_grid(pin), here, width, height)
         except Exception:  # noqa: BLE001 - no fact is the old behaviour (exit_not_offered)
             return None
@@ -10097,6 +10123,14 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
                     nonlocal submitted
                     if approach or self._goal_route_owns(goal) or request.snapshot.event_movement is not None:
                         _, fresh = self._move_precheck(request, folder, acquired=True)
+                        movement = request.snapshot.event_movement or {}
+                        if movement.get("is_festival") is True:
+                            from arti_stardew_event_control import festival_leave_chosen, festival_step_target, festival_walk_target
+                            run = self._skill_move_run(goal)
+                            target = festival_step_target(fresh.tile, args["direction"])
+                            if (not festival_leave_chosen(run, movement)
+                                    and not festival_walk_target(target, self._festival_map_size(pin), here=fresh.tile)):
+                                raise ValueError("festival_edge_requires_leave_choice")
                         route_reason = self._goal_route_step_reason(goal, pin, fresh, args)
                         if route_reason is not None:
                             raise ValueError(route_reason)

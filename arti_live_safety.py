@@ -2,6 +2,7 @@
 from __future__ import annotations
 import re
 from contextvars import ContextVar
+from contextlib import contextmanager
 import threading
 import time
 
@@ -80,6 +81,18 @@ class SpeechControl:
     def allows(self, epoch: int | None=None) -> bool:
         with self._lock:
             return not self.held and (epoch is None or epoch==self.epoch)
+
+    def interrupt(self, *, hold=False):
+        """Invalidate work already dispatched by an explicit operator stop."""
+        with self._lock:
+            self.epoch += 1
+            self.held = self.held or hold
+
+    @contextmanager
+    def retaining(self, epoch):
+        """A stop either prevents this retry or clears it after it is queued."""
+        with self._lock:
+            yield self.allows(epoch)
 
 speech_turn_epoch = ContextVar("speech_turn_epoch", default=None)
 speech_control=SpeechControl()

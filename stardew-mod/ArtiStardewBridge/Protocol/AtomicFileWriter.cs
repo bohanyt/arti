@@ -19,13 +19,15 @@ public static partial class AtomicFileWriter
 
     public readonly record struct Result(bool Ok, int Tries, Exception? Error);
 
-    public static Result TryWrite(string target, string content, Action<int>? sleep = null, bool flushToDisk = false, bool overwrite = true)
+    public static Result TryWrite(string target, string content, Action<int>? sleep = null, bool flushToDisk = false,
+        bool overwrite = true, bool retry = true)
     {
         string temp = target + "." + Guid.NewGuid().ToString("N") + ".tmp";
         Exception? last = null;
         int tries = 0;
         bool tempReady = false;
-        for (int attempt = 1; attempt <= Attempts; attempt++)
+        int limit = retry ? Attempts : 1;
+        for (int attempt = 1; attempt <= limit; attempt++)
         {
             tries = attempt;
             try
@@ -44,7 +46,7 @@ public static partial class AtomicFileWriter
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 last = ex;
-                if (attempt < Attempts)
+                if (attempt < limit)
                 {
                     try { (sleep ?? Thread.Sleep)(RetryDelayMs); } catch { }
                 }

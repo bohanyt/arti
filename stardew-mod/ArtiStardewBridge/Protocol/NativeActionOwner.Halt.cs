@@ -148,6 +148,8 @@ public sealed partial class NativeActionOwner
         // HB-H8: stat on the game thread, including files created after the poll snapshot.
         if (new[] { "stop.json", "stop_all.json" }.Any(n => File.Exists(Path.Combine(this.haltFolder, n))))
         { this.NoteHalt("rearm_waiting_stop_files"); return; }
+        // A watchdog token names every stop its Python gate read; each is stat'ed here, in the same tick.
+        if (GuardsBlock(token) is { } held) { this.NoteHalt(held); return; }
         var rearmed = Copy(this.haltRecord!).AsObject(); rearmed["state"] = "rearmed";
         rearmed["rearmed"] = new JsonObject { ["halt_seq"] = Copy(token["halt_seq"]!), ["token_sha256"] = Hash(Encoding.UTF8.GetBytes(raw)), ["ms"] = nowMs };
         if (!WriteHaltFile(Path.Combine(this.haltFolder, "halt.json"), rearmed)) return;
@@ -155,6 +157,38 @@ public sealed partial class NativeActionOwner
         try { File.Delete(Path.Combine(this.haltFolder, "rearm.json")); } catch (Exception e) when (RecordError(e)) { }
         this.clearSeq = snap.Seq;
         this.DisarmFenced(true); this.ClearStopLatch(); // persistence precedes memory clear
+    }
+
+    /// <summary>
+    /// Why a token's <c>stop_guards</c> keep the latch, or null. A token without the list is the owner's
+    /// manual re-arm and keeps today's check (the inbox stop files only). Every guard must be a fully qualified path
+    /// (else <c>rearm_token_mismatch</c>); any guard that exists now keeps the latch (<c>rearm_waiting_stop_files</c>).
+    /// Plain loops and named static methods only: no closure in the halt consumption path (IL rows).
+    /// </summary>
+    internal static string? GuardsBlock(JsonObject token)
+    {
+        if (token["stop_guards"] is not JsonArray guards) return null;
+        foreach (JsonNode? guard in guards)
+            if (GuardPath(guard) is not { } path || !Path.IsPathFullyQualified(path)) return "rearm_token_mismatch";
+        foreach (JsonNode? guard in guards)
+            if (GuardPresent(GuardPath(guard)!)) return "rearm_waiting_stop_files";
+        return null;
+    }
+
+    static string? GuardPath(JsonNode? guard)
+    {
+        if (guard is JsonValue value && value.TryGetValue(out string? path)) return path;
+        return null;
+    }
+
+    /// <summary>Existence counts, never content: a file of zero bytes or a directory is present. Only a missing file or a
+    /// missing directory reads as absent; any other failure to stat (a sharing or permission fault, a bad path) is present.</summary>
+    internal static bool GuardPresent(string path)
+    {
+        try { File.GetAttributes(path); return true; }
+        catch (FileNotFoundException) { return false; }
+        catch (DirectoryNotFoundException) { return false; }
+        catch (Exception) { return true; }
     }
 
     static bool WriteHaltFile(string path, JsonObject value)

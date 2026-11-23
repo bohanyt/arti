@@ -64,6 +64,7 @@ internal sealed record FishReflexOutcome(string RequestId, string Verdict, bool 
 internal sealed class FishingReflexRunner
 {
     public const int FinishBudgetTicks = 300;       // release proof + settle after the verdict (5 s)
+    internal const int FinishNativeExitGraceTicks = 60;
 
     private readonly IFishingGame game;
     private readonly Func<BackgroundMoveRuntime?> runtime;
@@ -107,6 +108,7 @@ internal sealed class FishingReflexRunner
             FishPhase.Bar or FishPhase.Landing => "landing", FishPhase.CatchMenu or FishPhase.Done => "done", _ => "cast" } };
     private Func<bool>? festivalScope;
     private Func<int>? festivalScore;
+    private Func<bool>? festivalCleanupScope;
     private int startFestivalScore;
 
     public FishingReflexRunner(IFishingGame game, Func<BackgroundMoveRuntime?> runtime, Func<bool> leaseHeld, Func<bool> stopLatched)
@@ -128,7 +130,8 @@ internal sealed class FishingReflexRunner
     public int NeutralWrites { get; private set; }
 
     /// <summary>Start one reflex for an admitted request (the caller ran FishReflexAdmission + ReflexPadAdmission).</summary>
-    public void Start(MenuStepCommandRequest req, FishReflexArgs a, Func<bool>? festivalScope = null, Func<int>? festivalScore = null)
+    public void Start(MenuStepCommandRequest req, FishReflexArgs a, Func<bool>? festivalScope = null, Func<int>? festivalScore = null,
+        Func<bool>? festivalCleanupScope = null)
     {
         if (this.Active)
             throw new InvalidOperationException("fishing reflex already active");
@@ -139,6 +142,7 @@ internal sealed class FishingReflexRunner
         this.args = a;
         this.festivalScope = festivalScope;
         this.festivalScore = festivalScore;
+        this.festivalCleanupScope = festivalCleanupScope;
         this.startFestivalScore = festivalScore?.Invoke() ?? 0;
         this.machine = new FishingReflexMachine(a, festivalScope is null ? null : BarControllerTuning.Festival);
         this.capturedBar = null;
@@ -253,6 +257,14 @@ internal sealed class FishingReflexRunner
         bool cleanup = FishPressCleanup.Confirmed(terminal.Hold?.Outcome.CleanupConfirmed == true,
             issued, terminal.Hold?.Facts?.ReleaseProved == true, h, this.Phase,
             this.verdict == ReflexContracts.FishCaught, terminal.Label);
+        // Expiry can end the native effect before R/N callbacks. The move runtime
+        // can still prove Suppress, exact latch restoration and neutral movement.
+        if (!cleanup && this.festivalCleanupScope?.Invoke() == true
+            && (terminal.Label == "NOT_COMPLETED:RELEASED_EARLY:" + BackgroundMoveRuntime.FestivalTimerRelease
+                || terminal.Label == "RELEASED_BEFORE_LATCH:" + BackgroundMoveRuntime.FestivalTimerRelease)
+            && (!issued || terminal.Hold?.Facts?.ReleaseProved == true)
+            && this.runtime() is { FestivalReleaseConfirmed: true, PressOverrideOutstanding: false })
+            cleanup = true;
         this.releasesProved &= cleanup;
         this.padFault = h > 0 && cleanup ? null : terminal.Label;
         this.game.Log($"REFLEX_FISH press_terminal kind={terminal.Kind} label={terminal.Label} h={h} issued={issued} "
@@ -347,6 +359,7 @@ internal sealed class FishingReflexRunner
 
     private void EndController(string reason)
     {
+        if (!this.Active || this.outcome is not null) return;
         if (reason.StartsWith("save:", StringComparison.Ordinal)) { this.AbortForSave(reason[5..]); return; }
         this.runtime()?.NeutralizeController(reason);
         this.ForceNeutral(reason);
@@ -561,12 +574,17 @@ internal sealed class FishingReflexRunner
     private bool SameCleanupBinding => this.farmer is not null && this.tool is not null
         && ReferenceEquals(this.farmer, this.game.Farmer) && ReferenceEquals(this.tool, this.game.Tool)
         && this.startLocation == this.game.Location
-        && (!this.game.EventUp || this.festivalScope?.Invoke() == true);
+        && (!this.game.EventUp || (this.festivalCleanupScope ?? this.festivalScope)?.Invoke() == true);
     private bool CatchMenuPending => this.SameCleanupBinding && this.capturedCatchMenu is not null
         && this.game.MenuKind(out object? menu) == FishMenuKind.ItemGrab
         && ReferenceEquals(menu, this.capturedCatchMenu);
     private bool FarmerUsable => !this.game.Rod.UsingTool && this.game.CanMove
         && this.game.MenuKind(out _) == FishMenuKind.None;
+
+    // The native result script may hold movement or open dialogue after it has
+    // already reset our rod. Read its idle state without touching that receiver.
+    private bool FestivalRodIdle => this.festivalCleanupScope?.Invoke() == true && this.festivalScope?.Invoke() == false
+        && !this.game.Rod.UsingTool && FishLineRetrieve.Decide(this.game.Rod, this.game.MenuKind(out _)) == FishLineRetrieve.Idle;
 
     /// <summary>FIXB15 D-B13-6: an aborted reflex never ends with the line in the water (bounded by the finish budget).</summary>
     private bool LineSettled()
@@ -575,7 +593,7 @@ internal sealed class FishingReflexRunner
         if (this.foreignCleanup || !this.SameCleanupBinding)
             return true; // report unconfirmed; never touch a foreign receiver/farmer/tool
         if (this.game.Tick <= this.cleanupWriteTick) return false;
-        if (this.lineSettled)
+        if (this.lineSettled || this.FestivalRodIdle)
             return true;
         if (!FishLineRetrieve.AppliesTo(this.verdict))
             return this.FarmerUsable;
@@ -617,7 +635,8 @@ internal sealed class FishingReflexRunner
         if (settled)
         {
             this.Complete(cleanup: this.releasesProved && rt?.PressOverrideOutstanding != true
-                && this.SameCleanupBinding && (this.FarmerUsable || this.CatchMenuPending) && !this.foreignCleanup);
+                && this.SameCleanupBinding && (this.FestivalRodIdle
+                    || !this.foreignCleanup && (this.FarmerUsable || this.CatchMenuPending)));
             return;
         }
         if (this.game.Tick - this.verdictTick > FinishBudgetTicks)
@@ -626,7 +645,7 @@ internal sealed class FishingReflexRunner
             // No input, reward, question response, or mutation replay is authorized here.
             if (!this.exitIssued && !this.pressPending && rt?.Busy != true && this.TryEndCast())
                 return;
-            if (this.exitIssued && this.game.Tick - this.verdictTick <= FinishBudgetTicks + 60)
+            if (this.exitIssued && this.game.Tick - this.verdictTick <= FinishBudgetTicks + FinishNativeExitGraceTicks)
                 return;
             this.game.Log($"REFLEX_FISH finish_unsettled pending={this.pressPending} busy={rt?.Busy} line_settled={line}", warn: true);
             this.Complete(cleanup: false);

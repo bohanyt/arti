@@ -134,6 +134,85 @@ def test_vts_port_reaches_the_bridge_config(tmp_path):
     assert mabar.mabar_bridge_config(tmp_path / "r", vts=True, mic=1, vts_port=8001)["vts_api_port"] == 8001
 
 
+@pytest.fixture
+def backup_paths(tmp_path, monkeypatch):
+    appdata = tmp_path / "appdata"
+    saves, backups, run = appdata / "Saves", tmp_path / "backups", tmp_path / "run"
+    monkeypatch.setattr(mabar, "APPDATA", appdata)
+    monkeypatch.setattr(mabar, "BACKUPS", backups)
+    monkeypatch.setattr(mabar, "MOD", tmp_path / "mod")
+    monkeypatch.setattr(mabar, "PREP", tmp_path / "prep")
+    mabar.MOD.mkdir()
+    (mabar.MOD / "ArtiStardewBridge.dll").write_bytes(b"mod")
+    for name in ("Test_123", "Other_456"):
+        (saves / name).mkdir(parents=True)
+        (saves / name / "SaveGameInfo").write_bytes(name.encode())
+    (appdata / "startup_preferences").write_bytes(b"prefs")
+    return saves, run
+
+
+@pytest.mark.parametrize("selection", [[], ["--continue", "Test_123"], ["--farm", "Test_123"]])
+def test_backup_copies_only_the_selected_save(backup_paths, selection):
+    saves, run = backup_paths
+    assert mabar.main(["backup", "--run", str(run), *selection]) == 0
+    backup = Path(mabar.soak.read(run / "backup.json")["path"])
+    manifest = mabar.soak.read(backup / "MANIFEST.json")["sha256"]
+    assert (backup / "startup_preferences").read_bytes() == b"prefs"
+    assert manifest["startup_preferences"] == mabar.sha(backup / "startup_preferences")
+    if selection:
+        assert sorted(path.name for path in (backup / "Saves").iterdir()) == ["Test_123"]
+        assert manifest["Saves/Test_123"] == mabar.tree_manifest(saves / "Test_123")
+    else:
+        assert not (backup / "Saves").exists()
+
+
+def test_prepare_refuses_a_continued_save_that_wasnt_backed_up(backup_paths, monkeypatch):
+    _, run = backup_paths
+    assert mabar.main(["backup", "--run", str(run)]) == 0
+    monkeypatch.setattr(mabar, "processes", lambda: set())
+    monkeypatch.setattr(mabar, "free_gib", lambda: 20)
+    with pytest.raises(RuntimeError, match="backup --continue"):
+        mabar.main(["prepare", "--run", str(run), "--continue", "Test_123"])
+
+
+@pytest.mark.parametrize("actual_save,warning", [("Test_123", False), ("Other_456", True), (None, False)])
+def test_manual_play_logs_the_actual_unbacked_save(backup_paths, monkeypatch, actual_save, warning):
+    _, run = backup_paths
+    assert mabar.main(["backup", "--run", str(run), "--continue", "Test_123"]) == 0
+    mabar.PREP.mkdir()
+    mabar.soak.write(run / "trial-config.json", {"stardew_host_controller": "owner"})
+    mabar.soak.write(run / "continued.json", {"save": "Test_123"})
+    cycle = run / "runtime/live7/c1"
+
+    def fake_tool(run, script, args, name):
+        if name == "start-cycle":
+            cycle.mkdir(parents=True)
+            mabar.soak.write(cycle / "cycle_state.json", {"save_name": actual_save})
+
+    monkeypatch.setattr(mabar, "tool", fake_tool)
+    monkeypatch.setattr(mabar, "release_farmhand_focus", lambda run: True)
+    assert mabar.play_once(argparse.Namespace(run=run), cycle=cycle) == cycle
+    rows = [json.loads(line) for line in (run / "mabar.jsonl").read_text(encoding="utf-8").splitlines()]
+    gaps = [row["save"] for row in rows if row["event"] == "host_save_not_backed_up"]
+    assert gaps == ([actual_save] if warning else [])
+
+
+def test_helper_host_logs_an_unbacked_save_and_launches(backup_paths, monkeypatch):
+    _, run = backup_paths
+    assert mabar.main(["backup", "--run", str(run), "--continue", "Test_123"]) == 0
+    monkeypatch.setattr(mabar, "processes", lambda: set())
+    monkeypatch.setattr(mabar.rehearse, "read_booking", lambda spec: {})
+    monkeypatch.setattr(mabar, "install_host_helper", lambda run, booking, save: {
+        "save_folder": save, "farmhand_name": "Arti",
+    })
+    calls = []
+    monkeypatch.setattr(mabar, "tool", lambda run, script, args, name: calls.append(name))
+    assert mabar.main(["host", "--run", str(run), "--helper", "--continue", "Other_456"]) == 0
+    rows = [json.loads(line) for line in (run / "mabar.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [row["save"] for row in rows if row["event"] == "host_save_not_backed_up"] == ["Other_456"]
+    assert calls == ["launch-host"]
+
+
 def test_restore_mirrors_the_backup_and_moves_additions_aside(tmp_path):
     import hashlib
     h = lambda b: hashlib.sha256(b).hexdigest()

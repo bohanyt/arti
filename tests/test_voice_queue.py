@@ -28,6 +28,21 @@ def test_priority_owner_mic_before_yt():
     assert item.trigger_type == "mic"
 
 
+def test_overdue_chat_orders_viewers_behind_owner_and_donation():
+    q = vq.VoiceTriggerQueue(max_yt=3, play_active=lambda: True)
+    now = time.time()
+    arrivals = [
+        vq.QueuedVoiceTrigger("newer", "yt_chat", "A", now - 75),
+        vq.QueuedVoiceTrigger("oldest", "yt_chat", "B", now - 90),
+        vq.QueuedVoiceTrigger("game", "game", enqueued_at=now - 100),
+        vq.QueuedVoiceTrigger("paid", "donation"),
+        vq.QueuedVoiceTrigger("owner", "mic"),
+    ]
+    for item in arrivals:
+        assert q.enqueue(item)
+    assert [q.dequeue().text for _ in arrivals] == ["owner", "paid", "oldest", "newer", "game"]
+
+
 def test_per_viewer_dedup_replaces_old():
     q = vq.VoiceTriggerQueue(max_yt=2, ttl_sec=60.0)
     q.enqueue(vq.QueuedVoiceTrigger("old", trigger_type="yt_chat", viewer_name="Alice"))

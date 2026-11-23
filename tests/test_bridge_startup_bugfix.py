@@ -991,6 +991,8 @@ def test_save_config_writes_config_local_not_source(tmp_path, monkeypatch):
 
     src_path = BRIDGE_FILE
     before = src_path.read_bytes()
+    wizard_path = REPO_ROOT / "arti_runtime" / "startup_wizard.py"
+    wizard_before = wizard_path.read_bytes()
 
     local = tmp_path / "config_local.json"
     local.write_text(
@@ -1011,17 +1013,19 @@ def test_save_config_writes_config_local_not_source(tmp_path, monkeypatch):
     assert src_path.read_bytes() == before, (
         "source bridge HARAM disentuh — inilah akar state live bocor ke commit"
     )
+    assert wizard_path.read_bytes() == wizard_before
     assert not list(tmp_path.glob("config_local.json.tmp*")), (
         "temp (per-PID, anti dua-bridge) harus di-rename bersih"
     )
 
 
 def test_save_config_never_rewrites_own_source_in_code():
-    src = BRIDGE_FILE.read_text(encoding="utf-8")
-    i = src.index("def _save_config_to_file")
-    # Sampai batas fungsi (blok __main__ persis di bawahnya) — jendela fixed
-    # 2200 char sempat menyerempet string prompt di luar fungsi (false-pass).
-    body = src[i:src.index('\nif __name__', i)]
+    import ast
+
+    src = (REPO_ROOT / "arti_runtime" / "startup_wizard.py").read_text(encoding="utf-8")
+    saver = next(node for node in ast.parse(src).body
+                 if isinstance(node, ast.FunctionDef) and node.name == "_save_config_to_file")
+    body = ast.get_source_segment(src, saver)
     # Pola KODE, bukan teks: docstring memang menjelaskan sejarahnya.
     assert '"arti_bridge.py"' not in body, (
         "wizard tidak boleh membuka/menulis source-nya sendiri (drift ke git)"

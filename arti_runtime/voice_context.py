@@ -405,6 +405,54 @@ def with_seed(prompt_content: str, seed: dict) -> VoicePrompt:
 
 
 TRIM_SUFFIX = "\n...(system dipangkas)"
+# Today's date block is rebuilt each turn. Keep its room independent of its actual length.
+TODAY_RESERVE_CHARS = 512
+GAME_STATUS_BLOCKS = ("KINI", "STARDEW STATUS", "NIATKU", "PLAN_DATES", "NATIVE_FACTS")
+MEMORY_BLOCKS = ("MEMORI TERBARU", "MEMORI JANGKA PANJANG")
+
+
+def _fit_system_blocks(blocks: dict[str, str], *, limit: int, priority, clip=False) -> str:
+    """Spend characters in priority order, then render the retained blocks in their original order."""
+    kept = {}
+    skipped = []
+    remaining = limit
+    for name in sorted(blocks, key=lambda name: priority(name.partition("#")[0])):
+        body = blocks[name]
+        cost = len(body) + 2
+        if cost <= remaining:
+            kept[name] = body
+            remaining -= cost
+        else:
+            skipped.append(name)
+    if clip and skipped and remaining > len(TRIM_SUFFIX) + 2:
+        name = skipped[0]
+        kept[name] = blocks[name][:remaining - len(TRIM_SUFFIX) - 2].rstrip() + TRIM_SUFFIX
+    return "\n\n".join(kept[name] for name in blocks if name in kept)
+
+
+def bounded_system_prompt(stable: str, tail: str, cap: int) -> tuple[str, str]:
+    """Fit the voice base before enrichment. Game facts can consume only the room left by stable and today's notes."""
+    cap = max(0, cap)
+    stable_limit = cap - min(TODAY_RESERVE_CHARS, cap // 2)
+    if len(stable) > stable_limit:
+        def stable_priority(name):
+            if name in MEMORY_BLOCKS:
+                return 0
+            return 2 if name == "JIWA ARTI" else 1
+
+        stable = _fit_system_blocks(split_now_blocks(stable), limit=stable_limit,
+                                    priority=stable_priority, clip=True)
+    if len(stable) + len(tail) <= cap:
+        return stable, stable + tail
+
+    def tail_priority(name):
+        if name == "HARI INI":
+            return 0
+        # Keep short current facts before the detailed native snapshot. Only whole game blocks fit.
+        return 2 + GAME_STATUS_BLOCKS.index(name) if name in GAME_STATUS_BLOCKS else 1
+
+    turn_context = _fit_system_blocks(split_now_blocks(tail), limit=cap - len(stable), priority=tail_priority)
+    return stable, stable + ("\n\n" + turn_context if turn_context else "")
 
 
 def stable_as_sent(stable: str, system: str, *, block_markers=(), remove_block=None) -> str:

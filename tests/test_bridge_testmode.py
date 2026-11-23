@@ -38,6 +38,11 @@ def test_test_mode_entry_runs_before_the_live_main_block():
     assert isinstance(first, ast.If) and "bridge_test_mode" in ast.unparse(first.test)
     assert "arti_bridge_testmode.main" in ast.unparse(first) and "sys.exit" in ast.unparse(first)
     assert "startup_wizard" not in ast.unparse(first) and "startup_wizard" in ast.unparse(mains[0])
+    wizard = next(node for node in tree.body
+                  if isinstance(node, ast.FunctionDef) and node.name == "startup_wizard")
+    delegation = wizard.body[-1]
+    assert isinstance(delegation, ast.Return) and isinstance(delegation.value, ast.Call)
+    assert ast.unparse(delegation.value.func) == "_startup_wizard.startup_wizard"
 
 
 def test_env_test_config_replaces_config_local(tmp_path, monkeypatch):

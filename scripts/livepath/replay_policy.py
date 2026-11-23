@@ -7,6 +7,7 @@ Missing/changed seams fail loudly. Device, history and motor effects are inert.
 from __future__ import annotations
 
 import ast
+from dataclasses import replace
 from functools import lru_cache
 from pathlib import Path
 import queue
@@ -14,14 +15,16 @@ import threading
 from types import SimpleNamespace as NS
 
 import arti_voice_queue
+from arti_live_safety import speech_turn_epoch
 from arti_screen_privacy import STREAMER_TRIGGERS
 from arti_wake import is_arti_wake_call
 from arti_runtime import attention_bridge, attention_desk, chat_media, chat_rotation, mic_priority, ssn_chat, streamer_voice
+from arti_runtime.asr_text import _ASR_LITERAL_PHANTOMS
 
 FUNCTIONS = (
     '_normalize_voice_trigger', '_note_owner_speech', 'clear_trigger_queue',
     '_live7_game_session_stopped', '_live7_game_lane_trigger', '_speech_trigger_expired',
-    '_last_reply_end_ts', '_mic_pasif_owner_marked', '_drop_waiting_unmarked_mic',
+    '_last_reply_end_ts', '_mic_pasif_owner_marked', '_passive_owner_reply_required', '_drop_waiting_unmarked_mic',
     'queue_voice_trigger', '_dequeue_buffered_trigger_if_brain_ready', '_voice_reply_superseded',
     '_game_reaction_expired', '_reaksi_penting', '_game_trigger_waiting',
     '_own_play_can_wait', '_own_play_min_gap', '_queued_trigger_types', '_own_play_held_back', '_own_play_lane_busy',
@@ -29,8 +32,10 @@ FUNCTIONS = (
     '_merge_waiting_yt_chat',
     '_make_voice_trigger_buffer', '_admit_quiet_viewer_chat', '_requeue_quiet_chat',
     '_retain_chat_trigger', 'is_bot_viewer',
+    '_enqueue_legacy_voice', '_capture_allows_turn', '_viewer_yields_to_owner',
+    '_viewer_ptt_gate_closed', '_requeue_quiet_chat_current',
 )
-CONSTANTS = ('_GAME_SESSION_LANE', '_OWN_PLAY_YIELD_KINDS', 'QUIET_CHAT_MAX_REQUEUES')
+CONSTANTS = ('_GAME_SESSION_LANE', '_OWN_PLAY_YIELD_KINDS', 'QUIET_CHAT_MAX_REQUEUES', 'VIEWER_PTT_GATE_MAX_SEC')
 
 
 @lru_cache(maxsize=1)
@@ -72,6 +77,9 @@ def bind(bridge, trigger_class):
         _note_screen_privacy=inert, _note_streamer_text_for_afk=inert,
         _note_stardew_owner_ingress=inert, _discard_stardew_capture=inert,
         request_asr_stream_restart=inert, add_to_history=inert, _mc_runner_active=lambda: False,
+        _game_live=lambda: False,
+        speech_turn_epoch=speech_turn_epoch, _ptt_capture_opened_at=None,
+        replace=replace, _ASR_LITERAL_PHANTOMS=_ASR_LITERAL_PHANTOMS,
     )
     bridge._owner_speaking_now = lambda: bool(bridge.hotkey_active or
         attention_bridge.desk(bridge).owner_speaking(bridge.time.time()))

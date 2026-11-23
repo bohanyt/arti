@@ -160,6 +160,53 @@ def test_whisper_vocabulary_dropped_bleed_words():
         assert bleed not in vocab
 
 
+@pytest.mark.parametrize("text", ["Arti, Bohan, Stardew Valley.", "ARTI! Bohan…", "Bohan, Arti.",
+                                 "Terima kasih."])
+def test_prompt_echo_and_literal_phantom_do_not_count_as_owner_lines(passive, monkeypatch, text):
+    _gate_on(monkeypatch)
+    monkeypatch.setitem(bridge.CONFIG, "mic_priority_mark", True)
+    revision = bridge.speech_control.owner_revision
+    assert bridge._handle_passive_ptt_transcript(text, 2.0) is False
+    passive.history.assert_not_called()
+    assert bridge.speech_control.owner_revision == revision
+    assert not _queued()
+
+
+@pytest.mark.parametrize("text", ["Arti!", "Stardew Valley.", "Arti, kenapa kamu main Stardew Valley?"])
+def test_prompt_echo_keeps_a_real_call_title_or_question(text):
+    assert not gate.is_prompt_echo(text, arti_voice_pipeline.MIC_ASR_VOCABULARY)
+
+
+def test_short_addressed_game_question_passes_passive_ptt_and_typed(passive, monkeypatch):
+    _gate_on(monkeypatch)
+    monkeypatch.setitem(bridge.CONFIG, "mic_priority_mark", True)
+    question = "Arti, Stardew Valley?"
+    assert bridge._handle_passive_ptt_transcript(question, 2.0)
+    bridge.voice_trigger_queue.get_nowait()
+    assert bridge._complete_stardew_asr(question, None, 2.0, {})
+    bridge.voice_trigger_queue.get_nowait()
+    assert bridge.queue_voice_trigger(question, "mic")
+    assert _queued()[0].text == question
+
+
+def test_deliberate_capture_does_not_use_the_vocabulary_subset(passive, monkeypatch):
+    _gate_on(monkeypatch)
+    monkeypatch.setattr(bridge, "summarizer_queue", queue.Queue())
+    echo = "Arti, Bohan, Stardew Valley."
+    assert not bridge._complete_stardew_asr(echo, None, 2.0, {})
+    assert not bridge.queue_voice_trigger(echo, "wake_word")
+    assert not bridge.queue_voice_trigger(echo, "mic")
+    assert bridge._complete_stardew_asr("Bohan, Arti.", None, 2.0, {})
+    assert not bridge._complete_stardew_asr("Terima kasih.", None, 2.0, {})
+
+
+@pytest.mark.parametrize("question", ["Nama Arti?", "Nama Arti？"])
+def test_passive_literal_words_with_question_mark_are_kept(passive, monkeypatch, question):
+    _gate_on(monkeypatch)
+    assert bridge._handle_passive_ptt_transcript(question, 2.0)
+    assert _queued()[0].text == question
+
+
 def test_mabar_turns_hygiene_on(tmp_path):
     from scripts.livepath import mabar
     cfg = mabar.mabar_bridge_config(tmp_path / "r", vts=False, mic=1, live={})

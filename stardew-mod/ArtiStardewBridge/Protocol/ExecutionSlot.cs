@@ -273,6 +273,20 @@ public sealed partial class ExecutionSlot
         return true;
     }
 
+    /// <summary>Admit one native festival route, ice approach step or cast under the festival lease.
+    /// The mod neutralizes each attempt as it ends, with a separate receipt and no inbox journal row.</summary>
+    public const string FestivalClient = "festival_reflex";
+
+    public bool TryAdmitFestival(MenuStepCommandRequest request, NativeActionOwner owner)
+    {
+        if (!owner.IsArmed || owner.StopLatched || owner.RecordFaulted || owner.IsReleasing || owner.ReleaseRequested
+            || owner.BoundRuntimeId != request.RuntimeInstanceId || owner.OwnerId != request.OwnerId
+            || owner.Generation != request.Generation) return false;
+        if (!this.TryAdmitValidated(request, false, out _, null, FestivalClient)) return false;
+        this.admittedOwner = owner;
+        return true;
+    }
+
     /// <summary>ADR 180 (a72 SMAPI 11229-11231 UNSUPPORTED_PRIMITIVE): the guard's request is the same input_once
     /// reflex_combat primitive the runtime-requested leg uses (BackgroundControlInputHooks.TryArmCore accepts a reflex step
     /// only for IsReflexCombat), under the core lease identity the press path checks (LeaseValidFor: owner id, generation,
@@ -335,7 +349,9 @@ public sealed record ActiveAttempt(MenuStepCommandRequest Request)
     public AttemptValidity? Validity { get; init; }
     public string Client { get; init; } = "inbox";
     internal bool ReadOnly => this.Request.Intent?.GetProperty("verb").GetString() == "observe";
-    internal bool UsesLease => this.Client is not ("progression" or ExecutionSlot.BodyGuardClient) && !this.ReadOnly;
+    // Each festival attempt releases the slot while the timed contest keeps its lease.
+    internal bool UsesLease => this.Client is not ("progression" or ExecutionSlot.BodyGuardClient or ExecutionSlot.FestivalClient)
+        && !this.ReadOnly;
     public string AttemptId => this.Request.VerbEnvelope?.GetProperty("attempt_id").GetString() ?? this.Request.RequestId;
 }
 

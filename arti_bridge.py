@@ -4,6 +4,7 @@ import os
 import uuid
 from pathlib import Path
 import sys
+import unicodedata
 from datetime import datetime
 from importlib.metadata import PackageNotFoundError, version
 
@@ -28,7 +29,8 @@ from arti_audio_buffer import AudioChunkQueue, UtteranceBuffer
 import threading
 from contextlib import contextmanager, ExitStack
 import traceback
-from dataclasses import dataclass
+from contextvars import ContextVar
+from dataclasses import dataclass, replace
 import time
 import collections
 import random
@@ -88,6 +90,7 @@ import arti_openrouter
 import arti_reply_policy
 import arti_voice_queue
 from arti_runtime import attention_desk, attention_bridge
+from arti_runtime.host_story import playback_story, playback_current as host_story_playback_current
 from arti_runtime import streamer_voice
 from arti_runtime import mic_hygiene
 from arti_runtime import live_rules
@@ -1154,7 +1157,7 @@ CONFIG = {
     "video_enabled": False,
     "video_max_duration_sec": 600,      # gate link chat/console (mediashare sudah pendek)
     "video_qa_window_sec": 300.0,       # jendela tanya-jawab watch-party pasca reaksi
-    "video_rate_limit_sec": 300.0,      # per viewer (chat/streamlabs; saweria bebas)
+    "video_rate_limit_sec": 300.0,      # per viewer (chat/streamlabs; owner/saweria exempt)
     "video_queue_max": 3,
     "video_gemini_model": "gemini-3.5-flash-lite",  # second try: video_gemini_second_model (3.1)
     # Bench 2026-11-12: 3.5 median 3.8s / p90 4.8s on shorts; 20s live first-try timed out.
@@ -1573,6 +1576,9 @@ class VoiceTrigger:
     stardew_voice_epoch: int | None = None
     owner_marked: bool = True
     rotation_rank: int = 0
+    owner_reply_required: bool = False
+    ptt_generation: int | None = None
+    host_story_retry: bool = False
 
 
 def _normalize_voice_trigger(item) -> VoiceTrigger:
@@ -1592,6 +1598,9 @@ def _normalize_voice_trigger(item) -> VoiceTrigger:
             getattr(item, "stardew_voice_epoch", None),
             bool(getattr(item, "owner_marked", True)),
             int(getattr(item, "rotation_rank", 0) or 0),
+            bool(getattr(item, "owner_reply_required", False)),
+            getattr(item, "ptt_generation", None),
+            bool(getattr(item, "host_story_retry", False)),
         )
     if isinstance(item, tuple) and item:
         return VoiceTrigger(
@@ -1616,6 +1625,7 @@ def _make_voice_trigger_buffer():
         preserve_humans=bool(CONFIG.get("voice_queue_preserve_humans", False)),
         human_age=lambda created, now: (chat_media.holds.age(created, now)
                                       if CONFIG.get("media_watch_mode") else now - created),
+        play_active=lambda: _game_live(),
     )
 
 
@@ -1645,15 +1655,10 @@ def _merge_waiting_yt_chat(viewer, extra_line, *, merge_window=None, cap=chat_ro
                 continue
             if merge_window is not None and time.time() - item.queued_at > merge_window:
                 continue
-            n = item.text.count("\n— ") + 1
-            if cap is not None and n >= cap:
-                return True
-            new_n = n + 1
-            items[index] = VoiceTrigger(
-                chat_media.append_chat(item.text, extra, answer_required=answer_required), "yt_chat", viewer, item.queued_at,
-                item.turn_id, item.stardew_voice_epoch, item.owner_marked,
-                1 if new_n >= 3 else item.rotation_rank,
-            )
+            merged = arti_voice_queue.merged_viewer_text(item.text, extra, cap=cap, answer_required=answer_required)
+            items[index] = replace(
+                item, text=merged, viewer_name=None if isinstance(merged, arti_voice_queue.CombinedChat) else viewer,
+                rotation_rank=1 if item.text.count("\n— ") >= 1 else item.rotation_rank)
             return True
     return False
 
@@ -1766,14 +1771,11 @@ def _ptt_attention_pause() -> None:
 
     Owner 2026-10-24 (live): omongan Bohan TIDAK PERNAH memotong audio Arti
     yang sedang diputar. PTT ON tidak lagi set tts_stop_flag / sd.stop();
-    hanya perintah stop eksplisit (speech_control) yang memotong. PTT yang
-    ditekan di tengah giliran dicatat supaya auto-OFF di akhir giliran itu
-    tidak mematikan PTT yang baru dinyalakan.
+    hanya perintah stop eksplisit (speech_control) yang memotong.
     """
-    global _stardew_ptt_epoch, _ptt_last_speech_at, _ptt_on_mid_turn
+    global _stardew_ptt_epoch, _ptt_last_speech_at
     _ptt_last_speech_at = time.monotonic()
-    with _brain_busy_lock:
-        _ptt_on_mid_turn = bool(_brain_busy or tts_is_playing)
+    speech_control.note_owner_activity()
     _stardew_ptt_epoch = _note_stardew_owner_ingress("ptt", None)
     if "_note_stardew_bridge_trial_ptt_capture" in globals():
         _note_stardew_bridge_trial_ptt_capture()
@@ -1789,7 +1791,14 @@ def _ptt_attention_pause() -> None:
 
 
 _ptt_last_speech_at = 0.0
-_ptt_on_mid_turn = False  # PTT ON ditekan saat giliran berjalan (lihat _ptt_attention_pause).
+_ptt_capture_generation = 0
+_ptt_capture_opened_at = None
+VIEWER_PTT_GATE_MAX_SEC = 120.0
+
+
+def _viewer_ptt_gate_closed() -> bool:
+    opened_at = _ptt_capture_opened_at
+    return hotkey_active and (opened_at is None or time.monotonic() - opened_at < VIEWER_PTT_GATE_MAX_SEC)
 
 
 def _note_ptt_speech() -> None:
@@ -1800,18 +1809,42 @@ def _note_ptt_speech() -> None:
 
 def _maybe_auto_off_ptt() -> None:
     """Existing main-loop tick releases silent/rejected PTT captures."""
-    global hotkey_active
+    global hotkey_active, _ptt_capture_opened_at
     timeout = float(CONFIG.get("ptt_auto_off_sec", 60.0))
     if (not hotkey_active or timeout <= 0
             or time.monotonic() - _ptt_last_speech_at < timeout):
         return
     hotkey_active = False
+    _ptt_capture_opened_at = None
     _discard_stardew_capture(_stardew_ptt_epoch)
     _cancel_lamp_fallback()
     if main_event_loop and not main_event_loop.is_closed():
         asyncio.run_coroutine_threadsafe(vts.trigger_expression_state("default"), main_event_loop)
     start_idle_animation()
     print(f"[PTT] auto-off — {timeout:g}s tanpa speech capture; idle/proaktif aktif lagi.")
+
+
+def _finish_reply_ptt(trigger) -> None:
+    """Only the reply to the current deliberate capture can release it."""
+    global hotkey_active, _ptt_capture_opened_at
+    if trigger.trigger_type == "ptt":
+        with _sd_gerbang:
+            if (hotkey_active and not tts_stop_flag
+                    and getattr(trigger, "ptt_generation", None) == _ptt_capture_generation):
+                hotkey_active = False
+                _ptt_capture_opened_at = None
+
+
+def _toggle_owner_capture():
+    """Serialize PTT ON with the last gate before native playback starts."""
+    global hotkey_active, _ptt_capture_generation, _ptt_last_speech_at, _ptt_capture_opened_at
+    with _sd_gerbang:
+        hotkey_active = not hotkey_active
+        if hotkey_active:
+            _ptt_capture_generation += 1
+            _ptt_capture_opened_at = _ptt_last_speech_at = time.monotonic()
+        else:
+            _ptt_capture_opened_at = None
 
 
 _asr_ptt_cooldown_until = 0.0
@@ -1854,14 +1887,14 @@ def _note_owner_speech(text, trigger_type, viewer_name):
         speech_control.note_owner_activity()
         _farewell_quiet_until = 0.0
         if not CONFIG.get("voice_queue_preserve_humans", False):
-            clear_trigger_queue(keep_chat=True)
+            clear_trigger_queue(keep_chat=True, keep_addressed=True)
         return None
     command = speech_control.note(text, trigger_type, viewer_name)
     # Bohan bersuara lagi sesudah pamit = obrolan boleh lanjut; model menilai.
     _farewell_quiet_until = 0.0
     # Drop stale conversations, retaining paid/media receipts and motor epochs. Mabar keeps viewer chat
     # (owner 2026-11-10: never drop events); it waits behind the owner and her persona judges it.
-    clear_trigger_queue(keep_chat=bool(CONFIG.get("live_reply_chat_keep")))
+    clear_trigger_queue(stop=command == "stop", keep_chat=command == "resume", keep_addressed=command == "resume")
     tts_stop_flag = True
     if tts_is_playing or _reflex_playing:
         try:
@@ -1900,6 +1933,11 @@ def _remember_live_session_fact(fact):
 
 
 def _speech_trigger_expired(trigger):
+    host_context = getattr(trigger.text, "host_story_context", None)
+    if host_context is not None and not host_context.is_current():
+        return True
+    if getattr(trigger.text, "_host_story_guarded", False):
+        return not trigger.text.is_current()
     if _live7_game_lane_trigger(trigger) and _live7_game_session_stopped():
         return True
     if trigger.trigger_type == "own_play":
@@ -1915,6 +1953,8 @@ def _speech_trigger_expired(trigger):
         return False
     if speech_control.held:
         return True
+    if trigger.owner_reply_required or (trigger.trigger_type == "yt_chat" and _game_live()):
+        return False
     if trigger.trigger_type in ("yt_chat", "curious", "mic_pasif", "mic", "ptt", "wake_word"):
         age = time.time() - trigger.queued_at if trigger.queued_at else 0.0
         if CONFIG.get("media_watch_mode") and trigger.queued_at:
@@ -1951,6 +1991,17 @@ def _mic_pasif_owner_marked(text) -> bool:
     return bool(marked)
 
 
+def _passive_owner_reply_required(text) -> bool:
+    if not (CONFIG.get("mic_priority_mark") or CONFIG.get("voice_queue_preserve_humans")):
+        return False
+    if mic_priority.is_vocative(text) or (CONFIG.get("asr_address_names") and streamer_voice.addressed(text, CONFIG)):
+        return True
+    return (
+        (mic_priority.is_question(text) or mic_priority.is_request_to_her(text))
+        and not mic_priority.addressed_viewer(text, _yt_pernah_chat)
+    )
+
+
 def _drop_waiting_unmarked_mic() -> None:
     """At most one unmarked mic_pasif waits; the older line stays in history."""
     if CONFIG.get("voice_queue_enabled", False):
@@ -1970,10 +2021,12 @@ def _drop_waiting_unmarked_mic() -> None:
         voice_trigger_queue.put(item)
 
 
-def queue_voice_trigger(text, trigger_type="mic", viewer_name=None, *, asr_stages=None, stardew_voice_epoch=None, owner_marked=None, rotation_rank=0) -> bool:
+def queue_voice_trigger(text, trigger_type="mic", viewer_name=None, *, asr_stages=None, stardew_voice_epoch=None,
+                        owner_marked=None, rotation_rank=0, ptt_generation=None) -> bool:
     """Antrikan jawaban dan log trigger; True hanya jika trigger diterima."""
     global _pending_turn_id, _last_human_activity_ts, _last_streamer_speech_ts
-    if trigger_type in _GAME_SESSION_LANE and (_live7_game_session_stopped()
+    if trigger_type in _GAME_SESSION_LANE and (
+            (not text.is_current() if getattr(text, "_host_story_guarded", False) else _live7_game_session_stopped())
             or (CONFIG.get("media_watch_mode") and chat_media.watch_held(CONFIG, time.time()))):
         return False
     if trigger_type == "read_in_game":
@@ -1992,6 +2045,15 @@ def queue_voice_trigger(text, trigger_type="mic", viewer_name=None, *, asr_stage
     # never computes it. A caller that passes nothing keeps owner priority (today's behaviour).
     if owner_marked is None:
         owner_marked = True
+    direct_owner = viewer_name is None and trigger_type in arti_voice_queue.DIRECT_OWNER_KINDS
+    if direct_owner and str(text).strip() in _ASR_LITERAL_PHANTOMS:
+        if stardew_voice_epoch is not None:
+            _discard_stardew_capture(stardew_voice_epoch)
+        return False
+    owner_reply_required = viewer_name is None and (
+        (trigger_type == "mic_pasif" and _passive_owner_reply_required(text))
+        or (direct_owner and (mic_priority.is_vocative(text) or mic_priority.is_question(text))))
+    owner_marked = owner_marked or owner_reply_required
     unmarked_passive = (
         bool(CONFIG.get("mic_priority_mark"))
         and trigger_type == "mic_pasif"
@@ -2084,6 +2146,8 @@ def queue_voice_trigger(text, trigger_type="mic", viewer_name=None, *, asr_stage
         item = arti_voice_queue.QueuedVoiceTrigger(
             text=text, trigger_type=trigger_type, viewer_name=viewer_name,
             owner_marked=bool(owner_marked), rotation_rank=int(rotation_rank or 0),
+            owner_reply_required=owner_reply_required,
+            ptt_generation=ptt_generation,
         )
         item.stardew_voice_epoch = voice_epoch
         item.name_addressed = (viewer_name is None and trigger_type in ("mic", "mic_pasif", "wake_word")
@@ -2095,6 +2159,8 @@ def queue_voice_trigger(text, trigger_type="mic", viewer_name=None, *, asr_stage
             )
 
         if not voice_trigger_buffer.enqueue(item, prepare=_siapkan_item_buffer):
+            if voice_epoch is not None:
+                _discard_stardew_capture(voice_epoch)
             if trigger_type == "curious":
                 print("[Queue] Curious deferred — YT pending di antrian")
             return False
@@ -2115,12 +2181,12 @@ def queue_voice_trigger(text, trigger_type="mic", viewer_name=None, *, asr_stage
         who = viewer_name or "viewer"
         print(f"[YT Chat] Antri jawab {who} (VTS turn di main loop)")
     if not use_buffer:
-        voice_trigger_queue.put(
-            VoiceTrigger(
-                text, trigger_type, viewer_name, time.time(), _pending_turn_id, voice_epoch,
-                bool(owner_marked), int(rotation_rank or 0),
-            )
-        )
+        item = VoiceTrigger(text, trigger_type, viewer_name, time.time(), _pending_turn_id, voice_epoch,
+                            bool(owner_marked), int(rotation_rank or 0), owner_reply_required, ptt_generation)
+        if not _enqueue_legacy_voice(item):
+            if voice_epoch is not None:
+                _discard_stardew_capture(voice_epoch)
+            return False
     if CONFIG.get("rehearsal_parent_pid"):
         from scripts.livepath.bridge import turn_event
         turn_event("queued", item.turn_id if use_buffer else _pending_turn_id,
@@ -2204,15 +2270,13 @@ def get_categorized_history():
     return "\n".join(result) if result else "(Belum ada history)"
 
 
+# Keep the bridge signatures and pass the current config and dependencies at call time.
+from arti_runtime import prompt_blocks  # noqa: E402
+
+
 def build_origin_context(config: dict | None = None) -> str:
     """Fakta kanon debut + pointer arsip — selalu inject (hemat token)."""
-    cfg = config or CONFIG
-    label = cfg.get("arti_debut_label") or "debut date"
-    return (
-        f"\n\n[ASAL USUL ARTI]\n"
-        f"fakta contoh live: {label} ({cfg.get('arti_debut_date') or 'YYYY-MM-DD'}).\n"
-        f"Kalau ditanya sejak kapan Arti ada: jawab {label}, bukan tanggal sesi hari ini."
-    )
+    return prompt_blocks.build_origin_context(config or CONFIG)
 
 
 def build_today_block(config: dict | None = None) -> str:
@@ -2223,55 +2287,12 @@ def build_today_block(config: dict | None = None) -> str:
     prompt mana pun). Ditutup pengingat debut supaya tidak menabrak aturan
     origin block ("jawab tanggal debut, bukan tanggal sesi").
     """
-    cfg = config or CONFIG
-    today = time.strftime("%Y-%m-%d")
-    umur = ""
-    try:
-        debut_struct = time.strptime(str(cfg.get("arti_debut_date", "")), "%Y-%m-%d")
-        days = max(0, int((time.time() - time.mktime(debut_struct)) // 86400))
-        umur = f" Kamu sudah {days} hari jadi co-host."
-    except (ValueError, OverflowError):
-        pass
-    return (
-        f"\n\n[HARI INI]\n"
-        f"Tanggal sesi sekarang: {today}.{umur} Ini alat hitung DI KEPALAMU saja: "
-        f"cuplikan memori berlabel [YYYY-MM-DD] kamu terjemahkan jadi waktu relatif "
-        f"('tiga hari lalu', 'minggu kemarin'). "
-        f"JANGAN menyebut atau mengumumkan tanggal di jawaban kecuali memang "
-        f"DITANYA tanggal/hari — tidak ada 'berdasarkan tanggal...', tidak ada "
-        f"tanggal di akhir jawaban. "
-        f"Tanggal debut tetap dijawab sesuai [ASAL USUL ARTI]."
-    )
+    return prompt_blocks.build_today_block(config or CONFIG, time=time)
 
 
 def build_startup_memory_block(memories: list[str]) -> str:
     """Cuplikan memori startup — sisanya lewat Vault RAG per query (hemat token Groq)."""
-    import arti_memory_quality
-
-    max_b = int(CONFIG.get("memory_startup_max_bullets", 0))
-    if max_b <= 0:
-        if CONFIG.get("vault_rag_enabled", True):
-            return (
-                "\n\n[MEMORI JANGKA PANJANG: catatan sesi lama dipanggil otomatis saat "
-                "jawab. Jangan sebut nama teknis internal (database, RAG, vault, nama "
-                "berkas, nama model). Pakai ingatan itu supaya nyambung dengan obrolan "
-                "sekarang; cara kerjanya nggak perlu diceritakan. "
-                "Urusan teknis ditangani Bohan; jangan membuat klaim pekerjaan internal.]"
-            )
-        return ""
-    memories = [m for m in memories if not arti_live_safety.is_backstage(str(m))]
-    today_memories = arti_memory_quality.filter_memories_for_startup(memories)
-    if not today_memories:
-        if CONFIG.get("vault_rag_enabled", True):
-            return (
-                "\n\n[MEMORI JANGKA PANJANG: catatan sesi lama dipanggil otomatis saat "
-                "jawab. Jangan sebut nama teknis internal (database, RAG, vault, nama "
-                "berkas, nama model). Pakai ingatan itu supaya nyambung dengan obrolan "
-                "sekarang; cara kerjanya nggak perlu diceritakan. "
-                "Urusan teknis ditangani Bohan; jangan membuat klaim pekerjaan internal.]"
-            )
-        return ""
-    return "\n\n[MEMORI TERBARU (hari ini):]\n" + "\n".join(today_memories[-max_b:])
+    return prompt_blocks.build_startup_memory_block(memories, CONFIG, arti_live_safety=arti_live_safety)
 
 
 # Discord -> stream stories (design §4, consumer only): built once at stream start
@@ -2304,37 +2325,27 @@ _SYSTEM_PROMPT_BLOCK_MARKERS = (
 _SYSTEM_PROMPT_KEEP_MARKERS = (arti_state.DIRIKU_MARKER, SOUL_MARKER)
 
 
+# Keep bridge signatures and resolve configuration and dependencies at call time.
+from arti_runtime import groq_chat  # noqa: E402
+
+
 def _remove_system_prompt_block(text: str, marker: str) -> str:
     """Hapus satu blok opsional; blok lain setelahnya tetap."""
-    start = text.find(marker)
-    if start < 0:
-        return text
-    tail = text[start + len(marker) :]
-    # ADR 119: an optional block ends at the next header of any kind. Ending only at listed markers let
-    # [HARI INI] take [STARDEW] and [NATIVE_FACTS] after it with it, on all 315 turns of attempt 51.
-    next_header = re.search(r"(?m)^\[[A-Z]", tail)
-    end_rel = next_header.start() if next_header else len(tail)
-    for other in _SYSTEM_PROMPT_BLOCK_MARKERS + _SYSTEM_PROMPT_KEEP_MARKERS:
-        if other == marker:
-            continue
-        pos = tail.find(other)
-        if pos >= 0:
-            end_rel = min(end_rel, pos)
-    end = start + len(marker) + end_rel
-    return (text[:start] + text[end:]).rstrip()
+    return groq_chat._remove_system_prompt_block(
+        text, marker,
+        re=re,
+        _SYSTEM_PROMPT_BLOCK_MARKERS=_SYSTEM_PROMPT_BLOCK_MARKERS,
+        _SYSTEM_PROMPT_KEEP_MARKERS=_SYSTEM_PROMPT_KEEP_MARKERS,
+    )
 
 
 def _split_stardew_status(system_prompt: str) -> tuple[str, str]:
     """Reserve status, intent and generic current time/place facts outside every trim."""
-    # ADR 119: her role, native facts and plan dates are facts too; the trim bug showed what losing them costs.
-    pattern = r"(?m)^\[(?:STARDEW(?: STATUS)?|NIATKU|KINI|NATIVE_FACTS|PLAN_DATES)\][^\r\n]*"
-    if CONFIG.get("voice_game_memory_enabled"):
-        from arti_runtime import experience_digest  # ADR 228: her game memory line is a fact line too
-        pattern = experience_digest.RESERVED_PATTERN
-    facts = re.findall(pattern, system_prompt)
-    if not facts:
-        return system_prompt, ""
-    return re.sub(pattern, "", system_prompt), "\n" + "\n".join(facts) + "\n"
+    return groq_chat._split_stardew_status(
+        system_prompt,
+        config=CONFIG,
+        re=re,
+    )
 
 
 def trim_system_prompt_for_llm(system_prompt: str, config: dict | None = None) -> str:
@@ -2379,28 +2390,58 @@ _reply_chunks_inflight = False
 _pending_alert_yield_fact = None
 cancel_event = asyncio.Event()   # Event signal buat cancel
 
-def clear_trigger_queue(*, keep_chat=False):
+def _enqueue_legacy_voice(item) -> bool:
+    """Apply the same retention limits in the FIFO transport."""
+    if not (item.owner_reply_required or item.trigger_type == "yt_chat"):
+        voice_trigger_queue.put(item)
+        return True
+    now = time.time()
+    playing = item.trigger_type == "yt_chat" and _game_live()
+    limit = max(1, int(CONFIG.get("yt_chat_queue_max", 2)))
+    with voice_trigger_queue.not_empty:
+        items = voice_trigger_queue.queue
+        normalized = [_normalize_voice_trigger(raw) for raw in items]
+        combined = arti_voice_queue.combined_pending(normalized, item, max_yt=limit, playing=playing, now=now,
+                                                    preserve_humans=CONFIG.get("voice_queue_preserve_humans", False))
+        if combined is not None:
+            index, merged = combined
+            if index is None:
+                return False
+            items[index] = merged
+            return True
+        if item.trigger_type == "yt_chat":
+            chat_indices = [i for i, raw in enumerate(items) if _normalize_voice_trigger(raw).trigger_type == "yt_chat"]
+            if len(chat_indices) >= limit:
+                del items[chat_indices[0]]
+        items.append(item)
+        voice_trigger_queue.unfinished_tasks += 1
+        voice_trigger_queue.not_empty.notify()
+    return True
+
+
+def clear_trigger_queue(*, keep_chat=False, keep_addressed=False, stop=False):
     """Clear stale triggers, retaining paid events and pending media shares."""
     # Super Chats, memberships, Saweria and Streamlabs all enter as donation.
     keep_types = ("donation", "video", "game")
     if CONFIG.get("voice_queue_preserve_humans", False):
         keep_types += arti_voice_queue.HUMAN_KINDS
+    legacy_play_chat = not CONFIG.get("voice_queue_enabled", False) and keep_addressed and keep_chat and _game_live()
     with _game_reaction_queue_lock:
-        # Only the priority buffer can keep chat behind the owner; the legacy queue is FIFO.
-        discarded = voice_trigger_buffer.clear(keep_types=keep_types + (("yt_chat",) if keep_chat else ()))
-        kept = []
-        for _ in range(voice_trigger_queue.qsize()):
-            try:
-                item = voice_trigger_queue.get_nowait()
-            except queue.Empty:
-                break
-            if (_normalize_voice_trigger(item).trigger_type in keep_types
-                    or getattr(_normalize_voice_trigger(item).text, "retain_pending", False)):
-                kept.append(item)
-            else:
-                discarded.append(item)
-        for item in kept:
-            voice_trigger_queue.put_nowait(item)
+        discarded = voice_trigger_buffer.clear(
+            keep_types=keep_types + (("yt_chat",) if keep_chat else ()), keep_addressed=keep_addressed, stop=stop)
+        with voice_trigger_queue.mutex:
+            kept = []
+            for item in voice_trigger_queue.queue:
+                trigger = _normalize_voice_trigger(item)
+                if not stop and (trigger.trigger_type in keep_types or (keep_addressed and trigger.owner_reply_required)
+                        or (legacy_play_chat and trigger.trigger_type == "yt_chat")
+                        or getattr(trigger.text, "retain_pending", False)):
+                    kept.append(item)
+                else:
+                    discarded.append(item)
+            voice_trigger_queue.queue.clear()
+            voice_trigger_queue.queue.extend(kept)
+            voice_trigger_queue.not_full.notify_all()
     # Release only the current discarded epoch, outside queue locks. The
     # existing speech-busy handoff delays continuation until actual finally.
     for item in discarded:
@@ -2415,22 +2456,19 @@ def clear_trigger_queue(*, keep_chat=False):
         print("[Queue] Dibuang: " + ", ".join(f"{kind}={n}" for kind, n in sorted(counts.items())))
 
 
-def _dequeue_buffered_trigger_if_brain_ready():
+def _dequeue_buffered_trigger_if_brain_ready(*, owner_only=False):
     """Ambil item buffer hanya jika main loop tidak sedang memegang giliran."""
     global _brain_busy, _brain_busy_since
     with _game_reaction_queue_lock:
         with _brain_busy_lock:
-            if _brain_busy:
+            if _brain_busy or speech_control.held:
                 return None
             while True:
-                if ((CONFIG.get("mic_priority_mark") and time.time() < _media_playback_until)
-                        or (CONFIG.get("media_watch_mode") and chat_media.watch_held(CONFIG, time.time()))):
-                    # During a clip only what may speak is taken; chat waits untouched for the clip end
-                    # instead of blocking the turn (and a marked owner line behind it) until then.
-                    item = voice_trigger_buffer.dequeue_best(_media_hold_allows)
-                else:
-                    item = voice_trigger_buffer.dequeue(skip_types=("mic_pasif",) if hotkey_active
-                                                         and CONFIG.get("voice_queue_preserve_humans", False) else ())
+                holding_media = ((CONFIG.get("mic_priority_mark") and time.time() < _media_playback_until)
+                        or (CONFIG.get("media_watch_mode") and chat_media.watch_held(CONFIG, time.time())))
+                item = voice_trigger_buffer.dequeue_best(
+                    lambda it: _capture_allows_turn(it) and (not owner_only or arti_voice_queue.owner_turn(it))
+                    and (not holding_media or _media_hold_allows(it)))
                 if item is None:
                     return None
                 trigger = _normalize_voice_trigger(item)
@@ -2441,30 +2479,40 @@ def _dequeue_buffered_trigger_if_brain_ready():
                 return trigger
 
 
+def _capture_allows_turn(item):
+    if not hotkey_active:
+        return True
+    if item.trigger_type == "yt_chat":
+        return not _viewer_ptt_gate_closed()
+    if item.trigger_type == "mic_pasif":
+        return False
+    return item.trigger_type != "ptt" or item.ptt_generation == globals().get("_ptt_capture_generation")
+
+
 def _dequeue_preserved_legacy_trigger():
-    """Name first; retain every other human event, including repeated calls."""
+    """Select owner, donation and chat in the same order as the priority buffer."""
     with _brain_busy_lock:
-        if _brain_busy:
+        if _brain_busy or speech_control.held:
             raise queue.Empty
         with voice_trigger_queue.mutex:
             items = voice_trigger_queue.queue
             if not items:
                 raise queue.Empty
+            play_now = time.time() if _game_live() else 0.0
             def priority(raw):
                 item = _normalize_voice_trigger(raw)
-                if (item.viewer_name is None and item.trigger_type in ("mic", "mic_pasif", "wake_word")
-                        and (item.owner_marked if (item.trigger_type == "mic_pasif"
-                             and CONFIG.get("mic_priority_mark"))
-                             else streamer_voice.addressed(item.text, CONFIG))):
-                    return (-2, item.rotation_rank, item.queued_at or 0)
+                if arti_voice_queue.owner_turn(item):
+                    addressed = item.owner_reply_required or streamer_voice.addressed(item.text, CONFIG)
+                    return (-2, 0 if addressed else 1, item.queued_at)
+                if item.trigger_type == "yt_chat" and arti_voice_queue.play_chat_due(item.queued_at, play_now):
+                    return (0.5, -1, item.queued_at)
                 type_rank = arti_voice_queue._TRIGGER_PRIORITY.get(item.trigger_type, 5)
                 if CONFIG.get("media_watch_mode") and item.trigger_type == "video":
                     type_rank = float(CONFIG.get("media_reaction_rank", 0.25))
                 if item.trigger_type == "mic_pasif" and not item.owner_marked:
                     type_rank = 3
                 return (type_rank, item.rotation_rank, item.queued_at or 0)
-            eligible = [i for i in range(len(items)) if not (hotkey_active
-                        and _normalize_voice_trigger(items[i]).trigger_type == "mic_pasif")
+            eligible = [i for i in range(len(items)) if _capture_allows_turn(_normalize_voice_trigger(items[i]))
                         and (not CONFIG.get("media_watch_mode")
                              or _media_hold_allows(_normalize_voice_trigger(items[i])))]
             if not eligible:
@@ -2479,12 +2527,34 @@ def _dequeue_preserved_legacy_trigger():
 QUIET_CHAT_MAX_REQUEUES = 3
 
 
+def _viewer_yields_to_owner(revision):
+    if _viewer_ptt_gate_closed() or speech_control.superseded("yt_chat", revision):
+        return True
+    if CONFIG.get("voice_queue_enabled", False):
+        return any(arti_voice_queue.owner_turn(it) and _capture_allows_turn(it)
+                   for it in voice_trigger_buffer.snapshot())
+    with voice_trigger_queue.mutex:
+        pending = (_normalize_voice_trigger(it) for it in voice_trigger_queue.queue)
+        return any(arti_voice_queue.owner_turn(it) and _capture_allows_turn(it) for it in pending)
+
+
+_viewer_floor_revision = ContextVar("viewer_floor_revision", default=None)
+
+
+def _speech_playback_allowed(epoch):
+    revision = _viewer_floor_revision.get()
+    return speech_control.allows(epoch) and (revision is None or not _viewer_yields_to_owner(revision))
+
+
 def _voice_reply_superseded(trigger, revision):
-    if getattr(trigger.text, "retain_pending", False):
-        # Owner speech still goes first (W3); a quiet-chat item is not dropped but answered after it.
+    playing_chat = trigger.trigger_type == "yt_chat" and _game_live()
+    if trigger.trigger_type == "yt_chat" and _viewer_yields_to_owner(revision):
+        _requeue_quiet_chat(trigger, playing=playing_chat, owner_first=True)
+        return True
+    if playing_chat or getattr(trigger.text, "retain_pending", False):
         if not speech_control.superseded(trigger.trigger_type, revision):
             return False
-        _requeue_quiet_chat(trigger)
+        _requeue_quiet_chat(trigger, playing=playing_chat)
         return True
     if (CONFIG.get("voice_queue_preserve_humans", False)
             and trigger.trigger_type in arti_voice_queue.HUMAN_KINDS):
@@ -2502,11 +2572,17 @@ def _name_call_waiting():
                    for it in voice_trigger_queue.queue)
 
 
-def _requeue_quiet_chat(trigger):
-    """A quiet-chat reply superseded by owner speech goes back in the queue (bounded), never lost."""
+def _requeue_quiet_chat(trigger, *, playing=False, owner_first=False):
+    """Return superseded chat to the queue. In play, keep the original deadline."""
+    with speech_control.retaining(speech_turn_epoch.get()) as allowed:
+        if allowed:
+            _requeue_quiet_chat_current(trigger, playing=playing, owner_first=owner_first)
+
+
+def _requeue_quiet_chat_current(trigger, *, playing, owner_first):
     text = trigger.text
     n = int(getattr(text, "quiet_requeues", 0) or 0)
-    if n >= QUIET_CHAT_MAX_REQUEUES:
+    if not playing and n >= QUIET_CHAT_MAX_REQUEUES and not hotkey_active:
         print(f"[Queue] Chat {trigger.viewer_name or 'viewer'} disusul Bohan {n}x — tidak diantre lagi")
         return
     # A superseded chat could go to the back of the queue and be answered minutes later, after the same viewer's
@@ -2519,36 +2595,62 @@ def _requeue_quiet_chat(trigger):
         line = rest if sep and raw.startswith("[") else raw
         if voice_trigger_buffer.merge_viewer_chat(trigger.viewer_name, line, cap=None,
                                                   answer_required=getattr(text, "answer_required", None),
-                                                  skip_turn_id=trigger.turn_id):
+                                                  skip_turn_id=trigger.turn_id,
+                                                  enqueued_at=trigger.queued_at if playing else 0.0):
             print(f"[Queue] Chat {trigger.viewer_name} disusul Bohan — digabung ke chatnya yang masih antre")
             return
-    try:
-        text.quiet_requeues = n + 1
-    except AttributeError:
-        return
+    if not (playing or owner_first and not getattr(text, "retain_pending", False)):
+        try:
+            text.quiet_requeues = n + 1
+        except AttributeError:
+            return
     if CONFIG.get("voice_queue_enabled", False):
+        if (playing or owner_first) and not getattr(text, "retain_pending", False):
+            text = chat_media.PendingChat(text)
         item = arti_voice_queue.QueuedVoiceTrigger(text, trigger.trigger_type, trigger.viewer_name,
-                                                   time.time(), trigger.turn_id, trigger.stardew_voice_epoch,
+                                                   trigger.queued_at if playing or owner_first else time.time(),
+                                                   trigger.turn_id, trigger.stardew_voice_epoch,
                                                    owner_marked=bool(getattr(trigger, "owner_marked", True)),
                                                    rotation_rank=int(getattr(trigger, "rotation_rank", 0) or 0))
         voice_trigger_buffer.enqueue(item)
     else:
-        voice_trigger_queue.put(trigger)
-    print(f"[Queue] Chat {trigger.viewer_name or 'viewer'} disusul Bohan — diantre lagi ({n + 1})")
+        _enqueue_legacy_voice(trigger)
+    detail = " (umur awal tetap)" if playing else f" ({n + 1})"
+    print(f"[Queue] Chat {trigger.viewer_name or 'viewer'} disusul Bohan — diantre lagi{detail}")
 
 
-def _retain_interrupted_passive(trigger):
-    if (trigger.trigger_type != "mic_pasif" or not CONFIG.get("voice_queue_preserve_humans", False)
-            or speech_control.held):
-        return
+def _retain_interrupted_owner(trigger):
+    with speech_control.retaining(speech_turn_epoch.get()) as allowed:
+        if allowed:
+            _retain_current_owner(trigger)
+
+
+def _retain_current_owner(trigger):
+    if trigger.trigger_type != "mic_pasif" and not isinstance(trigger.text, arti_voice_queue.CombinedOwnerQuestions):
+        text = trigger.text
+        trigger = replace(trigger, text=arti_voice_queue.CombinedOwnerQuestions(getattr(text, "lines", (text,))),
+                          stardew_voice_epoch=None)
     if CONFIG.get("voice_queue_enabled", False):
-        item = arti_voice_queue.QueuedVoiceTrigger(trigger.text, trigger.trigger_type, trigger.viewer_name,
-                                                   time.time(), trigger.turn_id, trigger.stardew_voice_epoch,
-                                                   owner_marked=bool(getattr(trigger, "owner_marked", True)))
+        item = arti_voice_queue.wrap_trigger(trigger)
+        item.enqueued_at = trigger.queued_at if trigger.owner_reply_required else time.time()
         item.name_addressed = streamer_voice.addressed(trigger.text, CONFIG) if not CONFIG.get("mic_priority_mark") else bool(item.owner_marked)
         voice_trigger_buffer.enqueue(item)
     else:
-        voice_trigger_queue.put(trigger)
+        _enqueue_legacy_voice(trigger)
+
+
+def _revoked_host_reply(trigger, stories):
+    """Suppress stale HOST output and retry its unrelated owner input once."""
+    if not any(not story.is_current() for story in stories):
+        return False
+    if (trigger.viewer_name is None and
+            (trigger.trigger_type in arti_voice_queue.DIRECT_OWNER_KINDS
+             or getattr(trigger, "owner_reply_required", False))
+            and not getattr(trigger, "host_story_retry", False)
+            and speech_control.allows(speech_turn_epoch.get())):
+        text = arti_voice_queue.CombinedOwnerQuestions(getattr(trigger.text, "lines", (str(trigger.text),)))
+        _retain_interrupted_owner(replace(trigger, text=text, owner_reply_required=True, host_story_retry=True))
+    return True
 
 
 # === SCOUTER STATE (multi-provider digest) ===
@@ -2770,6 +2872,18 @@ def _stardew_live() -> bool:
 def _game_live() -> bool:
     return arti_session_mode.game_active(
         minecraft=_mc_runner_active(), stardew=_stardew_live())
+
+
+def _game_actually_playing() -> bool:
+    if _mc_runner_active():
+        return True
+    import arti_stardew_driver_guard
+    runtime = _stardew_runtime
+    if getattr(runtime, "status", None) == "READY" and not runtime._host_paused():
+        binding, player_id = runtime._binding_view()
+        if binding.status == "bound" and not runtime.state_store.is_stale(player_id):
+            return True
+    return arti_stardew_driver_guard.live7_cycle_playing(CONFIG)
 
 
 def _session_mode() -> str:
@@ -3480,6 +3594,8 @@ def _game_reaction_expired(trigger) -> bool:
     menit sesudah zombie-nya mati. Itu yang dia rasakan sebagai "[recorded remark omitted]". Hanya berlaku untuk `game`: omongan manusia & donasi tidak
     pernah kadaluwarsa.
     """
+    if getattr(trigger.text, "_host_story_guarded", False):
+        return not CONFIG.get("live7_moments_enabled", False) or not trigger.text.is_current()
     kind = getattr(trigger, "trigger_type", None)
     if kind != "game":
         return kind in _GAME_SESSION_LANE and _live7_game_session_stopped()
@@ -5334,72 +5450,8 @@ class VTSController:
 # ==========================================
 # 2. AUDIO PROCESSING & TTS
 # ==========================================
-def resample_audio(data, orig_sr, target_sr=44100):
-    if orig_sr == target_sr:
-        return data, target_sr
-    duration = len(data) / orig_sr
-    target_length = int(duration * target_sr)
-    orig_xs = np.linspace(0, duration, len(data))
-    target_xs = np.linspace(0, duration, target_length)
-    if len(data.shape) > 1:
-        resampled_channels = []
-        for i in range(data.shape[1]):
-            resampled_channels.append(np.interp(target_xs, orig_xs, data[:, i]))
-        return np.column_stack(resampled_channels), target_sr
-    else:
-        return np.interp(target_xs, orig_xs, data), target_sr
-
-# ------------------------------------------------------------------
-# OBS Subtitle helpers (WordBoundary tick parsing)
-# ------------------------------------------------------------------
-# edge_tts emits offset / duration in HNS Ticks (100-nanosecond units).
-# The Word Timings List contract consumed by subtitle.html expects seconds
-# as Python floats, so every tick value is divided by HNS_PER_SECOND.
-HNS_PER_SECOND = 10_000_000
-
-
-def _parse_word_boundary(chunk: dict) -> dict | None:
-    """Convert a raw edge_tts WordBoundary chunk into a Word Timings entry.
-
-    Returns None (and logs a [SubTitle] diagnostic) on any malformed field —
-    missing offset/duration/text, non-numeric or negative offset/duration —
-    so the caller's stream loop can skip the chunk and keep iterating.
-    Never raises on malformed input.
-
-    `text` is passed through byte-for-byte: no .strip(), no .lower(), no
-    unicodedata.normalize. (Requirements 1.4, 1.5, 1.7, 5.10.)
-    """
-    # Required field presence check.
-    try:
-        offset = chunk["offset"]
-        duration = chunk["duration"]
-        text = chunk["text"]
-    except (KeyError, TypeError) as e:
-        print(f"[SubTitle] Skipping WordBoundary missing field: {e}")
-        return None
-
-    # Numeric type check. bool is a subclass of int in Python, so it would
-    # pass isinstance(x, int); we explicitly reject it because True/False are
-    # not meaningful tick counts.
-    def _is_numeric(v):
-        return isinstance(v, (int, float)) and not isinstance(v, bool)
-
-    if not _is_numeric(offset) or not _is_numeric(duration):
-        print(f"[SubTitle] Skipping WordBoundary with non-numeric ticks: {chunk!r}")
-        return None
-
-    # Negative-tick guard. (NaN comparisons are always False, so a NaN slips
-    # past this check; the upstream generator-test bound (allow_nan=False)
-    # keeps NaN out of the input space, matching the design contract.)
-    if offset < 0 or duration < 0:
-        print(f"[SubTitle] Skipping WordBoundary with negative ticks: {chunk!r}")
-        return None
-
-    return {
-        "word": text,                                  # byte-for-byte passthrough
-        "start": float(offset) / HNS_PER_SECOND,
-        "duration": float(duration) / HNS_PER_SECOND,
-    }
+# Moved verbatim to arti_runtime/speech_timing.py; the bare names stay here so callers and arti_bridge.<name> patches still meet.
+from arti_runtime.speech_timing import resample_audio, HNS_PER_SECOND, _parse_word_boundary  # noqa: E402
 
 
 # ==========================================
@@ -5701,81 +5753,15 @@ class SupertoneProcess:
             self._ready = False
 
 
-# ==========================================
-# PHRASE TIMING ESTIMATOR (Option C)
-# ==========================================
-# Supertone TTS doesn't provide word-level timestamps.
-# We estimate phrase boundaries proportional to character count.
-# Format matches edge_tts word_timings: [{"word": str, "start": float, "duration": float}]
-
-_PUNCTUATION_PHRASE = r"[.!?]"        # hard breaks — always split
-_PUNCTUATION_CLAUSE = r"[,;:\u2014\u2013]"  # soft breaks — split if result >= MIN_PHRASE_CHARS
-MIN_PHRASE_CHARS = 8                   # merge very short fragments into previous phrase
-MAX_PHRASE_CHARS = 60                  # force-split long phrases at word boundary
-
-
-def _split_into_phrases(text: str) -> list:
-    """Split text into phrases by punctuation, merging short fragments."""
-    if not text:
-        return []
-
-    # First pass: split on hard punctuation
-    raw = re.split(r"(?<=[.!?])\s+", text.strip())
-    phrases = []
-    for segment in raw:
-        segment = segment.strip()
-        if not segment:
-            continue
-        # Second pass: split on soft punctuation if segment is long enough
-        if len(segment) > MAX_PHRASE_CHARS:
-            sub = re.split(r"(?<=[,;:\u2014\u2013])\s*", segment)
-            buf = ""
-            for part in sub:
-                part = part.strip()
-                if not part:
-                    continue
-                if len(buf) + len(part) <= MAX_PHRASE_CHARS:
-                    buf = (buf + " " + part).strip() if buf else part
-                else:
-                    if buf:
-                        phrases.append(buf)
-                    buf = part
-            if buf:
-                phrases.append(buf)
-        else:
-            phrases.append(segment)
-
-    # Merge very short fragments into neighbours
-    merged = []
-    for p in phrases:
-        if merged and len(p) < MIN_PHRASE_CHARS:
-            merged[-1] = merged[-1] + " " + p
-        else:
-            merged.append(p)
-    return merged
-
-
-def _estimate_phrase_timings(text: str, total_duration: float) -> list:
-    """
-    Estimate start/duration for each phrase proportional to character count.
-    Returns list of {"word": phrase, "start": seconds, "duration": seconds}.
-    """
-    phrases = _split_into_phrases(text)
-    if not phrases:
-        return []
-
-    total_chars = sum(len(p) for p in phrases)
-    if total_chars == 0:
-        return []
-
-    timings = []
-    cursor = 0.0
-    for phrase in phrases:
-        share = len(phrase) / total_chars
-        dur = max(total_duration * share, 0.05)  # minimum 50ms per phrase
-        timings.append({"word": phrase, "start": round(cursor, 3), "duration": round(dur, 3)})
-        cursor += dur
-    return timings
+# Moved verbatim to arti_runtime/speech_timing.py; the bare names stay here so callers and arti_bridge.<name> patches still meet.
+from arti_runtime.speech_timing import (
+    _PUNCTUATION_PHRASE,
+    _PUNCTUATION_CLAUSE,
+    MIN_PHRASE_CHARS,
+    MAX_PHRASE_CHARS,
+    _split_into_phrases,
+    _estimate_phrase_timings,
+)  # noqa: E402
 
 
 class TTSEngine:
@@ -5821,7 +5807,9 @@ class TTSEngine:
                 self._refresh_output_device()
                 print(f"[TTS] Output device refresh; retry clip sekali (device={self.device_id})")
                 # Masih di dalam `with _sd_gerbang` di atas (Lock tidak re-entrant).
-                if not speech_control.allows(getattr(self, "_speech_epoch", None)):
+                if not host_story_playback_current():
+                    return
+                if not _speech_playback_allowed(getattr(self, "_speech_epoch", None)):
                     return
                 sd.play(data, samplerate, device=self.device_id)
             self._playback_started = True
@@ -6023,6 +6011,8 @@ class TTSEngine:
             # source sample rate differs (resample_audio no-ops at 48000).
             raw_data, raw_sr = sf.read(wav_path)
             data, samplerate = resample_audio(raw_data, raw_sr, 48000)
+            if not host_story_playback_current():
+                return
 
             # Phrase-based subtitle for Supertone (Option C):
             # Supertone doesn't provide word-level timing, so when word_timings is
@@ -6040,7 +6030,7 @@ class TTSEngine:
             # audio playback proceeds unchanged (Req 13.5).
             if subtitle_runtime.enabled and subtitle_runtime.server_started:
                 try:
-                    if not speech_control.allows(getattr(self, "_speech_epoch", None)):
+                    if not _speech_playback_allowed(getattr(self, "_speech_epoch", None)):
                         return
                     await _subtitle_broadcast(word_timings, text)
                 except Exception as e:
@@ -6057,7 +6047,7 @@ class TTSEngine:
             if (subtitle_runtime.enabled and subtitle_runtime.status_enabled
                     and subtitle_runtime.server_started):
                 try:
-                    if not speech_control.allows(getattr(self, "_speech_epoch", None)):
+                    if not _speech_playback_allowed(getattr(self, "_speech_epoch", None)):
                         return
                     await _subtitle_broadcast_status("speaking", "")
                 except Exception as e:
@@ -6085,7 +6075,9 @@ class TTSEngine:
             try:
                 play_t0 = time.perf_counter()
                 with self._sd_gerbang_play_retry_device(data, samplerate):
-                    if not speech_control.allows(getattr(self, "_speech_epoch", None)):
+                    if not host_story_playback_current():
+                        return
+                    if not _speech_playback_allowed(getattr(self, "_speech_epoch", None)):
                         return
                     tts_play_generation += 1
                     tts_is_playing = True
@@ -6111,8 +6103,10 @@ class TTSEngine:
             # Berikan jeda 0.3 detik agar gema suara speaker menghilang dari mic sebelum mulai mendengarkan lagi
             # Req 14.2, 14.3: reset tts_is_playing AFTER the 0.3s post-playback
             # sleep so mic gating stays consistent across engines.
-            await asyncio.sleep(0.3)
-            tts_is_playing = False
+            try:
+                await asyncio.sleep(0.3)
+            finally:
+                tts_is_playing = False
 
             # OBS Subtitle Integration (Req 13.4):
             # Best-effort "idle" status broadcast after the post-playback sleep
@@ -6195,9 +6189,11 @@ class TTSEngine:
             # the empty-list path is a pure no-op decision (Req 2.5, 4.5). The `text`
             # argument is forwarded byte-for-byte (Req 2.2). Any exception is logged
             # and swallowed so audio playback proceeds (Req 4.3, 4.4).
+            if not host_story_playback_current():
+                return
             if subtitle_runtime.enabled and subtitle_runtime.server_started and word_timings:
                 try:
-                    if not speech_control.allows(getattr(self, "_speech_epoch", None)):
+                    if not _speech_playback_allowed(getattr(self, "_speech_epoch", None)):
                         return
                     await _subtitle_broadcast(word_timings, text)
                 except Exception as e:
@@ -6214,7 +6210,7 @@ class TTSEngine:
             if (subtitle_runtime.enabled and subtitle_runtime.status_enabled
                     and subtitle_runtime.server_started):
                 try:
-                    if not speech_control.allows(getattr(self, "_speech_epoch", None)):
+                    if not _speech_playback_allowed(getattr(self, "_speech_epoch", None)):
                         return
                     await _subtitle_broadcast_status("speaking", "")
                 except Exception as e:
@@ -6243,7 +6239,9 @@ class TTSEngine:
             try:
                 play_t0 = time.perf_counter()
                 with self._sd_gerbang_play_retry_device(data, samplerate):
-                    if not speech_control.allows(getattr(self, "_speech_epoch", None)):
+                    if not host_story_playback_current():
+                        return
+                    if not _speech_playback_allowed(getattr(self, "_speech_epoch", None)):
                         return
                     tts_play_generation += 1
                     tts_is_playing = True
@@ -6266,8 +6264,10 @@ class TTSEngine:
             # Berikan jeda 0.3 detik agar gema suara speaker menghilang dari mic sebelum mulai mendengarkan lagi
             # Req 5.5: reset tts_is_playing AFTER the post-playback sleep so mic
             # gating stays consistent with today's behavior.
-            await asyncio.sleep(0.3)
-            tts_is_playing = False
+            try:
+                await asyncio.sleep(0.3)
+            finally:
+                tts_is_playing = False
 
             # OBS Subtitle Integration (Task 5.3):
             # Best-effort "idle" status broadcast after the post-playback sleep
@@ -6293,42 +6293,22 @@ class TTSEngine:
 # ==========================================
 # 3. PENDENGAR SUARA LOKAL (ASR WITH AUTO-NOISE CALIBRATION & HALLUCINATION FILTER)
 # ==========================================
-# Pola literal output Whisper dari noise — sering persis begini (kapital + titik)
-_ASR_LITERAL_PHANTOMS = frozenset({
-    "Terima kasih.",
-    "Thank you.",
-    "Thanks.",
-    "Selamat menikmati.",
-    "Terima kasih telah menonton.",
-    "Terima kasih sudah menonton.",
-    "Thank you for watching.",
-    "Thanks for watching.",
-    "Like and subscribe.",
-    "Sampai jumpa.",
-})
-# Tanpa titik / lowercase: cek lagi pakai durasi + jarak dari TTS
-_ASR_BARE_THANKS = frozenset({"terima kasih", "thank you", "thanks", "Terima kasih", "Thank you", "Thanks"})
-_ASR_ALWAYS_NOISE = frozenset({
-    "selamat menikmati", "terima kasih telah menonton", "selamat datang", "halo halo",
-    "ya ya ya", "oke oke", "terima kasih sudah menonton", "like and subscribe",
-    "sampai jumpa", "goodbye", "bye bye", "i mean",
-    "thank you for watching", "thanks for watching",
-})
-_ASR_NOISE_SUBSTRINGS = (
-    "terima kasih telah menonton",
-    "terima kasih sudah menonton",
-    "like and subscribe",
-    "thank you for watching",
-)
-
-
-def _normalize_asr_text(text: str) -> str:
-    return re.sub(r"[^\w\s]", "", text.lower()).strip()
+# Re-exported from arti_runtime/asr_text.py so bridge callers keep using these names.
+from arti_runtime.asr_text import (
+    _ASR_LITERAL_PHANTOMS,
+    _ASR_BARE_THANKS,
+    _ASR_ALWAYS_NOISE,
+    _ASR_NOISE_SUBSTRINGS,
+    _normalize_asr_text,
+)  # noqa: E402
 
 
 def is_asr_noise_transcript(text: str, audio_duration_sec: float | None = None) -> bool:
     """Halusinasi Whisper — tapi ucapan terima kasih ASLI tetap lolos."""
-    if CONFIG.get("passive_mic_hygiene") and mic_hygiene.is_hallucination_transcript(text):
+    if mic_hygiene.has_question_mark(text):
+        return False
+    if CONFIG.get("passive_mic_hygiene") and mic_hygiene.is_hallucination_transcript(
+            text, prompt=arti_voice_pipeline.MIC_ASR_VOCABULARY):
         return True
     raw = text.strip()
     t = _normalize_asr_text(text)
@@ -6403,154 +6383,16 @@ def is_asr_echo_of_arti(text: str) -> bool:
     return ratio > 0.7
 
 
-def filter_whisper_hallucination(text, is_passive_monitoring=True):
-    """Menyaring halusinasi khas Whisper dari noise/ambient.
-    
-    Lebih smart dari versi lama:
-    - Filter kata tunggal yang meaningless TAPI hanya kalau itu hasil transkrip sendiri
-      (bukan bagian dari percakutan nyata — cek via is_passive_monitoring)
-    - Filter repetitive patterns (Whisper ngulang kata karena bingung noise)
-    """
-    if not text:
-        return ""
-    text = text.strip()
-    if not text:
-        return ""
-    
-    # Phrases yang SELALU jadi hallucination Whisper (ignoring context selalu)
-    # Ini pattern Whisper bilang "g sendiri kalau denger noise/static"
-    phantom_phrases = {
-        "subscribe", "like and subscribe", "thank you for watching",
-        "thanks for watching", "see you next time", "salam sejahtera",
-        "wassalamualaikum", "wassalamu'alaikum",
-        "selamat menikmati",
-    }
-    text_clean = text.lower().strip(".,!?")
-    if text_clean in phantom_phrases:
-        return ""
-    
-    # Phrases yang HANYA hallucination kalau ini hasil transkrip pasif (bukan Bohan ngomong langsung)
-    # Ini kata yang Whisper salah tangkap dari noise, tapi BISA jadi real speech
-    contextual_hallucinations = {
-        "terima kasih kerana menonton", "terima kasih kerana menonton!",
-        "terima kasih guys", "sampai jumpa lagi",
-    }
-    if is_passive_monitoring and text_clean in contextual_hallucinations:
-        return ""
-    
-    # Filter kata berulang (repetitive hallucination)
-    # Whisper kadang ngulang kata yang sama berkali-kali kalau bingung noise
-    words = text.split()
-    if len(words) > 6:
-        counter = collections.Counter(words)
-        most_common_word, count = counter.most_common(1)[0]
-        if count / len(words) > 0.6:
-            return ""  # Return empty, bukan kata itu sendiri
-    
-    # Filter kata tunggal yang meaningless TAPI ekornya aja
-    # Kalau Bohan beneran bilang "tidak" atau "bye" sendiri, biarin masuk
-    # (handle via context di LLM, bukan di filter)
-    meaningless_single = {"ah", "oh", "uh", "eh", "hm", "hmm"}
-    if len(words) == 1 and text_clean.rstrip(".!?") in meaningless_single:
-        return ""
-    
-    return text
+# Re-exported from arti_runtime/asr_text.py so bridge callers keep using these names.
+from arti_runtime.asr_text import filter_whisper_hallucination  # noqa: E402
 
-_TTS_EXPRESSION_TAG_RE = re.compile(
-    r"<\s*(laugh|sigh|breath|chuckle|giggle)\s*>",
-    re.IGNORECASE,
-)
-_ANY_ANGLE_TAG_RE = re.compile(r"<\s*[a-zA-Z][a-zA-Z0-9_-]*\s*>")
-
-
-def strip_tts_expression_tags(text: str) -> str:
-    """Tag <laugh> dll → fonetik TTS; sigh/breath → hhh/hah (bukan kata 'sigh')."""
-    if not text:
-        return ""
-
-    laugh_idx = 0
-    laugh_variants = ("haha", "hehe", "hihi")
-
-    def _repl_tag(match: re.Match) -> str:
-        nonlocal laugh_idx
-        tag = match.group(1).lower()
-        if tag in ("laugh", "chuckle", "giggle"):
-            word = laugh_variants[laugh_idx % len(laugh_variants)]
-            laugh_idx += 1
-            return f" {word}"
-        if tag == "sigh":
-            return " hhh"
-        if tag == "breath":
-            return " hah"
-        return ""
-
-    out = _TTS_EXPRESSION_TAG_RE.sub(_repl_tag, text)
-    out = _ANY_ANGLE_TAG_RE.sub("", out)
-    out = re.sub(r"\s{2,}", " ", out)
-    out = re.sub(r"\s+([,.!?])", r"\1", out)
-    out = re.sub(
-        r"\b(haha|hehe|hihi)(\s+\1\b)+",
-        r"\1",
-        out,
-        flags=re.IGNORECASE,
-    )
-    return out.strip()
-
-
-def clean_ai_reply(text):
-    """Membersihkan yapping bahasa Inggris, membuang teks di dalam tanda bintang (bintang tunggal/ganda), dan menyisakan jawaban Indonesia murni menggunakan filter bahasa statistik."""
-    if not text:
-        return ""
-    # 0. Hapus blok <think>...</think> dari model yang support "thinking" (Qwen3, dll)
-    #    Handle juga kasus truncated (max_tokens motong di tengah <think>)
-    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
-    text = re.sub(r'<think>.*', '', text, flags=re.DOTALL).strip()  # Truncated: no closing tag
-    # 1. Hapus teks di dalam bintang ganda (bold) atau bintang tunggal (italic)
-    text = re.sub(r"\*\*.*?\*\*", "", text)
-    text = re.sub(r"\*.*?\*", "", text)
-    
-    # 2. Split menjadi kalimat-kalimat untuk memfilter yapping per kalimat
-    sentences = re.split(r'(?<=[.!?])\s+', text)
-    cleaned_sentences = []
-    
-    # Kumpulan kata bahasa Inggris umum (stop words) untuk penyaringan bahasa statistik
-    english_words = {
-        # Grammatical particles / pronouns
-        "is", "it", "it's", "ready", "for", "immediate", "use", "the", "to", "and", "of", "in", 
-        "that", "this", "with", "from", "you", "are", "not", "no", "shut", "up", "i", "have", "devis", 
-        "respond", "interpret", "streamer", "parameter", "context", "analyze", "utterance", "witty", 
-        "cute", "proceed", "response", "believe", "got", "my", "profile", "playful", "nonsensical", 
-        "opportunity", "making", "good", "progress", "active", "ready", "confirm", "available", 
-        "availability", "will", "would", "should", "could", "can", "do", "does", "did", "have", 
-        "has", "had", "been", "was", "were", "be", "am", "are", "your", "yours", "me", "my", "myself",
-        "an", "but", "or", "as", "if", "so", "than", "then", "there", "their", "them", "they", "we",
-        "i've", "rare", "leaning", "persona", "crafting", "emphasizes", "qualities", "precise", "aim",
-        "concise", "maintain", "existing", "memory", "emojis", "avoided", "kept", "previous", "feedback",
-        # Conversational English words (very common in yapping)
-        "here", "let's", "make", "amazing", "i'm", "bad", "bro", "hello", "hi", "great", "good", "fine",
-        "stream", "co-host", "ai", "intelligent", "talk", "speak", "chat", "conversation", "dialogue",
-        "words", "shutting", "talking", "yapping", "thought", "think", "thought", "how", "what", "why",
-        "when", "where", "who", "which", "whose", "whom", "about", "above", "below", "under", "over"
-    }
-    
-    for sentence in sentences:
-        words = [w.strip(".,!?\"'()").lower() for w in sentence.split() if w.strip()]
-        if not words:
-            continue
-            
-        # Hitung rasio kata bahasa Inggris dalam kalimat
-        english_count = sum(1 for w in words if w in english_words)
-        
-        # Jika kalimat MAYORITAS bahasa Inggris (>=60% kata Inggris DAN minimal 4 kata Inggris),
-        # baru buang sebagai yapping. Threshold rendah sebelumnya (2 kata/30%) terlalu agresif
-        # karena bahasa Indonesia sering campur kata Inggris ("aku lagi chat di YouTube").
-        if english_count >= 4 and (english_count / len(words)) >= 0.6:
-            continue
-            
-        cleaned_sentences.append(sentence.strip())
-        
-    final_text = " ".join(cleaned_sentences).strip()
-    return final_text
+# Re-exported from arti_runtime/reply_text.py; calls inside reply_text do not see bridge rebinding.
+from arti_runtime.reply_text import (
+    _TTS_EXPRESSION_TAG_RE,
+    _ANY_ANGLE_TAG_RE,
+    strip_tts_expression_tags,
+    clean_ai_reply,
+)  # noqa: E402
 
 local_whisper_model = None
 _local_whisper_lock = threading.Lock()
@@ -7097,6 +6939,10 @@ def _video_set_qa_window(event_id: str, window_sec: float) -> None:
     t.start()
 
 
+def _queue_video_reaction(text, viewer) -> None:
+    queue_voice_trigger(text, trigger_type="video", viewer_name=viewer)
+
+
 def start_video_watcher() -> None:
     global _video_watcher
     import arti_video_watcher
@@ -7113,9 +6959,7 @@ def start_video_watcher() -> None:
     _video_watcher = arti_video_watcher.VideoWatcher(
         CONFIG,
         {
-            "queue_reaction": lambda text, viewer: queue_voice_trigger(
-                text, trigger_type="video", viewer_name=viewer
-            ),
+            "queue_reaction": _queue_video_reaction,
             "reindex": _reindex,
             "set_qa": _video_set_qa_window,
             "transcribe_audio": transcribe_audio,
@@ -7176,7 +7020,7 @@ def _on_donation(ev) -> None:
     if kind == "media_points":
         # Streamlabs loyalty points: KASUAL —
         # tanpa upacara terima kasih donasi; langsung nonton bareng + komentar.
-        # Gagal submit (antrean penuh / video off) = diam — cuma points.
+        # A refusal gets a short video turn with the reason.
         print(f"[Donasi] {ev.platform}: {ev.name} media share (loyalty points)")
         add_to_history(
             f"Viewer {ev.name} ({ev.platform.title()})",
@@ -7226,7 +7070,11 @@ def _submit_media_job(ev, donation_label: str) -> bool:
     # The desktop gate was already reserved at receipt, even if analysis rejects.
     hold = _media_alert_hold_sec(ev)
     ids = avw.extract_youtube_ids(ev.media_url or "")
-    if not ids or _video_watcher is None or not CONFIG.get("video_enabled", False):
+    if not ids:
+        avw.queue_media_refusal(_queue_video_reaction, ev.name, "tautan YouTube tidak dikenali")
+        return False
+    if _video_watcher is None or not CONFIG.get("video_enabled", False):
+        avw.queue_media_refusal(_queue_video_reaction, ev.name, "fitur analisis video dimatikan")
         return False
     accepted = _video_watcher.submit(avw.VideoJob(
         video_id=ids[0],
@@ -7252,46 +7100,8 @@ def _media_alert_hold_sec(ev) -> float:
     return alert + (clip or float(CONFIG.get("mediashare_hold_sec", 60.0))) + 3.0
 
 
-def extract_membership(item: dict) -> dict | None:
-    """YouTube membership / gifted membership from one innertube item — pure.
-
-    Super Chat and Super Sticker stay in extract_superchat. Same DonationEvent
-    kind as parse_streamlabs_membership (platform=youtube, kind=membership).
-    """
-    import arti_donations  # noqa: PLC0415
-
-    evs = arti_donations.parse_youtube_membership_item(item)
-    if not evs:
-        return None
-    ev = evs[0]
-    raw = ev.raw if isinstance(ev.raw, dict) else {}
-    return {
-        "name": ev.name,
-        "message": ev.message,
-        "membership_months": ev.membership_months,
-        "membership_level": ev.membership_level,
-        "renderer_key": raw.get("_renderer") or "",
-        "id": raw.get("id") or "",
-    }
-
-
-def extract_superchat(item: dict) -> dict | None:
-    """Data Super Chat / paid sticker dari satu item innertube — pure, testable.
-
-    D0 rencana v0.7: `purchaseAmountText` selama ini DIBUANG oleh parse_action
-    padahal datanya sudah mengalir. Return {'name','message','paid_amount'}
-    atau None kalau bukan item berbayar.
-    """
-    for key in ("liveChatPaidMessageRenderer", "liveChatPaidStickerRenderer"):
-        r = item.get(key)
-        if not r:
-            continue
-        amount = ((r.get("purchaseAmountText") or {}).get("simpleText") or "").strip()
-        author = ((r.get("authorName") or {}).get("simpleText") or "Unknown").strip()
-        runs = (r.get("message") or {}).get("runs", [])
-        msg = "".join(x.get("text", "") for x in runs).strip()
-        return {"name": author, "message": msg, "paid_amount": amount}
-    return None
+# Re-exported from arti_runtime/yt_paid_parse.py so bridge callers keep using these names.
+from arti_runtime.yt_paid_parse import extract_membership, extract_superchat  # noqa: E402
 
 
 def is_bot_viewer(viewer: str, config: dict | None = None) -> bool:
@@ -7716,6 +7526,13 @@ def youtube_chat_worker():
         if CONFIG.get("owner_chat_as_owner"):
             from arti_runtime import owner_chat
             if not paid and not backlog_paid and owner_chat.is_owner(viewer, CONFIG):
+                if CONFIG.get("video_enabled", False) and _video_watcher is not None:
+                    import arti_video_watcher as _avw
+                    _ids = _avw.extract_youtube_ids(chat_msg)
+                    if _ids:
+                        _video_watcher.submit(_avw.VideoJob(
+                            video_id=_ids[0], source="chat", viewer=viewer, message=chat_msg,
+                        ))
                 owner_chat.take(__import__(__name__), viewer, chat_msg)  # his own account: the owner path
                 return
         if CONFIG.get("live7_help_enabled", False) and _live7_help_relay is not None:
@@ -8171,7 +7988,7 @@ def init_global_hotkey():
         def on_mouse_click():
             global hotkey_active, current_api_task, _toggle_on_time, tts_stop_flag
             now = time.time()
-            hotkey_active = not hotkey_active
+            _toggle_owner_capture()
             arti_executors.note_user_cancel()  # pembatalan sesudah ini = pengguna, bukan timeout
             if hotkey_active:
                 _toggle_on_time = now
@@ -8186,7 +8003,7 @@ def init_global_hotkey():
                     float(CONFIG.get("health_mic_watch_sec", 5.0)),
                     "mouse",
                 )
-                clear_trigger_queue()
+                clear_trigger_queue(keep_chat=_game_live(), keep_addressed=True)
                 _ptt_attention_pause()
             else:
                 elapsed = now - _toggle_on_time
@@ -8194,7 +8011,7 @@ def init_global_hotkey():
                 # dipotong; hanya double-toggle (bungkam) yang memotong.
                 bungkam = elapsed < 2.0
                 if bungkam:
-                    tts_stop_flag = True
+                    _stop_voice_now(ptt=True)
                     # Double-toggle dalam < 2 detik = force bungkam
                     print(f"\n⚫⚫ [DOUBLE TOGGLE] Bungkam! ({elapsed:.1f}s)")
                 else:
@@ -8207,18 +8024,8 @@ def init_global_hotkey():
                     pass
                 _cancel_lamp_fallback()
                 start_idle_animation()
-                if bungkam and current_api_task and not current_api_task.done():
-                    current_api_task.cancel()
-                    print("[Cancel] API call dibatalkan.")
-                if bungkam and tts_is_playing:
-                    try:
-                        with _sd_gerbang:
-                            sd.stop()
-                        print("[Cancel] TTS dihentikan.")
-                    except Exception:
-                        pass
-                    request_asr_stream_restart("toggle OFF + stop TTS")
-                clear_trigger_queue()
+                if not bungkam:
+                    clear_trigger_queue(keep_chat=_game_live(), keep_addressed=True)
 
         try:
             mouse.on_button(on_mouse_click, buttons=(mouse_button,), types=('down',))
@@ -8248,7 +8055,7 @@ def init_global_hotkey():
         def on_hotkey_pressed():
             global hotkey_active, current_api_task, _toggle_on_time_kb, tts_stop_flag
             now = time.time()
-            hotkey_active = not hotkey_active
+            _toggle_owner_capture()
             arti_executors.note_user_cancel()  # pembatalan sesudah ini = pengguna, bukan timeout
             if hotkey_active:
                 _toggle_on_time_kb = now
@@ -8263,7 +8070,7 @@ def init_global_hotkey():
                     float(CONFIG.get("health_mic_watch_sec", 5.0)),
                     "keyboard",
                 )
-                clear_trigger_queue()
+                clear_trigger_queue(keep_chat=_game_live(), keep_addressed=True)
                 _ptt_attention_pause()
             else:
                 elapsed = now - _toggle_on_time_kb
@@ -8271,7 +8078,7 @@ def init_global_hotkey():
                 # dipotong; hanya double-toggle (bungkam) yang memotong.
                 bungkam = elapsed < 2.0
                 if bungkam:
-                    tts_stop_flag = True
+                    _stop_voice_now(ptt=True)
                     print(f"\n⚫⚫ [DOUBLE TOGGLE] Bungkam! ({elapsed:.1f}s)")
                 else:
                     print("\n⚫ [Toggle OFF] Omongan masuk antrean prioritas; Arti tidak dipotong.")
@@ -8283,18 +8090,8 @@ def init_global_hotkey():
                     pass
                 _cancel_lamp_fallback()
                 start_idle_animation()
-                if bungkam and current_api_task and not current_api_task.done():
-                    current_api_task.cancel()
-                    print("[Cancel] API call dibatalkan.")
-                if bungkam and tts_is_playing:
-                    try:
-                        with _sd_gerbang:
-                            sd.stop()
-                        print("[Cancel] TTS dihentikan.")
-                    except Exception:
-                        pass
-                    request_asr_stream_restart("toggle OFF + stop TTS")
-                clear_trigger_queue()
+                if not bungkam:
+                    clear_trigger_queue(keep_chat=_game_live(), keep_addressed=True)
                 
         try:
             keyboard.add_hotkey(hotkey, on_hotkey_pressed)
@@ -8579,37 +8376,44 @@ def start_screen_watcher_worker():
     threading.Thread(target=_run, daemon=True, name="screen-watcher").start()
 
 
-def refresh_vision_for_turn(user_speech: str = "") -> None:
-    """On-demand screenshot describe (bukan Groq) sebelum jawaban.
+_SCREEN_LOOK_REQUEST = re.compile(
+    r"(?:(?:eh|arti|kamu|tolong) )*"
+    r"(?:coba (?:liat|lihat)|(?:coba )?(?:liat|lihat) (?:ke )?(?:layar|screen)"
+    r"|(?:itu apa|(?:apa|yang) (?:(?:yang|lagi) )?ada) di (?:layar|screen))"
+    r"(?: (?:aku|saya|ini|itu|apa|dong|deh|ya|sekarang|sebentar|bentar|dulu|nih|arti))*"
+)
 
-    Kalau omongan turn INI menyinggung layar ("layar", "screen", "lihat", ...)
-    tapi jendela vision belum terbuka, buka dulu — jangan tunggu timer scouter.
-    Tanpa ini pertanyaan soal layar bisa datang SEBELUM scouter sempat
-    membuka jendela, jadi Arti menjawab tanpa data dan mengarang. Scouter
-    baru membuka jendelanya
-    SETELAH pertanyaan lewat. Mekanisme bukanya sama persis dengan scouter
-    (vision_auto_until), cuma pemicunya keyword turn ini — dan tetap di belakang
-    master switch vision_enabled.
-    """
-    global vision_auto_until
-    if not screen_privacy.allows_screen():
-        return
-    if not is_vision_active():
-        import arti_scouter_client  # import lokal — bridge tidak meng-importnya di level modul
 
-        if (
-            user_speech
-            and CONFIG.get("vision_enabled", CONFIG.get("screen_context_enabled", False))
-            and arti_scouter_client.has_screen_keywords(user_speech)
-        ):
-            sec = float(CONFIG.get("scouter_auto_vision_sec", 60))
-            vision_auto_until = max(vision_auto_until, time.time() + sec)
-            _sync_vision_runtime_to_config()
-            print(f"[Vision] Dibuka karena ditanya soal layar (~{int(sec)}s)")
-        else:
-            return
+def _owner_screen_look_requested(trigger: VoiceTrigger) -> bool:
+    if (trigger.viewer_name is not None or trigger.trigger_type not in ("mic", "ptt", "wake_word", "mic_pasif")
+            or (trigger.trigger_type == "mic_pasif" and not trigger.owner_marked)):
+        return False
+    text = " ".join(re.sub(r"[,?.!]", " ", trigger.text.casefold()).split())
+    return bool(_SCREEN_LOOK_REQUEST.fullmatch(text))
+
+
+def refresh_vision_for_turn(
+    requested: bool = False, privacy_epoch: int | None = None,
+) -> arti_screen_context.ScreenSnapshot | None:
+    """Describe a requested frame for this turn, or refresh the manually enabled ring."""
+    if not screen_privacy.allows_screen(privacy_epoch):
+        return None
+    if requested and not CONFIG.get("vision_enabled", CONFIG.get("screen_context_enabled", False)):
+        return None
+    if not requested and not is_vision_active():
+        return None
     try:
-        snap, provider = arti_vision_client.refresh_if_stale(_scouter_config())
+        cfg = _scouter_config()
+        if privacy_epoch is not None:
+            cfg["_screen_privacy_epoch"] = privacy_epoch
+        if requested:
+            cfg.update(vision_runtime_on=True, _vision_explicit_request=True)
+            snap, provider = arti_vision_client.capture_and_describe(cfg)
+            if snap and screen_privacy.allows_screen(snap.privacy_epoch):
+                print(f"[Vision] Owner screen request described via {provider}")
+                return snap
+            return None
+        snap, provider = arti_vision_client.refresh_if_stale(cfg)
         if snap and snap.scene:
             arti_screen_context.update_watch_state_from_snapshot(
                 snap,
@@ -8618,6 +8422,7 @@ def refresh_vision_for_turn(user_speech: str = "") -> None:
             print(f"[Vision] Turn refresh via {provider}: {snap.scene[:50]}...")
     except Exception as e:
         print(f"[Vision] Turn refresh skip: {type(e).__name__}: {e}")
+    return None
 
 
 @contextmanager
@@ -8722,7 +8527,7 @@ def _passive_voice_block_reason(text: str, audio_duration_sec: float | None) -> 
     # Panggilan nama lolos pagar panjang (smoke 2026-10-24: "[recorded remark omitted]",
     # "[recorded remark omitted]" dibuang terlalu_pendek, Bohan mengira Arti beku). Pagar lain
     # tetap berlaku dan model masih boleh memilih [DIAM].
-    called = streamer_voice.addressed(text or "", CONFIG)
+    called = streamer_voice.addressed(text or "", CONFIG) or _passive_owner_reply_required(text)
     if not called and _passive_speech_is_short(text):
         why = _short_speech_block_reason(text)
         if why is not None:
@@ -8787,12 +8592,16 @@ def _handle_passive_ptt_transcript(text, audio_duration_sec) -> bool:
             from arti_runtime import stream_notes
             stream_notes.bridge_passive(__import__(__name__), text)
         return False
-    if CONFIG.get("passive_mic_hygiene") and mic_hygiene.is_hallucination_transcript(text):
-        print(f"[ASR Noise Filter] Skip noise: \"{text}\"")
+    if CONFIG.get("passive_mic_hygiene") and not mic_hygiene.has_question_mark(text) and (
+        mic_hygiene.is_hallucination_transcript(text, prompt=arti_voice_pipeline.MIC_ASR_VOCABULARY)
+        or text.strip() in _ASR_LITERAL_PHANTOMS
+    ):
+        print("[ASR Noise Filter] Skip Whisper phantom.")
         return False
     # Preserve T3-25's bounded conversational short turns, including its echo fence.
+    required = _passive_owner_reply_required(text)
     allow_short = _passive_speech_is_short(text) and _short_speech_block_reason(text) is None
-    why = _passive_junk_gate.reject(text, CONFIG, allow_short=allow_short)
+    why = _passive_junk_gate.reject(text, CONFIG, allow_short=allow_short or required, dedup_addressed=required)
     if why is not None:
         add_to_history("Streamer", str(text))
         if CONFIG.get("stream_game_notes"):
@@ -8812,7 +8621,7 @@ def _handle_passive_ptt_transcript(text, audio_duration_sec) -> bool:
     speech_clock = _last_streamer_speech_ts
     add_to_history("Streamer", text)
     print(f"[ASR Info] Pasif: \"{text}\"")
-    marked = _mic_pasif_owner_marked(text)  # flag off: True (today's owner path)
+    marked = required or _mic_pasif_owner_marked(text)
     if CONFIG.get("stream_game_notes"):
         if CONFIG.get("mic_priority_mark") and marked:
             from arti_runtime import stream_notes
@@ -8821,7 +8630,8 @@ def _handle_passive_ptt_transcript(text, audio_duration_sec) -> bool:
         _last_streamer_speech_ts = speech_clock
     if CONFIG.get("passive_mic_hygiene"):
         why = mic_hygiene.passive_history_only_reason(
-            named=streamer_voice.addressed(text, CONFIG), now=time.time(), media_until=_media_playback_until)
+            named=required or streamer_voice.addressed(text, CONFIG),
+            now=time.time(), media_until=_media_playback_until)
         if why is not None:
             print(f"[ASR Pasif] History only ({why}).")
             return False
@@ -8829,7 +8639,7 @@ def _handle_passive_ptt_transcript(text, audio_duration_sec) -> bool:
 
 
 def _passive_voice_prompt(
-    prompt_content: str, target_instruction: str, speech: str = "",
+    prompt_content: str, target_instruction: str, speech: str = "", *, answer_required: bool = False,
 ) -> str:
     """PTT state is observed; addressee/response remain the model's decision."""
     # Wake detection supplies a word-bounded lexical fact, never owner authority
@@ -8864,6 +8674,12 @@ def _passive_voice_prompt(
         "(Omongan tanpa PTT tidak dihitung sebagai saran; kalau kamu lagi "
         "nanya saran, boleh minta Bohan pencet PTT.)"
     )
+    if answer_required:
+        instruction = (
+            "Bohan menyapamu atau menanyakan sesuatu di [Pesan/Panggilan Sekarang]. "
+            "Tanggapi pesannya langsung dalam suara Arti. Kalau belum tahu jawabannya, bilang terus terang. "
+            "Layar dan chat lama hanya bahan konteks. Ucapan tanpa PTT tetap bukan saran untuk menggerakkan permainan."
+        )
     if target_instruction and target_instruction in prompt_content:
         return prompt_content.replace(target_instruction, instruction, 1)
     return f"{prompt_content}\n{instruction}"
@@ -8871,6 +8687,25 @@ def _passive_voice_prompt(
 
 # ADR 98 (a46 T40): the model typed the token with a space inside it; the exact-word pattern missed it and it reached her speech.
 DIAM_TOKEN_RE = re.compile(r"\[\s*d\s*i\s*a\s*m\s*\]", re.IGNORECASE)
+_DIAM_CONFUSABLES = str.maketrans({
+    "Ԁ": "D", "ԁ": "d", "І": "I", "і": "i", "Ӏ": "I", "ӏ": "i",
+    "А": "A", "а": "a", "М": "M", "м": "m",
+    "Ι": "I", "ι": "i", "Α": "A", "α": "a", "Μ": "M", "μ": "m",
+})
+# Include fullwidth and vertical square brackets, which NFKC folds to ASCII.
+_DIAM_CANDIDATE_RE = re.compile(r"[\[［﹇][^\[［﹇\]］﹈]*[\]］﹈]")
+
+
+def _normalize_diam_token(text):
+    return unicodedata.normalize("NFKC", text).translate(_DIAM_CONFUSABLES)
+
+
+def _strip_diam_tokens(text):
+    def strip_token(match):
+        candidate = match[0]
+        return "" if DIAM_TOKEN_RE.fullmatch(_normalize_diam_token(candidate)) else candidate
+
+    return _DIAM_CANDIDATE_RE.sub(strip_token, text).strip()
 
 
 def _passive_voice_reply_is_silence(reply) -> bool:
@@ -8881,13 +8716,15 @@ def _passive_voice_reply_is_silence(reply) -> bool:
     dianggap diam — kalimat kaleng ke orang yang tidak bertanya lebih buruk.
     """
     text = str(reply or "").strip()
-    if not text or DIAM_TOKEN_RE.search(text):
+    normalized = _normalize_diam_token(text)
+    if not normalized or DIAM_TOKEN_RE.search(normalized):
         return True
-    if re.sub(r"[^a-z]", "", text.lower()) == "diam":
+    if re.sub(r"[^a-z]", "", normalized.lower()) == "diam":
         return True
     try:
         kept, removed = filter_meta_history_talk(clean_ai_reply(text).strip())
-        return not kept or removed > 0 or is_narrator_reply(kept)
+        return (not kept or removed > 0 or bool(DIAM_TOKEN_RE.search(_normalize_diam_token(kept)))
+                or is_narrator_reply(kept))
     except Exception:  # noqa: BLE001 — penilai advisory; ragu = jalur lama
         return False
 
@@ -9001,6 +8838,7 @@ def voice_listener_worker():
             recording = []
             is_speaking = False
             stardew_asr_epoch = None
+            capture_generation = None
             silence_duration = 0
             # Endpoint adaptif: satu percobaan spekulatif per ucapan.
             spek_dikirim = False
@@ -9040,6 +8878,7 @@ def voice_listener_worker():
                             print("[ASR] Mendengar suara...")
                             is_speaking = True
                             stardew_asr_epoch = _stardew_ptt_epoch if hotkey_active else None
+                            capture_generation = _ptt_capture_generation if hotkey_active else None
                         recording.append(audio_chunk)
                         silence_duration = 0
                         last_voice_at = time.perf_counter()
@@ -9188,7 +9027,7 @@ def voice_listener_worker():
                                             text = _transcribe_stardew_ptt(audio_array,samplerate,stardew_asr_epoch)
                                         asr_ms = int((time.perf_counter() - asr_t0) * 1000)
                                         asr_stages = {"vad_tail_ms": vad_tail_ms, "asr_ms": asr_ms}
-                                        _complete_stardew_asr(text, stardew_asr_epoch, audio_dur, asr_stages)
+                                        _complete_stardew_asr(text, stardew_asr_epoch, audio_dur, asr_stages, capture_generation)
                                     else:
                                         # OFF: catat ke history; lolos pagar -> giliran mic_pasif
                                         text = transcribe_audio(audio_array, samplerate, use_groq=True, capture_quality=True)
@@ -9201,31 +9040,25 @@ def voice_listener_worker():
                                     text = transcribe_audio(audio_array, samplerate, use_groq=use_groq)
                                     asr_ms = int((time.perf_counter() - asr_t0) * 1000)
                                     asr_stages = {"vad_tail_ms": vad_tail_ms, "asr_ms": asr_ms}
-                                    if text:
-                                        text = filter_whisper_hallucination(text, is_passive_monitoring=True)
-                                        if text:
-                                            print(f"[ASR] Hasil: \"{text}\"")
-                                            if is_arti_wake_call(text):
-                                                # Audit ronde-3: cabang wake dulu SATU-SATUNYA
-                                                # jalur ASR tanpa filter echo — ekor TTS yang
-                                                # menyebut "Arti" bisa jadi trigger + tanda
-                                                # kehidupan palsu (dormansi mundur terus).
-                                                if is_asr_echo_of_arti(text):
-                                                    print("[ASR] Echo suara Arti — diabaikan (wake)")
-                                                else:
-                                                    print(f"🎉 WAKE WORD TERDETEKSI!")
-                                                    queue_voice_trigger(
-                                                        text,
-                                                        trigger_type="wake_word",
-                                                        asr_stages=asr_stages,
-                                                    )
-                                                    summarizer_queue.put(text)
+                                    if text and text.strip() not in _ASR_LITERAL_PHANTOMS:
+                                        print(f"[ASR] Hasil: \"{text}\"")
+                                        if is_arti_wake_call(text):
+                                            if is_asr_echo_of_arti(text):
+                                                print("[ASR] Echo suara Arti — diabaikan (wake)")
                                             else:
-                                                add_to_history("Streamer", text)
-                                                print(
-                                                    "[ASR Info] Diabaikan (tidak memanggil Arti, "
-                                                    "tapi dicatat ke sejarah stream)."
+                                                print(f"🎉 WAKE WORD TERDETEKSI!")
+                                                queue_voice_trigger(
+                                                    text,
+                                                    trigger_type="wake_word",
+                                                    asr_stages=asr_stages,
                                                 )
+                                                summarizer_queue.put(text)
+                                        else:
+                                            add_to_history("Streamer", text)
+                                            print(
+                                                "[ASR Info] Diabaikan (tidak memanggil Arti, "
+                                                "tapi dicatat ke sejarah stream)."
+                                            )
                             
                                 # Reset buffer
                                 recording.clear()
@@ -9745,46 +9578,8 @@ def set_mood(new_mood):
 # (fitur teks murni — TIDAK menyentuh idle/expression/VTS)
 # ============================================================
 
-_BAD_ARTICULATION_PATTERNS = re.compile(
-    r"|".join(
-        [
-            r"membaca\s+\d*\s*catatan",
-            r"membaca\s+(sejarah|history|log)",
-            r"catatan\s+sejarah",
-            r"buku\s+sejarah",
-            r"sejarah\s+(stream|chat|percakapan)",
-            r"mengingat\s+(chat|sejarah|percakapan|dari\s+konteks)",
-            r"aku\s+ingat",
-            r"(kamu\s+)?ingat\s+viewer",
-            r"bilang.*ingat",
-            r"history\s+stream",
-            r"\d+\s+catatan",
-            r"log\s+(chat|stream)",
-            r"sebagai\s+arti",
-            r"arti\s+menerima",
-            r"menerima\s+panggilan",
-            r"menanggapi\s+panggilan",
-            r"giliran\s+aku\s+sebagai",
-            r"aku\s+harus\s+respon",
-            r"aku\s+perlu\s+(memilih|ingat|menjawab)",
-            r"bukan\s+sebagai\s+ai",
-            r"langsung\s+sebagai\s+arti",
-            r"sekarang\s+arti\s+(lagi|menerima)",
-            r"perlu\s+ingat\s+aturan",
-            r"ini\s+adalah\s+lanjutan",
-            r"aturan\s*:\s*\d",
-            r"arti\s+ini\s+dipanggil",
-            r"pertanyaan\s+atau\s+panggilan",
-            r"panggilan\s+sekarang\s+adalah",
-            r"harus\s+merespons",
-            r"ini\s+kan\s+ucapan",
-            r"dengan\s+gaya\s+yang\s+sesuai",
-            r"karena\s+aku\s+ingat\s+dari\s+konteks",
-            r"langsung\s+merespons\s+sebagai",
-        ]
-    ),
-    re.IGNORECASE,
-)
+# Re-exported from arti_runtime/reply_text.py; calls inside reply_text do not see bridge rebinding.
+from arti_runtime.reply_text import _BAD_ARTICULATION_PATTERNS  # noqa: E402
 
 
 def _streamer_label(config: dict | None = None) -> str:
@@ -9793,8 +9588,8 @@ def _streamer_label(config: dict | None = None) -> str:
     return (cfg.get("streamer_name") or "").strip()
 
 
-def _sentence_is_bad_articulation(sentence: str) -> bool:
-    return bool(_BAD_ARTICULATION_PATTERNS.search(sentence))
+# Re-exported from arti_runtime/reply_text.py; calls inside reply_text do not see bridge rebinding.
+from arti_runtime.reply_text import _sentence_is_bad_articulation  # noqa: E402
 
 
 def is_narrator_reply(text: str) -> bool:
@@ -9820,22 +9615,8 @@ def is_narrator_reply(text: str) -> bool:
     return False
 
 
-def filter_meta_history_talk(text: str) -> tuple[str, int]:
-    """Buang kalimat meta; return (teks bersih, jumlah kalimat dibuang)."""
-    if not text:
-        return "", 0
-    kept = []
-    removed = 0
-    for sentence in re.split(r"(?<=[.!?])\s+", text):
-        s = sentence.strip()
-        if not s:
-            continue
-        if _sentence_is_bad_articulation(s):
-            removed += 1
-            print(f"[Filter] Meta/narrator dihapus: {s[:72]}...")
-            continue
-        kept.append(s)
-    return " ".join(kept).strip(), removed
+# Re-exported from arti_runtime/reply_text.py; calls inside reply_text do not see bridge rebinding.
+from arti_runtime.reply_text import filter_meta_history_talk  # noqa: E402
 
 
 def _viewer_names_for_fallback(max_names: int = 3) -> list[str]:
@@ -9937,18 +9718,8 @@ def _reply_tokens_with_thinking(user_speech: str, floor: int) -> int:
     )
 
 
-def _trim_stream_reply(full: str, finish_reason, max_tokens: int, source: str) -> str:
-    """Jawaban stream: pakai finish_reason dari chunk SSE terakhir kalau ada.
-
-    Heuristik (dekat budget + tanpa tanda baca akhir) hanya cadangan saat
-    stream tidak melapor finish_reason — heuristik itu meleset di gpt-oss,
-    yang nalarnya berbagi budget sehingga content berhenti di bawah ambang.
-    """
-    if finish_reason:
-        return arti_reply_policy.trim_if_length_cut(full, finish_reason, source)
-    if arti_reply_policy.looks_token_cut(full, max_tokens):
-        return arti_reply_policy.trim_if_length_cut(full, "length", f"{source} (heuristik)")
-    return full
+# Re-exported from arti_runtime/reply_text.py; calls inside reply_text do not see bridge rebinding.
+from arti_runtime.reply_text import _trim_stream_reply  # noqa: E402
 
 
 def get_arti_reply_limits(
@@ -9976,76 +9747,8 @@ def get_arti_reply_limits(
     return plan.sentences, plan.max_chars
 
 
-def _truncate_reply_length(
-    text: str, max_sentences: int, max_chars: int, runon_chars: int | None = None
-) -> str:
-    """Batas AMAN jawaban — potong HANYA di batas kalimat (2026-10-23).
-
-    Dulu memotong di jumlah kalimat target lalu di koma/kata kalau karakter
-    lewat — Arti berhenti di tengah pikiran. Sekarang `max_sentences` /
-    `max_chars` adalah batas aman (arti_reply_policy.reply_hard_cap) dan:
-    - kalimat yang akan terbelah batas karakter dibuang UTUH;
-    - kalimat pertama (atau pembuka pendek "Iya!" + satu kalimat panjang)
-      dipertahankan utuh, kecuali lebih dari 2x `runon_chars` (keluaran kabur
-      tanpa tanda baca) — baru di situ pemotong klausa lama dipakai sebagai
-      rem darurat, memotong ke ~`runon_chars`. `runon_chars` = batas aman
-      dasar (900), bukan batas rant, jadi kalimat kabur tidak pernah > 1800
-      dan hasil rem <= 900.
-    """
-    sentences = arti_reply_policy.split_sentences(text)
-    sentences = [re.sub(r"\s+", " ", s).strip() for s in sentences]
-    if max_chars <= 0 or max_sentences <= 0 or not sentences:
-        return ""
-    runon = max_chars if runon_chars is None else max(1, min(runon_chars, max_chars))
-    kept: list[str] = []
-    for sentence in sentences[:max_sentences]:
-        joined = " ".join(kept + [sentence])
-        if kept and len(joined) > max_chars:
-            if len(" ".join(kept)) < 0.25 * max_chars:
-                # Yang tersisa cuma pembuka ("Iya!"): jangan jadi celetukan.
-                # Aturan sama dengan kalimat pertama — utuh sampai 2x runon,
-                # rem darurat hanya di atas itu.
-                if len(joined) > 2 * runon:
-                    return _runaway_clause_cut(joined, runon)
-                kept.append(sentence)
-            break
-        kept.append(sentence)
-    result = " ".join(kept)
-    if len(result) <= 2 * runon or max(len(s) for s in kept) <= 2 * runon:
-        return result
-    return _runaway_clause_cut(result, runon)
-
-
-def _runaway_clause_cut(result: str, max_chars: int) -> str:
-    """Rem darurat untuk SATU kalimat kabur > 2x batas aman (tanpa titik).
-
-    Ini pemotong lama (klausa/kata + "…"); sekarang hanya untuk keluaran
-    kabur, bukan jawaban normal yang panjang.
-    """
-    if len(result) <= max_chars:
-        return result
-    if max_chars <= 0:
-        return ""
-    cut = result[:max_chars - 1]
-    # Prefer the last complete sentence or clause, but only when it keeps at
-    # least 60% of the budget: an opener like "Hah," / "Iya!" must never
-    # become the whole reply. Boundaries are judged on the full text, so the
-    # "." in "Rp10.000" or the "," in "3,5" never counts as one.
-    boundary = 0
-    for m in re.finditer(r"[.!?,;:](?=\s|$)", result):
-        if m.end() > len(cut):
-            break
-        boundary = m.end()
-    if boundary >= 0.6 * max_chars and " " in cut[:boundary]:
-        cut = cut[:boundary]
-        if cut.endswith((".", "!", "?")):
-            return cut
-    elif not result[len(cut)].isspace():
-        head = cut.rsplit(" ", 1)[0] if " " in cut else ""
-        # One leftover word ("Hah,") would be a lone interjection; keep the
-        # hard cut instead.
-        cut = head if not head or " " in head else cut
-    return cut.rstrip(" ,;:") + "…"
+# Re-exported from arti_runtime/reply_text.py; calls inside reply_text do not see bridge rebinding.
+from arti_runtime.reply_text import _truncate_reply_length, _runaway_clause_cut  # noqa: E402
 
 
 def get_viewer_profile_snippet(viewer_name: str) -> str:
@@ -10173,52 +9876,14 @@ def pick_groq_model(
     prompt_chars: int = 0,
 ) -> str:
     """Pilih model Groq by complexity; fallback round-robin jika smart off."""
-    cfg = config or CONFIG
-    models = cfg.get("groq_models", ["llama-3.1-8b-instant"])
-    fast = cfg.get("groq_model_fast", "llama-3.1-8b-instant")
-
-    def _pick(preferred: str) -> str:
-        return preferred if preferred in models else (models[0] if models else preferred)
-
-    # Prompt besar → model fast (hindari HTTP 413 di Groq)
-    if prompt_chars > int(cfg.get("groq_prompt_char_soft_cap", 33000)):
-        return _pick(fast)
-
-    if not cfg.get("smart_groq_routing", True):
-        if not hasattr(pick_groq_model, "_rr_idx"):
-            pick_groq_model._rr_idx = 0
-        m = models[pick_groq_model._rr_idx % len(models)]
-        pick_groq_model._rr_idx += 1
-        return m
-
-    medium = cfg.get("groq_model_medium", "openai/gpt-oss-20b")
-    strong = cfg.get("groq_model_strong", "openai/gpt-oss-120b")
-    rare = cfg.get("groq_model_rare", "openai/gpt-oss-120b")
-
-    t = (user_text or "").lower()
-    complex_kw = ("kenapa", "jelaskan", "bagaimana", "bandingkan", "explain", "detail", "ceritain", "maksudnya")
-    if len(user_text) > 180 or sum(1 for k in complex_kw if k in t) >= 2:
-        return _pick(rare)
-    if "?" in user_text or len(user_text) > 100 or any(k in t for k in complex_kw):
-        return _pick(strong)
-    if len(user_text) > 55:
-        return _pick(medium)
-    return _pick(fast)
+    return groq_chat.pick_groq_model(
+        user_text, config, prompt_chars,
+        default_config=CONFIG,
+        pick_groq_model=pick_groq_model,
+    )
 
 
-def _groq_fallback_chain(primary: str, config: dict) -> list[str]:
-    """Urutan coba: model pilihan dulu, lalu sisanya (fast diutamakan saat limit)."""
-    all_models = list(config.get("groq_models") or [])
-    fast = config.get("groq_model_fast", "llama-3.1-8b-instant")
-    tail: list[str] = []
-    for m in [fast, *all_models]:
-        if m and m not in tail:
-            tail.append(m)
-    chain = [primary] if primary else []
-    for m in tail:
-        if m not in chain:
-            chain.append(m)
-    return chain or all_models or [fast]
+from arti_runtime.groq_chat import _groq_fallback_chain  # noqa: E402
 
 
 def _trim_llm_payload(
@@ -10230,47 +9895,14 @@ def _trim_llm_payload(
 
     The current message, the fact lines and the soul's head go last of all (ADR 119). They can pass max_chars
     together: a slightly big retry beats one that answers without knowing what is true or who she is."""
-    def over():
-        return len(system_prompt) + len(user_content) - max_chars
-
-    if over() <= 0:
-        return system_prompt, user_content
-    history, sep, current = user_content.partition("[Pesan/Panggilan Sekarang:]")
-    if sep:
-        note = "...(history dipangkas)...\n\n"
-        keep = max(0, len(history) - over() - len(note))
-        user_content = note + (history[-keep:] if keep else "") + sep + current
-    elif len(user_content) > max_chars:
-        user_content = user_content[-max_chars:]
-    if over() <= 0:
-        return system_prompt, user_content
-    text, facts = _split_stardew_status(system_prompt)
-    system_prompt = text + facts
-    for marker in _SYSTEM_PROMPT_BLOCK_MARKERS:
-        if over() <= 0:
-            break
-        text = _remove_system_prompt_block(text, marker)
-        system_prompt = text + facts
-    if over() <= 0:
-        return system_prompt, user_content
-    start = text.find(SOUL_MARKER)
-    before, soul, rest = text, "", ""
-    if start >= 0:
-        after = start + len(SOUL_MARKER)
-        found = re.search(r"(?m)^\[[A-Z]", text[after:])
-        end = after + found.start() if found else len(text)
-        before, soul, rest = text[:start], text[start:end], text[end:]
-        # A 2000-character floor: her identity and core personality come first in the file. Whole lines only.
-        keep = max(min(len(soul), 2000), len(soul) - over())
-        if keep < len(soul):
-            soul = soul[:keep].rsplit("\n", 1)[0] + "\n"
-        system_prompt = before + soul + rest + facts
-    if over() > 0:
-        before = before[:max(4000, len(before) - over())]
-        system_prompt = before + soul + rest + facts
-    if over() > 0:
-        rest = rest[:max(0, len(rest) - over())]
-    return before + soul + rest + facts, user_content
+    return groq_chat._trim_llm_payload(
+        system_prompt, user_content, max_chars,
+        _split_stardew_status=_split_stardew_status,
+        _remove_system_prompt_block=_remove_system_prompt_block,
+        _SYSTEM_PROMPT_BLOCK_MARKERS=_SYSTEM_PROMPT_BLOCK_MARKERS,
+        SOUL_MARKER=SOUL_MARKER,
+        re=re,
+    )
 
 
 def _openrouter_after_groq(
@@ -10279,61 +9911,16 @@ def _openrouter_after_groq(
     cfg: dict,
     reason,
 ) -> tuple[str | None, str | None]:
-    if not screen_privacy.current(cfg.get("_screen_privacy_epoch", screen_privacy.epoch)):
-        return None, None
-    # Penanda untuk pembungkus groq_chat_completion: Groq jatuh ke sini = Groq gagal.
-    _groq_health_tl.alasan = reason
-    if not cfg.get("openrouter_live_fallback_enabled", True):
-        return None, None
-    if not arti_provider_health.is_available("openrouter:voice"):
-        return None, None
-    print(f"[Brain] Fallback OpenRouter (groq: {reason})...")
-    reply, or_model = arti_openrouter.openrouter_live_completion(
-        system_prompt, user_content, cfg
+    return groq_chat._openrouter_after_groq(
+        system_prompt, user_content, cfg, reason,
+        screen_privacy=screen_privacy,
+        _groq_health_tl=_groq_health_tl,
+        arti_provider_health=arti_provider_health,
+        arti_openrouter=arti_openrouter,
     )
-    if reply:
-        arti_provider_health.record_success("openrouter:voice")
-    else:
-        arti_provider_health.record_failure("openrouter:voice", "unknown")
-    return reply, or_model
 
 
-def _groq_model_hilang(response) -> bool:
-    """HTTP 400 `model_decommissioned` = model ini MATI, bukan permintaan salah.
-
-    Groq memensiunkan model kira-kira tiap 2 bulan (docs/MODEL-REGISTRY.md §4).
-    Sampai 2026-08-13 kode di bawah memperlakukan 400 sebagai kegagalan fatal
-    lalu `break` — jadi SATU model mati di tengah rantai menyumbat seluruh
-    sisanya: primary kena 429 -> model mati -> berhenti -> OpenRouter, tanpa
-    pernah menyentuh model Groq yang masih hidup. Dibuktikan dengan
-    menjalankan groq_chat_completion terhadap transport palsu berbentuk error
-    asli (diambil dari `llama3-8b-8192` yang sudah mati sejak Agu 2025).
-
-    Sengaja SEMPIT — hanya kode/pesan yang jelas menyoal model. Permintaan
-    yang memang rusak (payload salah) harus tetap gagal cepat, bukan
-    menggilir lima model dan membuang lima kali round-trip.
-    """
-    if response.status_code not in (400, 404):
-        return False
-    kode = pesan = ""
-    try:
-        err = (response.json() or {}).get("error") or {}
-        if isinstance(err, dict):
-            kode = str(err.get("code") or "")
-            pesan = str(err.get("message") or "")
-    except Exception:  # noqa: BLE001 - body bukan JSON
-        pesan = response.text or ""
-    campur = f"{kode} {pesan}".lower()
-    return any(
-        p in campur
-        for p in (
-            "model_decommissioned",
-            "model_not_found",
-            "has been decommissioned",
-            "no longer supported",
-            "does not exist",
-        )
-    )
+from arti_runtime.groq_chat import _groq_model_hilang  # noqa: E402
 
 
 def groq_chat_completion(
@@ -10343,120 +9930,19 @@ def groq_chat_completion(
     config: dict | None = None,
 ) -> tuple[str | None, str | None]:
     """Groq dengan model pilihan (+ opsi roll semua model) → OpenRouter jika gagal."""
-    cfg = config or CONFIG
-    key = cfg.get("groq_api_key")
-    if not key or key == "YOUR_GROQ_API_KEY":
-        return _openrouter_after_groq(system_prompt, user_content, cfg, "no groq key")
-
-    if cfg.get("groq_roll_all_models_on_limit", False):
-        chain = _groq_fallback_chain(primary_model, cfg)
-    else:
-        chain = [primary_model] if primary_model else []
-
-    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-    url = "https://api.groq.com/openai/v1/chat/completions"
-    retryable = (429, 502, 503)
-    last_status = None
-    tried_413_retry = False
-    dicoba: list[str] = []   # yang SUNGGUH ditembak, bukan panjang rantai
-
-    for model in chain:
-        if not screen_privacy.current(cfg.get("_screen_privacy_epoch", screen_privacy.epoch)):
-            return None, None
-        dicoba.append(model)
-        payload = {
-            "model": model,
-            "max_tokens": live_max_tokens_for_trigger(user_content, cfg),
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content},
-            ],
-        }
-        if "qwen" in model.lower():
-            # "/no_think" diabaikan qwen3.6 — pakai reasoning_effort API param
-            payload["reasoning_effort"] = "none"
-        elif "gpt-oss" in model.lower():
-            # gpt-oss juga model reasoning tapi selama ini TANPA peredam —
-            # malam 17 Agu: 3 giliran curious (teks panjang -> routing rare =
-            # gpt-oss-120b) balik 200 dengan content KOSONG karena seluruh
-            # budget habis buat nalar. Groq menghormati "low" (beda dari
-            # provider free OpenRouter yang mengabaikannya) — nalar singkat,
-            # jawaban tetap utuh; persis permintaan Bohan "[recorded remark omitted]".
-            payload["reasoning_effort"] = "low"
-            payload["max_tokens"] += REPLY_THINKING_HEADROOM_TOKENS
-        try:
-            response = requests.post(url, headers=headers, json=payload, timeout=(3, 8))
-        except Exception as e:
-            print(f"[Groq] {model} error: {e}")
-            if not cfg.get("groq_roll_all_models_on_limit", False):
-                break
-            continue
-
-        if response.status_code == 200:
-            _pilihan = response.json()["choices"][0]
-            isi = arti_reply_policy.trim_if_length_cut(
-                _pilihan["message"]["content"], _pilihan.get("finish_reason"), f"Groq {model}"
-            )
-            if isi and str(isi).strip():
-                return isi, model
-            # HTTP 200 dengan content kosong = GAGAL, bukan sukses. Dulu
-            # nilai kosong ini di-return apa adanya -> pemanggil menganggap
-            # provider "sudah menjawab" -> OpenRouter tak pernah dicoba ->
-            # giliran curious membisu 3x semalam (17 Agu).
-            print(f"[Groq] {model} 200 tapi content KOSONG (budget termakan nalar?) — lanjut")
-            last_status = 200
-            continue
-
-        last_status = response.status_code
-        if response.status_code == 413 and not tried_413_retry:
-            if not screen_privacy.current(cfg.get("_screen_privacy_epoch", screen_privacy.epoch)):
-                return None, None
-            tried_413_retry = True
-            fast = cfg.get("groq_model_fast", "llama-3.1-8b-instant")
-            sys_t, user_t = _trim_llm_payload(system_prompt, user_content)
-            print(f"[Groq] HTTP 413 — retry {fast} dengan prompt dipangkas...")
-            payload["model"] = fast
-            payload["messages"] = [
-                {"role": "system", "content": sys_t},
-                {"role": "user", "content": user_t},
-            ]
-            try:
-                response = requests.post(url, headers=headers, json=payload, timeout=(3, 8))
-            except Exception as e:
-                print(f"[Groq] retry 413 error: {e}")
-                break
-            if response.status_code == 200:
-                _pilihan = response.json()["choices"][0]
-                return arti_reply_policy.trim_if_length_cut(
-                    _pilihan["message"]["content"], _pilihan.get("finish_reason"), f"Groq {fast}"
-                ), fast
-            last_status = response.status_code
-        if _groq_model_hilang(response):
-            print(
-                f"[Groq] {model} SUDAH PENSIUN "
-                f"(HTTP {response.status_code}) — lanjut model berikutnya."
-            )
-            continue
-        if response.status_code in retryable:
-            if cfg.get("groq_roll_all_models_on_limit", False):
-                print(f"[Groq] {model} HTTP {response.status_code} — coba Groq lain...")
-                continue
-            print(f"[Groq] {model} HTTP {response.status_code} — langsung OpenRouter.")
-            break
-        if response.status_code not in (413,):
-            print(f"[Groq] {model} HTTP {response.status_code}: {response.text[:150]}")
-            break
-        print(f"[Groq] {model} HTTP 413 — langsung OpenRouter.")
-        break
-
-    if len(dicoba) > 1:
-        # Dulu mencetak len(chain) — bohong: "Gagal setelah 5 model" padahal
-        # cuma 1-2 yang ditembak sebelum break.
-        print(
-            f"[Groq] Gagal setelah {len(dicoba)} model dicoba "
-            f"({', '.join(dicoba)}) — HTTP {last_status}"
-        )
-    return _openrouter_after_groq(system_prompt, user_content, cfg, last_status)
+    return groq_chat._groq_chat_completion_inti(
+        primary_model, system_prompt, user_content, config,
+        default_config=CONFIG,
+        _openrouter_after_groq=_openrouter_after_groq,
+        _groq_fallback_chain=_groq_fallback_chain,
+        screen_privacy=screen_privacy,
+        live_max_tokens_for_trigger=live_max_tokens_for_trigger,
+        REPLY_THINKING_HEADROOM_TOKENS=REPLY_THINKING_HEADROOM_TOKENS,
+        requests=requests,
+        arti_reply_policy=arti_reply_policy,
+        _trim_llm_payload=_trim_llm_payload,
+        _groq_model_hilang=_groq_model_hilang,
+    )
 
 
 # --- Kesehatan provider Groq (2026-10-23) ---------------------------------
@@ -10475,28 +9961,15 @@ def groq_chat_completion(  # noqa: F811 — sengaja membungkus versi inti di ata
     config: dict | None = None,
 ) -> tuple[str | None, str | None]:
     """Groq + provider health (gerbang + catat), lalu perilaku lama apa adanya."""
-    cfg = config or CONFIG
-    if not arti_provider_health.enabled():
-        return _groq_chat_completion_inti(primary_model, system_prompt, user_content, config)
-    if not arti_provider_health.is_available("groq"):
-        return _openrouter_after_groq(system_prompt, user_content, cfg, "groq breaker/dead")
-    _groq_health_tl.alasan = _GROQ_TANPA_FALLBACK
-    reply, used = _groq_chat_completion_inti(primary_model, system_prompt, user_content, config)
-    alasan = getattr(_groq_health_tl, "alasan", _GROQ_TANPA_FALLBACK)
-    _groq_health_tl.alasan = _GROQ_TANPA_FALLBACK
-    if alasan is not _GROQ_TANPA_FALLBACK:
-        if alasan != "no groq key":
-            kelas = (arti_provider_health.classify_status(alasan)
-                     if isinstance(alasan, int) else "unknown")
-            # Status yang dilihat di sini milik model TERAKHIR di rantai Groq
-            # (mis. 429,429,404): 404/auth BUKAN bukti Groq mati -> breaker
-            # biasa. Vonis mati hanya dari probe startup (review 21cb06ff).
-            if kelas in arti_provider_health.HARD:
-                kelas = "unknown"
-            arti_provider_health.record_failure("groq", kelas)
-    elif reply:
-        arti_provider_health.record_success("groq")
-    return reply, used
+    return groq_chat.groq_chat_completion(
+        primary_model, system_prompt, user_content, config,
+        default_config=CONFIG,
+        arti_provider_health=arti_provider_health,
+        _groq_chat_completion_inti=_groq_chat_completion_inti,
+        _openrouter_after_groq=_openrouter_after_groq,
+        _groq_health_tl=_groq_health_tl,
+        _GROQ_TANPA_FALLBACK=_GROQ_TANPA_FALLBACK,
+    )
 
 
 _GROQ_TANPA_FALLBACK = object()
@@ -10911,37 +10384,12 @@ async def _cursor_reply_with_fallback(
     return None, [], "gagal"
 
 
-def _sentences_or_empty(text: str) -> list[str]:
-    """Kontrak sama dengan jalur Groq: list hanya diisi kalau >1 kalimat."""
-    try:
-        parts = arti_groq_stream.split_indonesian_sentences(text)
-        return parts if len(parts) > 1 else []
-    except Exception:  # noqa: BLE001
-        return []
-
-
-# qwen di Groq sesekali menyelipkan aksara CJK ke jawaban Indonesia; TTS
-# membacanya kacau. Rentang: kana, CJK unified, hangul, fullwidth forms.
-_CJK_RE = re.compile(r"[　-ヿ㐀-鿿가-힯＀-￯]+")
-
-
-def _shorten_viewer_handles(text: str, user_speech: str | None) -> str:
-    """Ganti handle panjang di jawaban dengan nama panggilan pendek.
-
-    Jaring pengaman kedua (yang pertama: instruksi nick di prompt) — TTS tidak
-    boleh membaca "exampleviewr586" bulat-bulat. Dua sasaran:
-    1. Handle viewer TURN INI (dengan/tanpa @, case-insensitive).
-    2. Token gaya-handle eksplisit ber-@ dengan >=2 digit ekor di mana pun.
-    """
-    handle = arti_reply_policy.extract_viewer_handle(user_speech or "")
-    if handle:
-        nick = arti_reply_policy.viewer_nickname(handle)
-        bare = re.escape(handle.lstrip("@"))
-        if nick and nick.lower() != handle.lstrip("@").lower():
-            text = re.sub(rf"@?{bare}\b", nick, text, flags=re.IGNORECASE)
-    def _nick_at(m: re.Match) -> str:
-        return arti_reply_policy.viewer_nickname(m.group(0)) or m.group(0)
-    return re.sub(r"@[A-Za-z][\w.\-]*\d{2,}\b", _nick_at, text)
+# Re-exported from arti_runtime/reply_text.py; calls inside reply_text do not see bridge rebinding.
+from arti_runtime.reply_text import (
+    _sentences_or_empty,
+    _CJK_RE,
+    _shorten_viewer_handles,
+)  # noqa: E402
 
 
 def post_process_response(text, user_speech=None, config=None, *, rehearsal_call=None):
@@ -12009,9 +11457,11 @@ def _live7_status_block_now():
     return relay.status_block() if CONFIG.get("live7_status_facts_enabled", True) else ""
 
 
-def _live7_reply_facts_now():
+def _live7_reply_facts_now(*, include_host_story=True):
     relay = _live7_help_relay
-    return relay.reply_facts() if relay is not None else ""
+    if relay is None:
+        return ""
+    return relay.reply_facts() if include_host_story else relay.reply_facts(include_host_story=False)
 
 
 def _register_live7_help_sink() -> None:
@@ -12186,7 +11636,7 @@ def _transcribe_stardew_ptt(audio_array, samplerate, epoch):
         raise
 
 
-def _complete_stardew_asr(text, epoch, audio_duration_sec, asr_stages):
+def _complete_stardew_asr(text, epoch, audio_duration_sec, asr_stages, capture_generation=None):
     """Existing PTT transcript filters, with the capture's original generation."""
     global _asr_ptt_cooldown_until
     runtime=_stardew_runtime
@@ -12196,9 +11646,10 @@ def _complete_stardew_asr(text, epoch, audio_duration_sec, asr_stages):
         _note_stardew_bridge_trial_mic(epoch)
     if runtime is not None and epoch is not None and not runtime.owner_voice_current(epoch):
         return False
-    if text:
-        text=filter_whisper_hallucination(text,is_passive_monitoring=False)
-    if text and is_asr_noise_transcript(text,audio_duration_sec):
+    if capture_generation is not None and capture_generation != _ptt_capture_generation:
+        _discard_stardew_capture(epoch)
+        return False
+    if text and text.strip() in _ASR_LITERAL_PHANTOMS:
         _asr_ptt_cooldown_until=time.time()+2.5
         text=None
     if text and is_asr_echo_of_arti(text): text=None
@@ -12209,7 +11660,8 @@ def _complete_stardew_asr(text, epoch, audio_duration_sec, asr_stages):
         _note_screen_privacy(text)
         from arti_runtime import stream_notes
         stream_notes.bridge_line(__import__(__name__), "owner", "ptt", text, owner_marked=True)
-    accepted=queue_voice_trigger(text,trigger_type="ptt",asr_stages=asr_stages,stardew_voice_epoch=epoch)
+    accepted=queue_voice_trigger(text,trigger_type="ptt",asr_stages=asr_stages,stardew_voice_epoch=epoch,
+                                 ptt_generation=capture_generation)
     if accepted: summarizer_queue.put(text)
     return accepted
 
@@ -12241,6 +11693,15 @@ def _try_stardew_owner_generation(trigger):
         return None, False
     speech = stardew_runtime.sanitize_trusted_speech(result.speech or "", CONFIG)
     return speech, True
+
+
+def _kept_owner_conversation_only(trigger):
+    if not getattr(trigger, "owner_reply_required", False):
+        return False
+    epoch = getattr(trigger, "stardew_voice_epoch", None)
+    return (isinstance(trigger.text, arti_voice_queue.CombinedOwnerQuestions)
+            or (epoch is not None and _stardew_runtime is not None
+                and not _stardew_runtime.owner_voice_current(epoch)))
 
 
 def _maybe_execute_reply_tags(reply, trigger, skip_reply_tags):
@@ -12704,6 +12165,9 @@ async def main_loop():
                 pending=voice_trigger_queue.qsize() + len(voice_trigger_buffer),
                 busy=True if tts_is_playing else _brain_busy,
             )
+            if _rehearsal_stopping:
+                _stop_stream_voice()
+                continue
         turn_cleanup_done = False
         try:
             _maybe_auto_off_ptt()
@@ -12859,39 +12323,25 @@ async def main_loop():
             if speech_control.held:
                 await asyncio.sleep(0.1)
                 continue
+            turn_stop_epoch = speech_control.epoch
             use_buffer = CONFIG.get("voice_queue_enabled", False)
             if use_buffer:
                 # Mode buffer: FIFO prioritas — TIDAK drain-newest, chat YT
                 # yang antri tetap dijawab berurutan.
-                queued = (await attention_bridge.dequeue(__import__(__name__)) if attention_desk.enabled(CONFIG)
-                          and not (CONFIG.get("media_watch_mode") and (chat_media.watch_held(CONFIG, time.time())
-                                   or voice_trigger_buffer.depth_for("video")))
-                          else _dequeue_buffered_trigger_if_brain_ready())
+                if attention_desk.enabled(CONFIG) and not (hotkey_active and not _viewer_ptt_gate_closed()) and not (
+                    CONFIG.get("media_watch_mode") and (chat_media.watch_held(CONFIG, time.time())
+                                                         or voice_trigger_buffer.depth_for("video"))
+                ):
+                    queued = _dequeue_buffered_trigger_if_brain_ready(owner_only=True)
+                    if queued is None:
+                        queued = await attention_bridge.dequeue(__import__(__name__))
+                else:
+                    queued = _dequeue_buffered_trigger_if_brain_ready()
                 if queued is None:
                     raise queue.Empty
                 raw = queued
-            elif (CONFIG.get("voice_queue_preserve_humans", False) or CONFIG.get("mic_priority_mark")
-                  or CONFIG.get("chat_quiet_answer_all") or CONFIG.get("media_watch_mode")):
-                raw = _dequeue_preserved_legacy_trigger()
             else:
-                raw = voice_trigger_queue.get_nowait()
-
-                # Drain-newest, TAPI donation/video/game/mic tidak boleh
-                # tertimpa oleh trigger yang datang belakangan (orang sudah
-                # bayar / nunggu playback / kejadian nyata di game yang sudah
-                # lewat kalau telat dijawab / perintah yang Bohan KETIK di
-                # console — lihat alasan lengkap di `always_queue`).
-                def _ttype(r):
-                    return getattr(r, "trigger_type", r[1] if isinstance(r, tuple) else "")
-
-                # "ptt" ikut kebal (2026-10-23): ucapan PTT Bohan yang antre
-                # di belakang giliran mic_pasif tidak boleh tertimpa.
-                while (
-                    _ttype(raw) not in ("donation", "video", "game", "mic", "ptt")
-                    and getattr(raw,"stardew_voice_epoch",None) is None
-                    and not voice_trigger_queue.empty()
-                ):
-                    raw = voice_trigger_queue.get_nowait()
+                raw = _dequeue_preserved_legacy_trigger()
 
             trigger = _normalize_voice_trigger(raw)
 
@@ -12916,15 +12366,12 @@ async def main_loop():
             turn_failed = True
             turn_pending_id = trigger.turn_id or _pending_turn_id
             try:
-                await _handle_voice_trigger_traced(trigger, memories, dynamic_system_prompt)
+                await _handle_voice_trigger_traced(trigger, memories, dynamic_system_prompt, expected_epoch=turn_stop_epoch)
                 turn_failed = False
                 _consecutive_turn_failures = 0
             finally:
                 if turn_failed:
-                    # Same guard as the success path: a PTT ON press during
-                    # this turn (_ptt_on_mid_turn) must not be undone.
-                    if hotkey_active and not tts_stop_flag and not _ptt_on_mid_turn:
-                        hotkey_active = False
+                    _finish_reply_ptt(trigger)
                     # A newer capture may already own the pending id.
                     if _pending_turn_id == turn_pending_id:
                         _pending_turn_id = None
@@ -12946,7 +12393,9 @@ async def main_loop():
                 # tugas sebelumnya dulu.
                 _schedule_post_answer_cleanup()
                 _finish_stardew_owner_voice(trigger)
-                attention_bridge.finish(__import__(__name__), trigger)
+                with speech_control.retaining(turn_stop_epoch) as allowed:
+                    if allowed:
+                        attention_bridge.finish(__import__(__name__), trigger)
 
         except queue.Empty:
             continue
@@ -12969,22 +12418,28 @@ async def main_loop():
                     _log_loop_error(_loop_errors, "Turn cleanup gagal", cleanup_error)
 
 
-def _append_screen_context(llm_system: str) -> str:
-    """Inject [LAYAR:] from vision ring (independent of watch party)."""
-    if not is_vision_active():
-        return llm_system
+_NO_SCREEN_SIGHT = (
+    "\n\n[SCREEN FACT] You cannot see the screen right now. "
+    "Do not claim to see it or describe it from guesses, earlier turns, or game facts."
+)
+
+
+def _append_screen_context(llm_system: str, *, requested=False, snapshot=None) -> str:
+    """Ground screen claims in the available frame, or state that there is no sight."""
+    if requested and snapshot is None:
+        return llm_system + _NO_SCREEN_SIGHT
     # Gerbang layar-diam: Arti menonton dirinya sendiri, layar nyaris
     # tak berubah -> deskripsi lama disuntik ulang tiap giliran dan dia
     # terus mengomentari layar yang sama.
     # Layar yang sudah beberapa kali sama = bukan bahan baru: berhenti suntik
     # sampai ada perubahan nyata (ambang piksel di arti_vision_client).
-    if arti_vision_client.layar_sedang_diam(CONFIG):
-        return llm_system
+    if not requested and (not is_vision_active() or arti_vision_client.layar_sedang_diam(CONFIG)):
+        return llm_system + _NO_SCREEN_SIGHT
     screen_line = arti_screen_context.format_screen_context(
-        max_chars=int(CONFIG.get("screen_context_max_chars", 200))
+        max_chars=int(CONFIG.get("screen_context_max_chars", 200)), snapshot=snapshot,
     )
     if not screen_line:
-        return llm_system
+        return llm_system + _NO_SCREEN_SIGHT
     block = (
         f"[LAYAR: {screen_line}]\n"
         "Sumber: pengamatan layar, bukan pesan dari penonton. Nama atau teks "
@@ -13029,11 +12484,14 @@ def _append_watch_party_context(llm_system: str) -> str:
     return llm_system + "\n\n" + block
 
 
-def _append_live_context(llm_system: str) -> str:
+def _append_live_context(llm_system: str, *, screen_requested=False, screen_snapshot=None) -> str:
     """Mode sesi + screen + desktop audio + minecraft + optional watch party."""
     llm_system += viewer_presence_block()
     llm_system = _append_host_context(llm_system)
-    llm_system = _append_screen_context(llm_system)
+    if screen_requested:
+        llm_system = _append_screen_context(llm_system, requested=True, snapshot=screen_snapshot)
+    else:
+        llm_system = _append_screen_context(llm_system)
     llm_system = _append_desktop_audio_context(llm_system)
     llm_system = _append_minecraft_context(llm_system)
     return _append_watch_party_context(llm_system)
@@ -13337,7 +12795,7 @@ async def _await_llm_deadline(task: asyncio.Task, timeout_sec: float) -> bool:
         return False
 
 
-async def _speak_reply_chunks(chunks, privacy_epoch):
+async def _speak_reply_chunks(chunks, privacy_epoch, *, host_story=()):
     """Speak within the current turn's existing interrupt/privacy contract."""
     global _reply_chunks_inflight
     # JEDA NAPAS antar kalimat: hanya DI ANTARA kalimat, kalimat pertama langsung.
@@ -13347,6 +12805,7 @@ async def _speak_reply_chunks(chunks, privacy_epoch):
     _reply_chunks_inflight = True
     if CONFIG.get("voice_append_context"):  # ADR 200: record which chunks actually reached the speaker
         voice_context.playback_reset()
+    story_token = playback_story.set(host_story) if host_story else None
     try:
         for _i, chunk in enumerate(chunks):
             if tts_stop_flag or not screen_privacy.current(privacy_epoch):
@@ -13361,6 +12820,9 @@ async def _speak_reply_chunks(chunks, privacy_epoch):
             if tts_stop_flag or not screen_privacy.current(privacy_epoch):
                 break
             if _i and _alert_yield_pending():
+                break
+            if host_story and not host_story_playback_current():
+                voiced = False
                 break
             if CONFIG.get("voice_append_context"):
                 voice_context.playback_mark(_i, tts_play_generation)
@@ -13380,6 +12842,8 @@ async def _speak_reply_chunks(chunks, privacy_epoch):
         voiced_ok = voiced and not tts_stop_flag and screen_privacy.current(privacy_epoch)
         return _SpeakChunksResult(voiced_ok, spoken_n, spoken_text, yielded)
     finally:
+        if story_token is not None:
+            playback_story.reset(story_token)
         _reply_chunks_inflight = False
 
 
@@ -13388,57 +12852,95 @@ def _retain_chat_trigger(trigger):
         return
     if not (getattr(trigger.text, "retain_pending", False) or chat_media.watch_held(CONFIG, time.time())):
         return
-    text = chat_media.PendingChat(trigger.text, answer_required=getattr(trigger.text, "answer_required", False))
-    if CONFIG.get("voice_queue_enabled", False):
-        voice_trigger_buffer.enqueue(arti_voice_queue.QueuedVoiceTrigger(
-            text, "yt_chat", trigger.viewer_name, trigger.queued_at, trigger.turn_id,
-            trigger.stardew_voice_epoch, owner_marked=trigger.owner_marked, rotation_rank=trigger.rotation_rank))
-    else:
-        from dataclasses import replace
-        voice_trigger_queue.put(replace(trigger, text=text))
+    with speech_control.retaining(speech_turn_epoch.get()) as allowed:
+        if not allowed:
+            return
+        text = trigger.text if getattr(trigger.text, "retain_pending", False) else chat_media.PendingChat(trigger.text)
+        if CONFIG.get("voice_queue_enabled", False):
+            voice_trigger_buffer.enqueue(arti_voice_queue.QueuedVoiceTrigger(
+                text, "yt_chat", trigger.viewer_name, trigger.queued_at, trigger.turn_id,
+                trigger.stardew_voice_epoch, owner_marked=trigger.owner_marked, rotation_rank=trigger.rotation_rank))
+        else:
+            _enqueue_legacy_voice(replace(trigger, text=text))
+
+
+def _stop_stream_voice():
+    _stop_voice_now(hold=True)
+
+
+def _stop_voice_now(*, hold=False, ptt=False):
+    """Invalidate queued and in-flight voice together before cutting native playback."""
+    global tts_stop_flag
+    speech_control.interrupt(hold=hold)
+    tts_stop_flag = True
+    clear_trigger_queue(stop=True)
+    task = current_api_task
+    if ptt and task and not task.done():
+        if main_event_loop is not None and main_event_loop.is_running():
+            main_event_loop.call_soon_threadsafe(task.cancel)
+        else:
+            task.cancel()
+    if tts_is_playing or _reflex_playing:
+        try:
+            with _sd_gerbang:
+                sd.stop()
+        except Exception:
+            pass
+        if ptt:
+            request_asr_stream_restart("toggle OFF + stop TTS")
 
 
 async def _handle_voice_trigger_traced(
-    trigger: VoiceTrigger, memories: list, dynamic_system_prompt: str
+    trigger: VoiceTrigger, memories: list, dynamic_system_prompt: str, *, expected_epoch=None,
 ):
     """Bind all telemetry emitted during this voice turn to its transcript id."""
     import arti_api_telemetry as tel
 
     turn_id = trigger.turn_id or _pending_turn_id or uuid.uuid4().hex[:12]
     token = tel.set_turn_id(turn_id)
-    if _speech_trigger_expired(trigger):
+    epoch = speech_control.epoch if expected_epoch is None else expected_epoch
+    if not speech_control.allows(epoch) or _speech_trigger_expired(trigger):
         tel.reset_turn_id(token)
         return
-    epoch = speech_control.epoch
     epoch_token = speech_turn_epoch.set(epoch)
+    floor_token = _viewer_floor_revision.set(speech_control.owner_revision if trigger.trigger_type == "yt_chat" else None)
+    stop_root = os.environ.get("ARTI_REHEARSAL_CONFIG")
+    stop_marker = Path(stop_root).resolve().parent / "bridge-stop-request" if stop_root else None
     async def run_turn():
         if (getattr(trigger, "trigger_type", None) == "mic_pasif"
                 or trigger.trigger_type == "own_play"):
-            await _run_passive_turn_preemptible(trigger, memories, dynamic_system_prompt)
-        else:
-            await _handle_voice_trigger(trigger, memories, dynamic_system_prompt)
+            return await _run_passive_turn_preemptible(trigger, memories, dynamic_system_prompt)
+        return await _handle_voice_trigger(trigger, memories, dynamic_system_prompt)
     task = asyncio.create_task(run_turn())
     if CONFIG.get("rehearsal_parent_pid"):
         from scripts.livepath.bridge import turn_event
         turn_event("start", turn_id, trigger)
     try:
         while not task.done():
+            if stop_marker is not None and stop_marker.is_file():
+                _stop_stream_voice()
             if (not speech_control.allows(epoch) or (CONFIG.get("media_watch_mode")
                     and not _media_hold_allows(trigger))):
                 arti_executors.note_user_cancel()
                 task.cancel()
                 await asyncio.gather(task, return_exceptions=True)
-                _retain_chat_trigger(trigger)
+                if speech_control.allows(epoch):
+                    if trigger.owner_reply_required:
+                        _retain_interrupted_owner(trigger)
+                    else:
+                        _retain_chat_trigger(trigger)
                 await _subtitle_broadcast_status("idle", "")
                 await arti_expression_runtime.apply_turn_end(vts, CONFIG)
                 return
             await asyncio.wait({task}, timeout=0.05)
-        task.result()
+        if not task.result() and trigger.owner_reply_required and tts_stop_flag and speech_control.allows(epoch):
+            _retain_interrupted_owner(trigger)
     finally:
         if not task.done():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
         speech_turn_epoch.reset(epoch_token)
+        _viewer_floor_revision.reset(floor_token)
         tel.reset_turn_id(token)
         if CONFIG.get("rehearsal_parent_pid"):
             turn_event("end", turn_id, trigger, completed=not task.cancelled() and task.exception() is None)
@@ -13464,6 +12966,7 @@ async def _run_passive_turn_preemptible(trigger, memories, dynamic_system_prompt
         while not task.done():
             name_waiting = (CONFIG.get("voice_queue_preserve_humans", False)
                             and not attention_desk.enabled(CONFIG)
+                            and not trigger.owner_reply_required
                             and (trigger.trigger_type == "own_play" or not streamer_voice.addressed(trigger.text, CONFIG))
                             and _name_call_waiting())
             if ((hotkey_active and not attention_desk.enabled(CONFIG)) or tts_stop_flag or name_waiting) and not _passive_turn_speaking:
@@ -13472,12 +12975,15 @@ async def _run_passive_turn_preemptible(trigger, memories, dynamic_system_prompt
                 break
             await asyncio.wait({task}, timeout=0.1)
         await asyncio.wait({task})
-        if task.cancelled() or yielded:
+        if task.cancelled() or yielded or (trigger.owner_reply_required and hotkey_active and not _passive_turn_speaking):
             print("[ASR Pasif] PTT menang — giliran pasif dibatalkan.")
-            _retain_interrupted_passive(trigger)
+            if (trigger.trigger_type == "mic_pasif"
+                    and (trigger.owner_reply_required or CONFIG.get("voice_queue_preserve_humans", False))
+                    and speech_control.allows(speech_turn_epoch.get())):
+                _retain_interrupted_owner(trigger)
             await arti_expression_runtime.apply_turn_end(vts, CONFIG)
-            return
-        task.result()
+            return True  # The wrapper settled this interruption.
+        return task.result()
     finally:
         _passive_turn_inflight = False
         _passive_turn_speaking = False
@@ -13490,15 +12996,23 @@ async def _handle_voice_trigger(
     trigger: VoiceTrigger, memories: list, dynamic_system_prompt: str
 ):
     """Satu trigger sekaligus: mikir → RAG → Groq → TTS (no overlap)."""
-    global _pending_turn_id, hotkey_active, last_arti_reply_text, current_api_task, tts_stop_flag, _ptt_on_mid_turn
+    global _pending_turn_id, last_arti_reply_text, current_api_task, tts_stop_flag
     global _passive_turn_speaking
-    if speech_control.held:
+    if not speech_control.allows(speech_turn_epoch.get()):
         return
-    if _live7_game_lane_trigger(trigger) and _live7_game_session_stopped():
+    if getattr(trigger.text, "_host_story_guarded", False):
+        if not trigger.text.is_current():
+            return
+    elif _live7_game_lane_trigger(trigger) and _live7_game_session_stopped():
         return
-    owner_revision = speech_control.owner_revision
+    playing_chat = trigger.trigger_type == "yt_chat" and _game_actually_playing()
+    host_story_retry = getattr(trigger, "host_story_retry", False)
+    owner_overflow = isinstance(trigger.text, arti_voice_queue.OwnerOverflowAck)
+    owner_revision = _viewer_floor_revision.get()
+    if owner_revision is None:
+        owner_revision = speech_control.owner_revision
     tts_stop_flag = False  # A new turn releases cancellation, never the owner hold.
-    _ptt_on_mid_turn = False  # PTT yang menyala sekarang adalah PTT giliran ini.
+    conversation_only = _kept_owner_conversation_only(trigger)
 
     with history_lock:
         privacy_epoch = screen_privacy.epoch
@@ -13518,6 +13032,8 @@ async def _handle_voice_trigger(
     turn_id = trigger.turn_id or _pending_turn_id or tel.current_turn_id()
     timer = PipelineTimer(extra=pipeline_timer.pop_asr_stages())
     await _prepare_turn_start(trigger.trigger_type, trigger.viewer_name)
+    screen_requested = not conversation_only and _owner_screen_look_requested(trigger)
+    screen_snapshot = None
     try:
         # In-game: data dunia Minecraft = ground truth, dan komentar layar OBS
         # memang dibungkam — refresh screenshot cuma nambah detik ke reaksi
@@ -13525,20 +13041,22 @@ async def _handle_voice_trigger(
         # maupun giliran komentar proaktif selama runner hidup.
         # mic_pasif: refresh vision (s/d 15 dtk) cuma memperpanjang jendela
         # di mana PTT Bohan harus menunggu giliran pasif selesai.
-        _skip_vision = (CONFIG.get("video_watcher_v2") and trigger.trigger_type == "video") or trigger.trigger_type in ("game", "mic_pasif", "own_play", "read_in_game", "focus", "cut_in", "scene_ended") or (
+        _skip_vision = trigger.viewer_name is not None or (
+            CONFIG.get("video_watcher_v2") and trigger.trigger_type == "video"
+        ) or trigger.trigger_type in (
+            "yt_chat", "game", "mic_pasif", "own_play", "read_in_game", "focus", "cut_in", "scene_ended"
+        ) or (
             _mc_runner_active() and CONFIG.get("minecraft_mute_screen_curious", True)
         )
-        if not _skip_vision:
-            await asyncio.wait_for(
-                arti_executors.run("vision", refresh_vision_for_turn, user_speech),
+        if (screen_requested and trigger.queued_at >= screen_privacy.changed_at) or (
+                not screen_requested and not _skip_vision):
+            screen_snapshot = await asyncio.wait_for(
+                arti_executors.run("vision", refresh_vision_for_turn, screen_requested, privacy_epoch),
                 timeout=float(CONFIG.get("vision_turn_budget_sec", 15.0)),
             )
     except asyncio.TimeoutError:
-        # Thread vision jalan terus di background dan mengisi ring untuk turn
-        # berikutnya — tapi turn INI tidak boleh disandera provider lemot.
-        # Live 2026-08-02: nvidia read-timeout 60 dtk + fallback cursor 24 dtk
-        # membuat dua turn makan 101-106 detik di fase mikir.
-        print("[Vision] Budget turn habis — jawab tanpa refresh, vision lanjut background")
+        # The worker may finish later. Only the manual path can update the ring.
+        print("[Vision] Turn capture budget expired")
     timer.mark("after_mikir")
 
     # Kumpulkan seluruh catatan sejarah 50 aktivitas sebelumnya untuk dikirim ke LLM
@@ -13564,8 +13082,18 @@ async def _handle_voice_trigger(
     if CONFIG.get("voice_game_memory_enabled"):
         from arti_runtime import experience_digest  # ADR 228: one stat + cached read, no model or retrieval
         turn_system_prompt += experience_digest.bridge_block(__import__(__name__))
+    if CONFIG.get("voice_append_context"):
+        append_stable, turn_system_prompt = voice_context.bounded_system_prompt(
+            dynamic_system_prompt, turn_system_prompt[len(dynamic_system_prompt):],
+            int(CONFIG.get("llm_system_prompt_max_chars", 5500)),
+        )
 
     # Pakai categorized history + RAG parallel (arti_voice_pipeline)
+    append_context = _append_live_context
+    if screen_requested:
+        def append_context(system):
+            return _append_live_context(system, screen_requested=True, screen_snapshot=screen_snapshot)
+
     if (
         trigger.trigger_type == "curious"
         and CONFIG.get("curious_fast_path_enabled", True)
@@ -13578,7 +13106,7 @@ async def _handle_voice_trigger(
             turn_system_prompt,
             CONFIG,
             trim_system_prompt=trim_system_prompt_for_llm,
-            append_watch_party_context=_append_live_context,
+            append_watch_party_context=append_context,
             get_categorized_history=get_categorized_history,
         )
     else:
@@ -13588,7 +13116,7 @@ async def _handle_voice_trigger(
             turn_system_prompt,
             CONFIG,
             trim_system_prompt=trim_system_prompt_for_llm,
-            append_watch_party_context=_append_live_context,
+            append_watch_party_context=append_context,
             get_categorized_history=get_categorized_history,
             extract_trigger_message=_extract_trigger_message,
             quiet=yt_chat_is_quiet(CONFIG),
@@ -13598,7 +13126,11 @@ async def _handle_voice_trigger(
         user_speech = resolve_reaction(user_speech)
         turn.prompt_content = turn.prompt_for(user_speech)
     formatted_history = turn.formatted_history
-    llm_system = turn.llm_system + _live7_reply_facts_now()
+    reply_facts = (_live7_reply_facts_now(include_host_story=False) if host_story_retry or owner_overflow
+                   else _live7_reply_facts_now())
+    llm_system = turn.llm_system + reply_facts
+    host_story = tuple(story for story in (trigger.text, reply_facts, getattr(trigger.text, "host_story_context", None))
+                       if getattr(story, "_host_story_guarded", False))
     if CONFIG.get("stream_game_notes"):
         from arti_runtime import stream_notes
         stream_notes.bridge_reply_facts(__import__(__name__), llm_system[len(turn.llm_system):], epoch=privacy_epoch)
@@ -13633,14 +13165,20 @@ async def _handle_voice_trigger(
     if facts := getattr(user_speech, "attention_facts", ""):
         llm_system += "\n[ATTENTION FACTS] " + facts
     if trigger.trigger_type == "mic_pasif":
-        prompt_content = _passive_voice_prompt(prompt_content, target_instruction, user_speech)
+        prompt_content = _passive_voice_prompt(
+            prompt_content, target_instruction, user_speech,
+            answer_required=getattr(trigger, "owner_reply_required", False))
+    if playing_chat:
+        prompt_content += "\nKamu sedang main. Jawab chat ini langsung dalam satu atau dua kalimat pendek."
+    if conversation_only:
+        prompt_content += "\nTanggapi ucapan Bohan sebagai percakapan. Jawab setiap pertanyaan yang masih relevan tanpa menggerakkan game."
     if trigger.trigger_type in ("ptt", "wake_word", "mic_pasif"):
         llm_system += arti_voice_pipeline.mic_transcript_facts(CONFIG)
     if CONFIG.get("voice_append_context"):
         # ADR 200: the same string for every lane; only the Codex lane reads the attached seed (stable = the
         # session prompt, the history block to drop from the request, the privacy epoch).
         prompt_content = voice_context.attach(prompt_content, stable=voice_context.stable_as_sent(
-            dynamic_system_prompt, llm_system, block_markers=_SYSTEM_PROMPT_BLOCK_MARKERS,
+            append_stable, llm_system, block_markers=_SYSTEM_PROMPT_BLOCK_MARKERS,
             remove_block=_remove_system_prompt_block),
                                               history=formatted_history, privacy_epoch=privacy_epoch)
         voice_seed = prompt_content.voice_seed
@@ -13650,6 +13188,7 @@ async def _handle_voice_trigger(
     if not screen_privacy.current(privacy_epoch):
         await arti_expression_runtime.apply_turn_end(vts, CONFIG)
         return
+    conversation_only = conversation_only or _kept_owner_conversation_only(trigger)
     if trigger.trigger_type == "mic_pasif" and (tts_stop_flag or hotkey_active):
         print("[ASR Pasif] PTT menang — giliran pasif dibuang sebelum LLM.")
         await arti_expression_runtime.apply_turn_end(vts, CONFIG)
@@ -13657,11 +13196,15 @@ async def _handle_voice_trigger(
 
     ai_reply = None
     skip_reply_tags = False
-    _stardew_speech, skip_reply_tags = _try_stardew_owner_generation(trigger)
+    if isinstance(trigger.text, (arti_voice_queue.CombinedChat, arti_voice_queue.OwnerOverflowAck)):
+        _stardew_speech, skip_reply_tags = str(trigger.text), True
+    else:
+        _stardew_speech, skip_reply_tags = ((None, False) if screen_requested or conversation_only
+                                            else _try_stardew_owner_generation(trigger))
     if _stardew_speech is not None:
         ai_reply = _stardew_speech
     provider = CONFIG["api_provider"].lower()
-    _cursor_route = _should_route_to_cursor(trigger.trigger_type)
+    _cursor_route = not host_story_retry and _should_route_to_cursor(trigger.trigger_type)
     tts_sentence_chunks: list[str] = []
     llm_call = {
         "provider": "cursor_chain" if _cursor_route else provider,
@@ -13691,7 +13234,7 @@ async def _handle_voice_trigger(
         # --- MIC PASIF TANPA OPT-IN: STATELESS (Groq -> OpenRouter) ---
         # Routing yang dikonfigurasi menang; default tetap satu request HTTP.
         # Gagal = None = diam (tanpa kalimat kaleng).
-        if trigger.trigger_type == "mic_pasif" and not _cursor_route:
+        if host_story_retry or (trigger.trigger_type == "mic_pasif" and not _cursor_route):
             _cfg_pasif = {**CONFIG, "_screen_privacy_epoch": privacy_epoch}
             _model_pasif = pick_groq_model(
                 user_speech, _cfg_pasif,
@@ -14008,6 +13551,21 @@ async def _handle_voice_trigger(
             except Exception as e:
                 print(f"[Brain Error] Gagal melakukan request ke SambaNova API: {e}")
 
+    lookup_turn = arti_voice_pipeline.ModelLookupTurn() if CONFIG.get("web_lookup_model_decides") else None
+
+    def lookup_aborted():
+        return tts_stop_flag or not screen_privacy.current(privacy_epoch)
+
+    async def announce_lookup():
+        if (playing_chat or lookup_aborted() or not speech_control.allows(speech_turn_epoch.get())
+                or (trigger.trigger_type == "yt_chat" and _viewer_yields_to_owner(owner_revision))
+                or speech_control.superseded(trigger.trigger_type, owner_revision)
+                or (time.time() < _media_playback_until and not _media_hold_allows(trigger))
+                or (attention_desk.enabled(CONFIG) and not attention_bridge.may_speak(__import__(__name__), trigger))):
+            return False
+        await arti_expression_runtime.apply_speaking(vts, "neutral", CONFIG)
+        return bool(await _speak_reply_chunks(["Aku cek dulu, ya."], privacy_epoch))
+
     async def do_api_call_with_lookup():
         nonlocal ai_reply, tts_sentence_chunks, llm_system
         async def ask(system):
@@ -14020,7 +13578,9 @@ async def _handle_voice_trigger(
             ask, llm_system, {**CONFIG, "_screen_privacy_epoch": privacy_epoch},
             regex_lookup_done=bool(getattr(turn, "stages", {}).get("web_lookup_regex")),
             private_contexts=memories,
-            abort=lambda: tts_stop_flag or not screen_privacy.current(privacy_epoch),
+            abort=lookup_aborted,
+            announce=announce_lookup if CONFIG.get("web_lookup_announce") else None,
+            lookup_turn=lookup_turn,
         )
 
     # Execute dengan cancel support
@@ -14114,22 +13674,37 @@ async def _handle_voice_trigger(
     if not screen_privacy.current(privacy_epoch):
         await arti_expression_runtime.apply_turn_end(vts, CONFIG)
         return
+    if _revoked_host_reply(trigger, host_story):
+        await arti_expression_runtime.apply_turn_end(vts, CONFIG)
+        return
+    playing_chat = trigger.trigger_type == "yt_chat" and _game_actually_playing()
+    speech_fallback = ""
+    if not (skip_reply_tags or _llm_cancelled) and (host_story_retry or not attention_desk.enabled(CONFIG)):
+        if getattr(trigger, "owner_reply_required", False):
+            speech_fallback = arti_voice_queue.OWNER_OVERFLOW_ACK
+        elif playing_chat and arti_voice_queue.play_chat_due(trigger.queued_at, time.time()):
+            speech_fallback = "Makasih udah nunggu, aku belum sempat jawab chat tadi."
+    if not ai_reply:
+        ai_reply = speech_fallback
     # Giliran mic_pasif: MODEL boleh memilih diam ([DIAM]); PTT yang ditekan
     # selama giliran ini (tts_stop_flag) juga menang. Diam = tidak ada TTS,
     # subtitle, tag, atau baris "Arti" di history.
-    if trigger.trigger_type == "mic_pasif" and (
-            tts_stop_flag or _passive_voice_reply_is_silence(ai_reply)):
-        print("[ASR Pasif] PTT menang — giliran pasif dibuang." if tts_stop_flag
-              else "[ASR Pasif] Arti memilih diam — tidak ada jawaban.")
-        await arti_expression_runtime.apply_turn_end(vts, CONFIG)
-        return
     if trigger.trigger_type == "mic_pasif":
+        if tts_stop_flag or _passive_voice_reply_is_silence(ai_reply):
+            if tts_stop_flag or not speech_fallback:
+                print("[ASR Pasif] PTT menang — giliran pasif dibuang." if tts_stop_flag
+                      else "[ASR Pasif] Arti memilih diam — tidak ada jawaban.")
+                await arti_expression_runtime.apply_turn_end(vts, CONFIG)
+                return
+            ai_reply = speech_fallback
         # Mulai fase bicara: pembatal PTT di _run_passive_turn_preemptible
         # berhenti di sini; TTS dihentikan jalur PTT-ON yang sudah ada.
         _passive_turn_speaking = True
-    elif ai_reply and re.search(r"\[\s*d\s*i\s*a\s*m\s*\]", ai_reply, re.IGNORECASE):
+    elif ai_reply and DIAM_TOKEN_RE.search(_normalize_diam_token(ai_reply)):
         # Jaring pengaman SEMUA trigger: token [DIAM] tidak pernah diucapkan.
-        ai_reply = re.sub(r"\[\s*d\s*i\s*a\s*m\s*\]", "", ai_reply, flags=re.IGNORECASE).strip()
+        ai_reply = _strip_diam_tokens(ai_reply)
+        if not ai_reply or DIAM_TOKEN_RE.search(_normalize_diam_token(ai_reply)):
+            ai_reply = speech_fallback
         if not ai_reply:
             print(f"[Brain] Jawaban [DIAM] di giliran {trigger.trigger_type} — diam.")
             await arti_expression_runtime.apply_turn_end(vts, CONFIG)
@@ -14139,7 +13714,7 @@ async def _handle_voice_trigger(
     # --- EKSEKUSI JAWABAN AI ---
     if ai_reply:
         # Bersihkan tanda bintang dan yapping bahasa Inggris sebelum memproses lebih lanjut
-        ai_reply = clean_ai_reply(ai_reply).strip()
+        ai_reply = clean_ai_reply(ai_reply).strip() or speech_fallback
 
         if ai_reply:  # Pastikan respon tidak kosong setelah dibersihkan!
             # Parsing jika ada memori baru yang ingin disimpan
@@ -14166,6 +13741,7 @@ async def _handle_voice_trigger(
             ai_reply, session_fact = arti_expression_runtime.parse_reply_session_fact(ai_reply)
             if session_fact:
                 _remember_live_session_fact(session_fact)
+            ai_reply = ai_reply or speech_fallback
 
             if ai_reply:  # Cek kembali setelah membuang tag memori
                 # Post-processing: anti-meta/narrator + batas adaptif (YT vs PTT)
@@ -14177,7 +13753,7 @@ async def _handle_voice_trigger(
                 # Arti bilang "[recorded remark omitted]" lalu mematung.
                 if ai_reply:
                     ai_reply = _maybe_execute_reply_tags(
-                        ai_reply, trigger, skip_reply_tags
+                        ai_reply, trigger, skip_reply_tags or conversation_only or _kept_owner_conversation_only(trigger)
                     )
 
                 if trigger.trigger_type == "mic_pasif" or attention_desk.enabled(CONFIG):
@@ -14187,6 +13763,7 @@ async def _handle_voice_trigger(
                 else:
                     ai_reply = post_process_response(ai_reply, user_speech,
                         **({"rehearsal_call": llm_call} if CONFIG.get("rehearsal_parent_pid") else {}))
+                ai_reply = ai_reply or speech_fallback
 
                 if ai_reply:  # Cek lagi setelah post-processing
                     ai_reply, turn_emotion = arti_expression_runtime.parse_reply_emotion(ai_reply)
@@ -14197,10 +13774,22 @@ async def _handle_voice_trigger(
                     # dari titik ini semua permukaan publik hanya melihat versi
                     # "sensor": TTS, subtitle, log, history, dan chat game.
                     ai_reply = arti_speech_censor.censor_from_config(ai_reply, CONFIG)
+                    # Reply cleanup can join characters that were separated by a removed tag.
+                    if DIAM_TOKEN_RE.search(_normalize_diam_token(ai_reply)):
+                        ai_reply = _strip_diam_tokens(ai_reply)
+                        if not ai_reply or DIAM_TOKEN_RE.search(_normalize_diam_token(ai_reply)):
+                            ai_reply = speech_fallback
+                            if not ai_reply:
+                                await arti_expression_runtime.apply_turn_end(vts, CONFIG)
+                                return
                     # Chunk dari do_api_call dibuat dari jawaban MENTAH — sebelum strip
                     # [MEMORY_SAVE], filter panjang, dan strip [EMOTION:]. Tanpa rebuild
                     # ini, tag emosi ikut diucapkan TTS ("emotion senang") dan jawaban
                     # yang dipotong filter tetap dibacakan versi panjangnya.
+                    if playing_chat:
+                        sentences = re.split(r"(?<=[.!?…])\s+|(?<=\.{3})(?=\w)|(?<=…)(?=\w)", ai_reply)
+                        if len(sentences) > 2:
+                            ai_reply = " ".join(sentences[:2])
                     tts_sentence_chunks = _sentences_or_empty(ai_reply)
                     if CONFIG.get("expression_emotion_enabled") and turn_emotion != "neutral":
                         print(f"[Expr] mood: {turn_emotion}")
@@ -14215,12 +13804,17 @@ async def _handle_voice_trigger(
                     if getattr(user_speech, "_live7_status", False) and not user_speech.is_current():
                         await arti_expression_runtime.apply_turn_end(vts, CONFIG)
                         return
+                    if _revoked_host_reply(trigger, host_story):
+                        await arti_expression_runtime.apply_turn_end(vts, CONFIG)
+                        return
                     if ((trigger.trigger_type == "own_play" and _speech_trigger_expired(trigger))
                             or _voice_reply_superseded(trigger, owner_revision)):
                         print(f"[Queue] Balasan {trigger.trigger_type} tidak diucapkan: Bohan bicara lebih dulu")
                         await arti_expression_runtime.apply_turn_end(vts, CONFIG)
                         return
-                    if attention_desk.enabled(CONFIG) and not attention_bridge.may_speak(__import__(__name__), trigger):
+                    if (attention_desk.enabled(CONFIG) and not arti_voice_queue.owner_turn(trigger)
+                            and not (trigger.trigger_type == "yt_chat" and hotkey_active and not _viewer_ptt_gate_closed())
+                            and not attention_bridge.may_speak(__import__(__name__), trigger)):
                         await arti_expression_runtime.apply_turn_end(vts, CONFIG)
                         return
                     await arti_expression_runtime.apply_speaking(vts, turn_emotion, CONFIG)
@@ -14248,7 +13842,14 @@ async def _handle_voice_trigger(
                     elif CONFIG.get("expression_nod_enabled") and turn_emotion != "neutral":
                         print(f"[Nod] skip (mood: {turn_emotion})")
                     try:
-                        voiced = await _speak_reply_chunks(tts_sentence_chunks or [ai_reply], privacy_epoch)
+                        speech_guard = {"host_story": host_story} if host_story else {}
+                        voiced = await _speak_reply_chunks(tts_sentence_chunks or [ai_reply], privacy_epoch,
+                                                          **speech_guard)
+                        if (not voiced and trigger.trigger_type == "yt_chat" and speech_control.allows(speech_turn_epoch.get())
+                                and _viewer_yields_to_owner(owner_revision)):
+                            _requeue_quiet_chat(trigger, playing=playing_chat, owner_first=True)
+                            await arti_expression_runtime.apply_turn_end(vts, CONFIG)
+                            return
                         if CONFIG.get("stream_game_notes"):
                             if voiced and voiced.spoken_n == len(tts_sentence_chunks or [ai_reply]):
                                 from arti_runtime import stream_notes
@@ -14274,6 +13875,11 @@ async def _handle_voice_trigger(
                             await asyncio.wait_for(nod_task, timeout=4.0)
                         except asyncio.TimeoutError:
                             pass
+                    if host_story and not voiced:
+                        _revoked_host_reply(trigger, host_story)
+                        _pending_turn_id = None
+                        await arti_expression_runtime.apply_turn_end(vts, CONFIG)
+                        return
                     timer.mark("after_tts")
                     stages = timer.stages_ms()
                     print(format_latency_line(stages))
@@ -14285,6 +13891,8 @@ async def _handle_voice_trigger(
                     if not screen_privacy.current(privacy_epoch):
                         await arti_expression_runtime.apply_turn_end(vts, CONFIG)
                         return
+                    if voiced and arti_voice_queue.owner_turn(trigger):
+                        _passive_junk_gate.answered(trigger.text)
                     if CONFIG.get("voice_append_context"):  # ADR 200: her line = what was heard, not generated
                         arti_meta["voice_spoken"] = voice_context.spoken_line(
                             ai_reply, tts_sentence_chunks or [ai_reply], voiced,
@@ -14295,11 +13903,10 @@ async def _handle_voice_trigger(
                     await arti_expression_runtime.apply_turn_end(vts, CONFIG)
                     await asyncio.sleep(0.35)
                     last_arti_reply_text = ai_reply
-                    if hotkey_active and not tts_stop_flag and not _ptt_on_mid_turn:
-                        hotkey_active = False
-                        print("🔴 [Auto-OFF] Arti selesai bicara. Tekan tombol lagi untuk ngobrol lagi.")
+                    _finish_reply_ptt(trigger)
                     voice_listener_worker._last_tts_end = time.time()
                     _schedule_post_answer_cleanup()
+                    return bool(voiced)
                 else:
                     print("[Brain Warning] Jawaban AI kosong setelah post-processing.")
                     await arti_expression_runtime.apply_turn_end(vts, CONFIG)
@@ -14335,10 +13942,20 @@ async def _handle_voice_trigger(
             print("[Echo] Turn proaktif/game gagal — diam beneran.")
             await arti_expression_runtime.apply_turn_end(vts, CONFIG)
         else:
+            if not speech_control.allows(speech_turn_epoch.get()) or _voice_reply_superseded(trigger, owner_revision):
+                await arti_expression_runtime.apply_turn_end(vts, CONFIG)
+                return
             fb = incharacter_fallback_reply(user_speech)
             print(f"[Echo] Fallback in-character: {fb[:60]}...")
             await arti_expression_runtime.apply_speaking(vts, "neutral", CONFIG)
             voiced = await _speak_reply_chunks([fb], privacy_epoch)
+            if voiced and arti_voice_queue.owner_turn(trigger):
+                _passive_junk_gate.answered(trigger.text)
+            if (not voiced and trigger.trigger_type == "yt_chat" and speech_control.allows(speech_turn_epoch.get())
+                    and _viewer_yields_to_owner(owner_revision)):
+                _requeue_quiet_chat(trigger, playing=playing_chat, owner_first=True)
+                await arti_expression_runtime.apply_turn_end(vts, CONFIG)
+                return
             if CONFIG.get("stream_game_notes"):
                 if voiced and voiced.spoken_n == 1:
                     from arti_runtime import stream_notes
@@ -14353,8 +13970,8 @@ async def _handle_voice_trigger(
             # dipungut mic/telinga dan jadi trigger baru (loop ngomong sendiri).
             last_arti_reply_text = fb
             voice_listener_worker._last_tts_end = time.time()
-            if hotkey_active and not tts_stop_flag and not _ptt_on_mid_turn:
-                hotkey_active = False
+            _finish_reply_ptt(trigger)
+            return bool(voiced)
 
 
 async def _main_loop_with_memory_drain():
@@ -14421,247 +14038,54 @@ def save_live_session() -> None:
         print(f"[Session] Gagal simpan live_session.json: {e}")
 
 
+# Use the bridge's current config, paths, and callbacks when the wizard runs.
+from arti_runtime import startup_wizard as _startup_wizard  # noqa: E402
+
+
 def _wizard_input(prompt: str, default: str = "") -> str:
-    if not sys.stdin.isatty():
-        return default
-    try:
-        raw = input(prompt).strip()
-        return raw if raw else default
-    except (EOFError, KeyboardInterrupt):
-        return default
+    return _startup_wizard._wizard_input(prompt, default, sys=sys, input=input)
 
 
 def prompt_live_session_setup() -> bool:
     """Tanya YouTube + VTS port SETIAP startup — Enter = pakai nilai sekarang."""
-    changed = False
-    yt = CONFIG.get("youtube_video_id", "") or "(kosong)"
-    yt_on = CONFIG.get("youtube_chat_enabled", True)
-    vts_port = int(CONFIG.get("vts_api_port", 8002))
-    sub_port = int(CONFIG.get("subtitle_port", 9988))
-    profile = CONFIG.get("active_profile", "default")
-
-    print("\n" + "=" * 60)
-    print("  LIVE SESSION SETUP  (Enter = keep current values)")
-    print("=" * 60)
-    mic_id, mic_name = resolve_asr_input_device()
-    mic_label = f"#{mic_id} {mic_name}" if mic_id is not None else mic_name
-
-    print(f"  YouTube : {yt}  chat={'ON' if yt_on else 'OFF'}")
-    print(f"  VTS port: {vts_port}")
-    print(f"  Subtitle: {sub_port}  |  Profil: {profile}")
-    print(f"  Mic     : {mic_label}")
-    print("-" * 60)
-
-    raw_yt = _wizard_input(
-        "  >> YouTube URL/ID (off=matikan chat, Enter=keep): ",
-        "",
+    return _startup_wizard.prompt_live_session_setup(
+        config=CONFIG,
+        resolve_asr_input_device=resolve_asr_input_device,
+        _wizard_input=_wizard_input,
+        _extract_yt_video_id=_extract_yt_video_id,
+        sys=sys,
+        bridge_health=bridge_health,
+        print=print,
     )
-    if raw_yt:
-        if raw_yt.lower() in ("off", "no", "0", "-"):
-            CONFIG["youtube_chat_enabled"] = False
-            changed = True
-            print("  [OK] YouTube chat OFF")
-        else:
-            vid = _extract_yt_video_id(raw_yt)
-            if vid:
-                CONFIG["youtube_video_id"] = vid
-                CONFIG["youtube_chat_enabled"] = True
-                changed = True
-                print(f"  [OK] YouTube -> {vid} (chat ON)")
-            else:
-                print(
-                    "  [WARN] URL/ID tidak valid (ID YouTube = 11 karakter) — "
-                    "YouTube TIDAK diubah, tetap pakai yang lama. Kalau stream "
-                    "lama sudah mati, chat akan gagal terus."
-                )
-
-    raw_port = _wizard_input(
-        f"  >> VTS port Arti (Enter={vts_port}): ",
-        "",
-    )
-    if raw_port.isdigit():
-        new_port = int(raw_port)
-        if new_port != vts_port:
-            CONFIG["vts_api_port"] = new_port
-            vts_port = new_port
-            changed = True
-            print(f"  [OK] VTS port -> {new_port}")
-
-    raw_sub = _wizard_input(
-        f"  >> Subtitle port (Enter={sub_port}): ",
-        "",
-    )
-    if raw_sub.isdigit():
-        new_sub = int(raw_sub)
-        if new_sub != sub_port:
-            CONFIG["subtitle_port"] = new_sub
-            sub_port = new_sub
-            changed = True
-            print(f"  [OK] Subtitle port -> {new_sub}")
-
-    if sys.stdin.isatty():
-        if bridge_health.prompt_mic_selection(
-            CONFIG,
-            resolve_mic_fn=resolve_asr_input_device,
-            ask_input=lambda p: _wizard_input(p, ""),
-        ):
-            changed = True
-
-    return changed
 
 
 def startup_wizard():
     """Interactive pre-flight checklist sebelum bridge start.
     Detect missing config, prompt user untuk input, validate.
     Bohan tinggal jawab pertanyaan — ga perlu edit file."""
-    
-    print("\n" + "="*60)
-    print("  ARTI BRIDGE — Startup Checklist")
-    print("="*60)
-    # Bangunkan model embedding SEKARANG, di latar — cold load LM Studio
-    # (~10-16 dtk) kebayar selagi Bohan menjawab checklist, bukan di
-    # panggilan RAG pertama (yang timeout-nya cuma 8 dtk).
-    arti_vault_rag.prewarm_embedding(CONFIG)
-    needs_save = False
-
-    if prompt_live_session_setup():
-        needs_save = True
-
-    # VTS port probe (setelah user confirm port)
-    vts_port = CONFIG.get("vts_api_port", 8002)
-    vts_ok = False
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(0.5)
-        result = sock.connect_ex(('localhost', vts_port))
-        sock.close()
-        if result == 0:
-            print(f"\n  [OK] VTS terdeteksi di port {vts_port}")
-            vts_ok = True
-    except Exception:
-        pass
-    
-    if not vts_ok:
-        print(f"\n  [WARN] VTS di port {vts_port} tidak terdeteksi!")
-        print("  Tips: Dua instance VTS? Biasanya port 8001 (instance pertama) dan 8002 (instance kedua).")
-        print(f"  [INFO] Jalankan VTS + Start API di port {vts_port}, atau restart wizard.")
-
-    youtube_id = CONFIG.get("youtube_video_id", "")
-    if CONFIG.get("youtube_chat_enabled") and youtube_id:
-        print(f"\n  [OK] YouTube Video ID: {youtube_id}")
-    elif not CONFIG.get("youtube_chat_enabled"):
-        print("\n  [INFO] YouTube chat disabled untuk sesi ini.")
-    else:
-        print("\n  [WARN] YouTube chat ON tapi video ID kosong.")
-
-    # 2.5 Subtitle Port — cek bentrok, kalau conflict prompt manual
-    sub_port = CONFIG.get("subtitle_port", 9988)
-    sub_port_ok = False
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(0.5)
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        import subtitle_server  # the probe checks the address the listener will bind (owner 2026-11-19)
-        result = sock.bind((subtitle_server.bind_host(CONFIG), sub_port))
-        sock.close()
-        sub_port_ok = True
-    except OSError:
-        sock.close()
-    if not sub_port_ok:
-        print(f"\n  [WARN] Port subtitle {sub_port} bentrok (TIME_WAIT atau dipakai proses lain).")
-        if not sys.stdin.isatty():
-            new_sub_port = sub_port + 1
-        else:
-            try:
-                raw_sub = input(f"  >> Ketik port subtitle baru (Enter = tetap {sub_port}): ").strip()
-                new_sub_port = int(raw_sub) if raw_sub.isdigit() else sub_port + 1
-            except (EOFError, KeyboardInterrupt):
-                new_sub_port = sub_port + 1
-        CONFIG["subtitle_port"] = new_sub_port
-        sub_port = new_sub_port
-        needs_save = True
-        print(f"  [OK] Subtitle port diganti ke {sub_port}")
-    else:
-        print(f"\n  [OK] Subtitle port {sub_port} tersedia.")
-
-    if CONFIG.get("tts_engine") == "supertone":
-        _supertone_preflight()
-
-    # 3. TTS voice check
-    voice = CONFIG.get("tts_voice", "")
-    if not voice:
-        print("\n  [WARN] TTS voice belum diset.")
-        CONFIG["tts_voice"] = "id-ID-GadisNeural"
-        needs_save = True
-        print("  [OK] Default voice: id-ID-GadisNeural")
-    else:
-        print(f"\n  [OK] TTS voice: {voice}")
-
-    # 4. Virtual cable check
-    print("\n  [INFO] Virtual cable akan dicari otomatis saat TTS init.")
-
-    # 5. Token VTS check
-    token_file = arti_vts_auth.token_path(__file__, CONFIG["vts_api_port"])
-    if not arti_vts_auth.read_token(__file__, CONFIG["vts_api_port"], main_port=CONFIG["vts_api_port"]):
-        print("\n  [INFO] VTS token tidak ditemukan — akan minta ALLOW saat connect.")
-    else:
-        print(f"\n  [OK] VTS token ditemukan ({token_file}).")
-
-    # 6. API Provider quick check
-    provider = CONFIG.get("api_provider", "groq").lower()
-    print(f"\n  [OK] API provider: {provider}")
-    if provider == "groq":
-        groq_key = CONFIG.get("groq_api_key", "")
-        if groq_key and groq_key.startswith("gsk_"):
-            print("  [OK] Groq API key terdeteksi")
-        else:
-            print("  [WARN] Groq API key belum valid!")
-    elif provider == "gemini":
-        gemini_key = CONFIG.get("gemini_api_key", "")
-        if gemini_key and not gemini_key.startswith("YOUR_"):
-            print("  [OK] Gemini API key terdeteksi")
-        else:
-            print("  [WARN] Gemini API key belum valid!")
-
-    # 7. OpenRouter key status (informational only)
-    openrouter_key = CONFIG.get("openrouter_api_key") or ""
-    if openrouter_key:
-        print(f"\n  [INFO] OpenRouter key: {'SET' if openrouter_key else 'NOT SET'}")
-
-    print("\n" + "="*60)
-    print("  Checklist selesai! Bridge siap start.")
-    print("="*60 + "\n")
-    if sys.stdin.isatty():
-        save_live_session()
-    return needs_save
+    return _startup_wizard.startup_wizard(
+        config=CONFIG,
+        script_path=__file__,
+        arti_vault_rag=arti_vault_rag,
+        prompt_live_session_setup=prompt_live_session_setup,
+        socket=socket,
+        sys=sys,
+        input=input,
+        _supertone_preflight=_supertone_preflight,
+        arti_vts_auth=arti_vts_auth,
+        save_live_session=save_live_session,
+        print=print,
+    )
 
 
 def _extract_yt_video_id(text):
     """Extract YouTube video ID dari URL atau raw input."""
-    text = text.strip()
-    # Raw ID (11 karakter alphanumeric + dash + underscore)
-    if re.match(r'^[a-zA-Z0-9_-]{11}$', text):
-        return text
-    # Full URL
-    patterns = [
-        r'(?:youtube\.com|youtu\.be)/(?:watch\?v=|embed/|shorts/|live/)?([a-zA-Z0-9_-]{11})',
-        r'youtube\.com/watch\?.*v=([a-zA-Z0-9_-]{11})',
-    ]
-    for pat in patterns:
-        m = re.search(pat, text)
-        if m:
-            return m.group(1)
-    return None
+    return _startup_wizard._extract_yt_video_id(text, re=re)
 
 
 # Nilai per-mesin yang boleh dipersistenkan wizard (semuanya ADA di CONFIG
 # sebagai default generik; nilai nyatanya milik mesin uji).
-_WIZARD_PERSIST_KEYS = (
-    "youtube_video_id",
-    "youtube_chat_enabled",
-    "vts_api_port",
-    "subtitle_port",
-)
+from arti_runtime.startup_wizard import _WIZARD_PERSIST_KEYS  # noqa: E402
 
 
 def _save_config_to_file():
@@ -14688,29 +14112,15 @@ def _save_config_to_file():
     bukan lapisan pemenang. Mengedit youtube_video_id manual di config_local
     TIDAK cukup selama live_session.json masih memuat nilai lama.
     """
-    path = os.path.join(_SCRIPT_DIR, "config_local.json")
-    try:
-        data: dict = {}
-        if os.path.isfile(path):
-            with open(path, "r", encoding="utf-8") as f:
-                loaded = json.load(f)
-            if isinstance(loaded, dict):
-                data = loaded
-        for key in _WIZARD_PERSIST_KEYS:
-            if key in CONFIG:
-                data[key] = CONFIG[key]
-        # Tulis via file sementara: config_local.json memegang setelan mesin
-        # Bohan — crash di tengah tulis tidak boleh menyisakan JSON rusak.
-        # Nama tmp per-PID: insiden nyata dua bridge kebuka bersamaan (3/8) —
-        # tmp fixed bisa saling truncate sebelum os.replace.
-        tmp = f"{path}.tmp{os.getpid()}"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-            f.write("\n")
-        os.replace(tmp, path)
-        print(f"[CONFIG] Tersimpan ke config_local.json ({len(_WIZARD_PERSIST_KEYS)} key per-mesin)")
-    except Exception as e:
-        print(f"[WARN] Gagal save config: {e}")
+    return _startup_wizard._save_config_to_file(
+        config=CONFIG,
+        root_path=_SCRIPT_DIR,
+        _WIZARD_PERSIST_KEYS=_WIZARD_PERSIST_KEYS,
+        os=os,
+        json=json,
+        open=open,
+        print=print,
+    )
 
 
 if __name__ == "__main__":

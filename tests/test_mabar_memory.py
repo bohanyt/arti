@@ -121,7 +121,7 @@ def test_status_line_carries_verified_self_facts(tmp_path):
     assert "dibaca dari profil native" in block and "Namamu Arti." in block and "Mint Blouse" in block
 
 
-# --- item 3: no internet lookups; item 4: chat flag ---------------------------------------------------------------
+# --- isolated live lookup and the chat flag ---------------------------------------------------------------
 
 def test_reply_lane_pins_web_search_only_when_configured():
     import arti_codex_agent
@@ -131,18 +131,27 @@ def test_reply_lane_pins_web_search_only_when_configured():
         arti_codex_agent.codex_overrides(dict(codex_web_search="on"))
 
 
-def test_mabar_config_has_no_internet_and_chat_only_with_a_video_id(tmp_path):
+def test_mabar_config_allows_only_model_requested_codex_lookup_and_opt_in_chat(tmp_path):
     from scripts.livepath import bridge as lp_bridge
     cfg = mabar.mabar_bridge_config(tmp_path / "r", vts=True, mic=1)
-    assert cfg["codex_web_search"] == "disabled" and cfg["web_lookup_enabled"] is False
-    assert cfg["web_lookup_codex_enabled"] is False and cfg["youtube_chat_enabled"] is False
+    assert cfg["codex_web_search"] == "disabled" and cfg["web_lookup_provider_chain"] == ["codex"]
+    for key in ("web_lookup_enabled", "web_lookup_codex_enabled", "web_lookup_model_decides",
+                "web_lookup_announce", "codex_agent_enabled", "vision_enabled"):
+        assert cfg[key] is True
+    for key in ("web_lookup_regex_enabled", "host_web_topic_enabled", "youtube_chat_enabled",
+                "vision_runtime_on_start", "vision_background_poll"):
+        assert cfg[key] is False
     chat = mabar.mabar_bridge_config(tmp_path / "r", vts=True, mic=1, youtube_video_id="abc123XYZ")
     assert chat["youtube_chat_enabled"] is True and chat["youtube_video_id"] == "abc123XYZ"
     path = tmp_path / "c.json"
     for good in (cfg, chat):
         path.write_text(json.dumps(good), encoding="utf-8")
         lp_bridge.load_config(path)
-    for bad in (dict(chat, youtube_video_id=""), dict(cfg, web_lookup_enabled=True), dict(cfg, codex_web_search="cached")):
+    for bad in (dict(chat, youtube_video_id=""), dict(cfg, web_lookup_enabled=False),
+                dict(cfg, codex_web_search="cached"), dict(cfg, web_lookup_regex_enabled=True),
+                dict(cfg, web_lookup_announce=False), dict(cfg, host_web_topic_enabled=True),
+                dict(cfg, web_lookup_provider_chain=["codex", "groq_compound"]),
+                dict(cfg, vision_background_poll=True), dict(cfg, vision_runtime_on_start=True)):
         path.write_text(json.dumps(bad), encoding="utf-8")
         with pytest.raises(ValueError):
             lp_bridge.load_config(path)

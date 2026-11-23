@@ -356,6 +356,8 @@ def _tangkap_bergerbang(config: dict) -> tuple[str | None, bytes | None]:
         float(config.get("vision_gelap_luma_max", 12.0)),
         float(config.get("vision_gelap_sebar_min", 6.0)),
     )
+    if config.get("_vision_explicit_request"):
+        return (None if gelap else b64), sidik
     # DUA metrik, gerbang buka kalau salah satu lolos:
     # - sel_berubah (UTAMA): menangkap perubahan LOKAL (subtitle, popup) yang
     #   nyaris tak menggeser rata-rata. Ukur nyata 20 Agu di layar Bohan:
@@ -406,7 +408,7 @@ def describe_with_chain(
     jpeg_b64: str | None = None,
 ) -> tuple[sc.ScreenSnapshot | None, str]:
     """Run vision chain; returns (snapshot, provider_name or '')."""
-    privacy_epoch = screen_privacy.epoch
+    privacy_epoch = config.get("_screen_privacy_epoch", screen_privacy.epoch)
     if not screen_privacy.allows_screen(privacy_epoch):
         return None, "privacy"
     if not config.get("vision_enabled", config.get("screen_context_enabled", False)):

@@ -3,7 +3,7 @@
     python -B scripts/livepath/mabar.py <step> --run RUN [options]
 
 Steps (CT runs them in order; each writes its own log in RUN, nothing is scored):
-  backup   copy Saves, startup_preferences, the farmhand mod folder and the rig prep files, verify a sha256 manifest
+  backup   copy the --continue save, startup_preferences, the farmhand mod folder and the rig prep files, verify SHA-256
   prepare  prepare-run with the booked DLL, deploy it to the farmhand Mods, write the trial config (HOST = owner)
   preflight  print one OK/BLOCKER/WARN line per bring-up check; non-zero on a blocker (also runs at voice/rejoin)
   voice    run ARTI's real bridge (mic, VTS, Supertone) until `stop`; blocks, so CT runs it in the background
@@ -38,7 +38,7 @@ import hashlib
 import json
 import re
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import shutil
 import socket
 import subprocess
@@ -300,16 +300,53 @@ def tool(run, script, args, name, *, deadline=None, background=False):
 
 # ------------------------------------------------------------------ backup / prepare / restore
 
+def _save_backup_key(name):
+    if (not name or name in (".", "..") or PureWindowsPath(name).name != name
+            or name.endswith((".", " ")) or PureWindowsPath(name).is_reserved()
+            or re.search(r'[<>:"/\\|?*\x00-\x1f]', name)):
+        raise RuntimeError("expected a save folder name")
+    return "Saves/" + name
+
+
+def _backup_covers_save(backup_record, save_name):
+    save_key = _save_backup_key(save_name)
+    manifest = soak.read(Path(soak.read(backup_record)["path"]) / "MANIFEST.json")["sha256"]
+    if not isinstance(manifest, dict):
+        raise ValueError("invalid backup manifest")
+    return manifest.get(save_key) is not None or f"{save_name}/SaveGameInfo" in (manifest.get("Saves") or {})
+
+
+def _log_host_save_backup_gap(run, save_name):
+    if not save_name:
+        return  # A new farm may have no on-disk save yet.
+    try:
+        covered = _backup_covers_save(run / "backup.json", save_name)
+    except (OSError, ValueError, KeyError, TypeError, RuntimeError):
+        log(run, "host_save_backup_unverified", save=save_name)
+    else:
+        if not covered:
+            log(run, "host_save_not_backed_up", save=save_name)
+
+
 def backup(a):
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     dest = BACKUPS / f"mabar-{stamp}"
-    sources = {"Saves": APPDATA / "Saves", "startup_preferences": APPDATA / "startup_preferences",
+    sources = {"startup_preferences": APPDATA / "startup_preferences",
                "farmhand-mod": MOD, "prep-trial-config.json": PREP / "trial-config.json",
                "prep-approval.json": PREP / "approval.json"}
+    save_name = getattr(a, "continue_save", None)
+    save_key = _save_backup_key(save_name) if save_name else None
+    if save_key:
+        save = APPDATA / save_key
+        if not save.is_dir() or save.is_symlink() or _is_junction(save):
+            raise RuntimeError("selected save is not a regular save folder: " + save_name)
+        sources[save_key] = save
     dest.mkdir(parents=True)
     manifest = {}
     for name, src in sources.items():
         if not src.exists():
+            if name == save_key:
+                raise RuntimeError("selected save disappeared during backup: " + save_name)
             manifest[name] = None
             continue
         if src.is_dir():
@@ -325,14 +362,14 @@ def backup(a):
     soak.write(dest / "MANIFEST.json", dict(utc=utc(), sources={k: str(v) for k, v in sources.items()}, sha256=manifest))
     Path(a.run).mkdir(parents=True, exist_ok=True)
     soak.write(Path(a.run) / "backup.json", dict(path=str(dest), utc=utc()))
-    log(a.run, "backup_verified", path=str(dest), saves=len(manifest["Saves"] or {}))
+    log(a.run, "backup_verified", path=str(dest), saves=len(manifest.get(save_key) or {}))
 
 
 # --- her live self (2026-11-10 audit, an internal design note) --------------------------------
 # A rehearsal bridge never loads the owner's private config, so mabar fell back to code defaults: no vault recall, no
 # owner name/handles, no origin facts, no VTS expressions/idle motion, not the live reply routing. These allowlisted
 # keys are copied from the live private config at voice start (values never printed). Peripherals that write live
-# data (observer, scouter, vault summaries) and the internet stay off. Donation/mediashare flags and watch-along
+# data (observer, scouter, vault summaries) stay off. Donation/mediashare flags and watch-along
 # timings are copied so the classic alerts route runs; provider secrets are never overlay keys (process env only).
 LIVE_CONFIG = STREAM / "config_local.json"
 LIVE_OVERLAY_KEYS = (
@@ -446,16 +483,20 @@ def vault_status(run):
 
 def prepare(a):
     run = Path(a.run)
-    if not (run / "backup.json").is_file():
+    backup_record = run / "backup.json"
+    if not backup_record.is_file():
         raise RuntimeError("run `backup` first")
     if "stardewmoddingapi.exe" in processes():
         raise RuntimeError("SMAPI is running; prepare only with the games closed")
     if free_gib() < 15:
         raise RuntimeError("C: below 15 GiB")
+    save_name = getattr(a, "continue_save", None)
+    if save_name and not _backup_covers_save(backup_record, save_name):
+        raise RuntimeError("run `backup --continue SAVE_FOLDER` for the selected save first")
     catch_up_notes(run)
     continued = None
-    if getattr(a, "continue_save", None):
-        continued = continued_state(run, a.continue_save)
+    if save_name:
+        continued = continued_state(run, save_name)
         soak.write(run / "continued.json", continued)
         log(run, "continued", farm=continued["farm"], evening=continued["evening"],
             saved="%s %s Y%s" % (continued["season"], continued["day"], continued["year"]))
@@ -777,18 +818,21 @@ def mabar_bridge_config(run, *, vts=True, mic=None, passive=False, vts_port=VTS_
         live7_self_facts_file=str(run / "self_facts.json"),  # her verified look, written after creation
         host_story_relay_file=str(run / "host_story.jsonl"),
         stream_session_id=run.name, rehearsal_parent_pid=os.getpid(),
-        # Owner 2026-11-10: she plays from her own experience, no internet/wiki. The Stardew decision lane already
-        # disables Codex web search; the voice lane gets it pinned here, and the bridge's own lookup stays off.
-        codex_web_search="disabled", web_lookup_enabled=False, web_lookup_codex_enabled=False,
-        web_lookup_model_decides=False,
+        vision_enabled=True, vision_runtime_on_start=False, vision_background_poll=False,
+        # The voice model can request the isolated lookup role. Its own client has no search.
+        codex_agent_enabled=True, codex_web_search="disabled", web_lookup_enabled=True,
+        web_lookup_codex_enabled=True, web_lookup_model_decides=True,
+        web_lookup_provider_chain=["codex"], web_lookup_regex_enabled=False,
+        web_lookup_announce=True, host_web_topic_enabled=False,
         # Viewer chat (YouTube Live, innertube; the 10-24 reader) only when the owner gives the live video id.
         youtube_chat_enabled=bool(youtube_video_id), youtube_video_id=youtube_video_id or "",
         # Or YouTube + TikTok + Instagram through Social Stream Ninja (one door); never both (bridge.load_config).
         # ssn = "app" | "file": where the BRIDGE reads the session id; this config never holds it.
         ssn_chat_enabled=bool(ssn), ssn_session_source=ssn or "app", ssn_status_file=str(run / "ssn_status.json"),
         # Never drop chat silently: chat waits through her speech and the owner's talk, in the live queue (2 deep,
-        # 60 s); a deeper queue answered stale chat. Game/story moments go ahead of viewer chat; owner speech stays first.
-        voice_queue_priority_overrides={"game": 0.5},
+        # 60 s); a deeper queue answered stale chat.
+        # Owner speech comes first, then paid events and viewer chat before game/story moments.
+        voice_queue_priority_overrides={},
         # On a solo stream a viewer can wait long per message: a warm Codex thread grows each turn until it
         # times out, and an own-topic lane can talk about unrelated things while chat waits.
         # V13: that resend design is gone; codex_thread_max_turns now
@@ -1278,6 +1322,7 @@ def host(a):
         if not a.continue_save:
             raise RuntimeError("host --helper needs --continue SAVE_FOLDER (the farm the program hosts)")
         ids = install_host_helper(run, rehearse.read_booking(a.spec), a.continue_save)
+        _log_host_save_backup_gap(run, ids["save_folder"])
         set_host_controller(run, "harness")
         log(run, "host_helper_installed", save=ids["save_folder"], farmhand=ids["farmhand_name"])
     else:
@@ -1536,7 +1581,8 @@ LIVE_BRIDGE = dict(
     vault_farm_labels=True,
 )
 # ADR 243: GenericWorldInputEnabled lets the mod publish its generic ACTION/USE target for any faced tile.
-LIVE_MOD_FLAGS = dict(CharacterCreationEnabled=True, UiPadMenusEnabled=True, GenericWorldInputEnabled=True)
+LIVE_MOD_FLAGS = dict(CharacterCreationEnabled=True, UiPadMenusEnabled=True, GenericWorldInputEnabled=True,
+                      FestivalReflexEnabled=True, ReflexFishingEnabled=True)
 
 
 def live_profile_lines():
@@ -1600,6 +1646,12 @@ def play_once(a, cycle=None):
         enroll += ["--expected-native", json.dumps(a.recovery_expected)]
     _check_recovery_deadline(run, a)
     tool(run, "live_cycle.py", enroll, "start-cycle", **start_opts)
+    if trial.get("stardew_host_controller") != "harness":
+        try:
+            save_name = cycle_status(cycle).get("save_name")
+        except (OSError, ValueError, AttributeError):
+            save_name = None
+        _log_host_save_backup_gap(run, save_name)
     log(run, "cycle_started", cycle=str(cycle))
     if background:
         start_opts["background"] = True
@@ -1922,6 +1974,9 @@ def recover_farmhand(run, slot, *, held=None, expected=None, stop_file=None, env
     return outcome["expected"]
 
 
+HOST_ACCEPT_WAIT_S = 60  # a watchdog launch waits this long at most for a HOST that can accept her
+
+
 def _recover_farmhand(run, slot, *, held, expected, stop_file, deadline, origin_cycle=None,
                       restart_module=None, save_identity_fn=None):
     """Own the close, launch and join until the same successor can safely play."""
@@ -1993,7 +2048,9 @@ def _recover_farmhand(run, slot, *, held, expected, stop_file, deadline, origin_
             if tool == "ui_op.py" and args[0] == "close":
                 raise RuntimeError("farmhand recovery must use the in-game exit request")
             if tool == "prep_trial.py" and args[:2] == ("launch", "farmhand"):
-                gate("launch")  # after worker start, immediately before the launch subprocess
+                if gate("launch").watchdog and not host_accepts():  # after worker start, right before the launch
+                    wait_for_host_accepting()
+                    gate("launch")  # authority read again right after the wait
                 launch_started_ms = int(time.time() * 1000)
                 act = "launch"
             if tool == "ui_op.py" and args[0] != "shot" and startup is not None:
@@ -2043,6 +2100,19 @@ def _recover_farmhand(run, slot, *, held, expected, stop_file, deadline, origin_
     adapter = GuardedAdapter(refs, record.with_suffix(""))
     worker = GuardedRestart(options, adapter, refs, record)
 
+    def host_accepts():
+        return HA.host_save_matches(run, expected_save, worker.host_hwnd, window_fn=adapter.window, accepting=True)
+
+    def wait_for_host_accepting():
+        """A watchdog launch waits, bounded, for a HOST that can accept her (one that still lists the
+        crashed game's farmer cannot); it never launches into a HOST that cannot. Every stop outranks the wait."""
+        until = min(deadline, time.time() + HOST_ACCEPT_WAIT_S)
+        while not host_accepts():
+            if time.time() >= until:
+                report_hold(run, HA.Decision("hold", "host_not_accepting", held=state.hands_held), state)
+            adapter.sleep(1)
+            stop_check(read())
+
     def wait_for_join():
         nonlocal restored, watchdog_attempted
         while True:
@@ -2065,6 +2135,11 @@ def _recover_farmhand(run, slot, *, held, expected, stop_file, deadline, origin_
                     adapter.sleep(1)
                     continue
             decision = HA.decide(ev, act="join", held=state.hands_held, clear_watchdog=not watchdog_attempted)
+            if decision.action == "rearm" and not host_accepts():
+                # A HOST that cannot accept her yet spends no attempt; the next pass reads every stop and
+                # decides again, bounded by the recovery deadline in `stop_check`.
+                adapter.sleep(1)
+                continue
             if decision.action == "rearm":
                 watchdog_attempted = True
                 state.hands_held = HA.bind(decision.session, decision.halt, state.hands_held)
@@ -2077,7 +2152,8 @@ def _recover_farmhand(run, slot, *, held, expected, stop_file, deadline, origin_
                     authorization = HA.decide(fresh, act="join", held=state.hands_held, clear_watchdog=True)
                     return (native is not None and authorization.action == "rearm"
                             and authorization.expect == decision.expect == tuple(native[k] for k in HA.KEY_FIELDS)
-                            and HA.host_save_matches(run, expected_save, worker.host_hwnd, window_fn=adapter.window))
+                            and HA.host_save_matches(run, expected_save, worker.host_hwnd, window_fn=adapter.window,
+                                                     accepting=True))  # never into a HOST that cannot accept her
 
                 def watchdog_stop_check():
                     fresh = read()
@@ -2088,11 +2164,15 @@ def _recover_farmhand(run, slot, *, held, expected, stop_file, deadline, origin_
                             names.append("host_inert")
                         report_hold(run, HA.Decision("hold", "stop_outranks_recovery:" + ",".join(names),
                                                       held=state.hands_held, paths=list(map(str, fresh.sentinels))), state)
+                    if not HA.host_save_matches(run, expected_save, worker.host_hwnd, window_fn=adapter.window,
+                                                accepting=True):  # the tool withdraws its token
+                        report_hold(run, HA.Decision("hold", "host_not_accepting", held=state.hands_held), state)
 
                 try:
                     arti_rearm.rearm(folder, "rig_operator", confirm, automatic=True, out=lambda _: None,
                                      sleep=adapter.sleep, wait_s=max(0, min(15, deadline - time.time())),
-                                     watchdog_stop_check=watchdog_stop_check)
+                                     watchdog_stop_check=watchdog_stop_check,
+                                     stop_guards=HA.stop_guards(run, stop_file=stop_file))  # the token names every stop read here
                 except (OSError, StopRefused):
                     pass  # the following read continues to hold unless the native receipt actually arrived
                 continue
@@ -2650,7 +2730,7 @@ def main(argv=None):
     p.add_argument("--launch", choices=("farmhand", "host", "voice"), default=None,
                    help="preflight: next-launch budget for the GB headroom gate")
     p.add_argument("--continue", dest="continue_save", default=None, metavar="SAVE_FOLDER",
-                   help="prepare: a carried-on co-op farm (its save folder name); her facts come from that save")
+                   help="backup/prepare: the existing co-op save folder to protect and use for this session")
     p.add_argument("--classic", action="store_true",
                    help="voice: accepted no-op; desk is off by default (the 11-10 lane)")
     p.add_argument("--desk", action="store_true",

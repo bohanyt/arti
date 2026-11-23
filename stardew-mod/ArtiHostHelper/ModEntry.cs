@@ -7,6 +7,7 @@ using StardewValley;
 using StardewValley.Locations;
 using StardewValley.Menus;
 using StardewValley.Network;
+using StardewValley.Objects;
 using StardewValley.Pathfinding;
 using ArtiStardewBridge.Protocol;
 
@@ -47,8 +48,13 @@ public sealed class ModEntry : Mod, IHelperHoldPort
     Proposal? proposal;
     string? response;
     int giftSlot, giftBefore;
-    DateTime menuSince, sleepSince, pathSince;
-    bool walking;
+    DateTime menuSince, sleepSince;
+    bool soloHost;
+    long? bedPathStarted;
+    int bedPathInitialSteps;
+    Farmer? bedWalker;
+    PathFindController? bedPath;
+    BedApproach? bedApproach;
     readonly HelperSleep sleep = new(); // review M4e item 1: its sleep state, one night only
     IClickableMenu? ownedGiftResponse;
     bool hostStaged;
@@ -72,6 +78,12 @@ public sealed class ModEntry : Mod, IHelperHoldPort
         gift = new(cfg.GiftWhen, cfg.GiftIdleSeconds);
         Directory.CreateDirectory(cfg.OutputDirectory);
         startup = new(cfg.StartupPauseSeconds);
+        soloHost = SoloHostLaunch.Verified(cfg.OutputDirectory);
+        if (soloHost)
+        {
+            try { HostBedTouch.Install(ModManifest.UniqueID, BeginBedTouch, CaptureBedTouch); }
+            catch (Exception ex) { Monitor.Log("HOST bed touch unavailable: " + ex.GetType().Name, LogLevel.Warn); }
+        }
         Log("helper_started", new { config = cfg, dll = GetType().Assembly.ManifestModule.ModuleVersionId });
         helper.Events.GameLoop.UpdateTicked += Tick;
         helper.Events.Multiplayer.ModMessageReceived += (_, e) =>
@@ -117,16 +129,17 @@ public sealed class ModEntry : Mod, IHelperHoldPort
     {
         try
         {
-            if (owner.Input(what, Environment.TickCount64) is { } line && Own())
+            var line = owner.Input(what, Environment.TickCount64);
+            bedApproach = null;
+            if (OwnsBedPath())
+            {
+                DropBedPath();
+                Log("host_path_dropped_for_owner", new { what });
+            }
+            if (line is not null && Own())
             {
                 this.Monitor.Log("HOST " + line + ": the owner is using the HOST; the harness waits (ADR 255)", LogLevel.Info);
                 Log("owner_input", new { what, line, harness_waits = true });
-            }
-            if (walking && Own())
-            {
-                Game1.player.controller = null; // the helper's own bed path ends; his input moves him
-                walking = false;
-                Log("host_path_dropped_for_owner", new { what });
             }
         }
         catch { /* naming never changes his input */ }
@@ -158,12 +171,6 @@ public sealed class ModEntry : Mod, IHelperHoldPort
                 this.Monitor.Log("HOST " + line + ": the owner is using the HOST; the harness waits (ADR 255)", LogLevel.Info);
                 Log("owner_input", new { what = line, harness_waits = true, source = "raw_state" });
             }
-            if (owner.Active(Environment.TickCount64) && walking && Own())
-            {
-                Game1.player.controller = null; // the helper's own bed path ends; his input moves him
-                walking = false;
-                Log("host_path_dropped_for_owner", new { source = "raw_state" });
-            }
         }
         catch { /* a failed read is not his input; the event path still stamps him */ }
         // Review M4d item 1 (a): while he is present, the helper's own holds are released at once (every tick, after the
@@ -181,6 +188,8 @@ public sealed class ModEntry : Mod, IHelperHoldPort
         {
             bool any = sleep.Clear() | ownSleepPrompt is not null;
             ownSleepPrompt = null;
+            DropBedPath();
+            bedPathStarted = null;
             if (any) { try { Log("helper_sleep_cleared", new { why }); } catch { } }
         }
         catch { }
@@ -215,13 +224,12 @@ public sealed class ModEntry : Mod, IHelperHoldPort
     bool inert;
     IClickableMenu? ownSleepPrompt;
 
-    /// <summary>Review M4c rule 4: after ANY stop (a helper stop, host/STOP, HOST_STOP, an ordinary mabar stop, a cycle-local
-    /// or runtime LIVE7_STOP, SUPERVISE_STOP, a bridge stop or drain) the helper takes no action at all in this HOST launch.
+    /// <summary>After any stop recognized by HostStop, the helper takes no action in this HOST launch.
     /// One log row. A host/STOP still latches the helper stop (HOST_STOP evidence) as before.</summary>
-    bool Inert()
+    bool Inert(string? observed = null)
     {
         if (inert) return true;
-        string? why = stopped ? "helper_stop" : StopMarker();
+        string? why = stopped ? "helper_stop" : observed ?? StopMarker();
         if (why is null) return false;
         inert = true;
         ReleaseHolds("stop_seen:" + why); // review M4d item 1 (b, c): the first act when a stop is seen and it goes inert
@@ -232,25 +240,7 @@ public sealed class ModEntry : Mod, IHelperHoldPort
         return true;
     }
 
-    /// <summary>The first stop marker of this helper's folder or of the run it belongs to (OutputDirectory is RUN/host).</summary>
-    string? StopMarker()
-    {
-        try
-        {
-            foreach (string own in new[] { "STOP", "HOST_STOP" })
-                if (File.Exists(Path.Combine(cfg.OutputDirectory, own))) return own;
-            string? run = Path.GetDirectoryName(Path.GetFullPath(cfg.OutputDirectory));
-            if (run is null) return "unreadable_run";
-            foreach (string marker in new[] { "SUPERVISE_STOP", "LIVE7_STOP", "bridge-stop-request", "bridge-drained" })
-                if (File.Exists(Path.Combine(run, marker))) return marker;
-            if (File.Exists(Path.Combine(run, "runtime", "LIVE7_STOP"))) return "runtime/LIVE7_STOP";
-            string cycles = Path.Combine(run, "runtime", "live7");
-            if (Directory.Exists(cycles) && Directory.EnumerateFiles(cycles, "LIVE7_STOP", SearchOption.AllDirectories).Any())
-                return "cycle/LIVE7_STOP";
-            return null;
-        }
-        catch { return "unreadable"; } // any doubt: inert
-    }
+    string? StopMarker() => HostStop.StopMarker(cfg.OutputDirectory);
 
     bool Own() => Context.IsWorldReady && Context.IsMainPlayer && !Context.IsSplitScreen && Game1.IsMasterGame
         && Game1.uniqueIDForThisGame == cfg.SaveId && Game1.player.UniqueMultiplayerID == cfg.HostId;
@@ -280,7 +270,7 @@ public sealed class ModEntry : Mod, IHelperHoldPort
             var menu = world ? Game1.activeClickableMenu : null;
             var facts = new HoldFacts(
                 PausedByHelper: startup.ReleaseHold(),
-                HelperWalking: world && walking,
+                HelperWalking: world && OwnsBedPath(),
                 OwnPromptOpen: menu is not null && (ReferenceEquals(menu, ownSleepPrompt) || ReferenceEquals(menu, ownedGiftPrompt)
                     || ReferenceEquals(menu, ownedGiftResponse)),
                 // Review M4e item 1: its own sleep wait only by its own record (the dialog it captured after its own Yes,
@@ -305,12 +295,96 @@ public sealed class ModEntry : Mod, IHelperHoldPort
 
     void IHelperHoldPort.Unpause() => Game1.netWorldState.Value.IsPaused = false;
 
-    void IHelperHoldPort.DropPath()
+    void IHelperHoldPort.DropPath() => DropBedPath();
+
+    bool OwnsBedPath() => bedPath is not null && Own() && ReferenceEquals(Game1.player, bedWalker)
+        && ReferenceEquals(Game1.player.controller, bedPath);
+
+    void DropBedPath()
     {
-        Game1.player.controller = null;
-        walking = false;
-        if (!OwnerActive()) Game1.player.Halt(); // never halts him while he moves the HOST
+        if (OwnsBedPath())
+        {
+            Game1.player.controller = null;
+            if (!OwnerActive()) Game1.player.Halt(); // never halts him while he moves the HOST
+        }
+        bedPath = null;
+        bedWalker = null;
+        bedApproach = null;
     }
+
+    BedSite? CurrentBedSite()
+    {
+        if (!Own() || Game1.player.currentLocation is not FarmHouse house
+            || !ReferenceEquals(Game1.currentLocation, house) || house.owner.UniqueMultiplayerID != cfg.HostId
+            || house.GetPlayerBed() is not { } bed)
+            return null;
+        var destination = bed.GetBedSpot();
+        return new BedSite(Game1.player, house, bed, Today(), (destination.X, destination.Y));
+    }
+
+    static bool IsOwnBedTouch(BedSite site, GameLocation location, Vector2 tile)
+    {
+        if (!ReferenceEquals(site.House, location) || location.lastTouchActionLocation != tile || Game1.player.Tile != tile)
+            return false;
+        // A single bed's native Sleep tile may be one tile left of GetPlayerBedSpot().
+        string action = "";
+        return ((BedFurniture)site.Bed).DoesTileHaveProperty((int)tile.X, (int)tile.Y, "TouchAction", "Back", ref action)
+            && action == "Sleep";
+    }
+
+    BedApproach? BeginBedTouch(GameLocation location, Vector2 tile)
+    {
+        if (bedApproach is not { } approach || stopped || inert || OwnerActive()
+            || CurrentBedSite() is not { } site || !IsOwnBedTouch(site, location, tile)
+            || bedPath?.pathToEndPoint is not { } steps || steps.Count >= bedPathInitialSteps
+            || CleanBlock(Game1.player) is not null || Inert())
+            return null;
+        return approach.CanTouch(site, Game1.player.controller, Game1.activeClickableMenu,
+            ((int)tile.X, (int)tile.Y), Environment.TickCount64) ? approach : null;
+    }
+
+    void CaptureBedTouch(BedApproach approach, GameLocation location, Vector2 tile)
+    {
+        if (!ReferenceEquals(approach, bedApproach) || stopped || inert || OwnerActive()
+            || CurrentBedSite() is not { } site || !IsOwnBedTouch(site, location, tile)
+            || Game1.activeClickableMenu is not DialogueBox { isQuestion: true } prompt || location.lastQuestionKey != "Sleep")
+            return;
+        approach.Capture(site, Game1.player.controller, prompt, Environment.TickCount64);
+    }
+
+    void BedPathArrived(Character character, GameLocation location)
+    {
+        if (bedApproach is { } approach && CurrentBedSite() is { } site
+            && ReferenceEquals(site.Farmer, character) && ReferenceEquals(site.House, location))
+            approach.Arrive(site, character.controller, Environment.TickCount64);
+    }
+
+    void ObserveBedApproach()
+    {
+        if (bedApproach is { } approach && (CurrentBedSite() is not { } site
+            || !approach.Observe(site, Game1.player.controller, Game1.activeClickableMenu, Environment.TickCount64)))
+            DropBedPath();
+    }
+
+    bool OwnsBedTouch(IClickableMenu menu) => bedApproach is { } approach && CurrentBedSite() is { } site
+        && approach.Owns(site, Game1.player.controller, menu, Environment.TickCount64);
+
+    bool CanAnswerSleep(DialogueBox menu, bool native, int today)
+    {
+        if (OwnerActive() || stopped || inert) return false;
+        if (!Own() || !ReferenceEquals(Game1.activeClickableMenu, menu) || Today() != today || !sleep.MayPressYes(today)
+            || !menu.isQuestion || Game1.player.currentLocation is not { lastQuestionKey: "Sleep", afterQuestion: null }
+            || Game1.eventUp
+            || Game1.CurrentEvent is not null || Game1.farmEvent is not null
+            || !(native ? OwnsBedTouch(menu) : ReferenceEquals(menu, ownSleepPrompt)))
+        {
+            NotClean("menu:" + menu.GetType().Name);
+            return false;
+        }
+        return true;
+    }
+
+    bool CanPressMenu(IClickableMenu menu) => !Inert() && ReferenceEquals(Game1.activeClickableMenu, menu);
 
     void IHelperHoldPort.CloseOwnPrompt()
     {
@@ -516,9 +590,10 @@ public sealed class ModEntry : Mod, IHelperHoldPort
             try { Log("exit_answered", exitAnswer); } catch { }
             return;
         }
-        if (!e.IsMultipleOf(15)) return;
         try
         {
+            ObserveBedApproach();
+            if (!e.IsMultipleOf(15)) return;
             if (e.IsMultipleOf(60))
             {
                 try { HarnessFileIo.AtomicWrite(Path.Combine(cfg.OutputDirectory, "heartbeat"), DateTime.UtcNow.ToString("O")); }
@@ -527,7 +602,7 @@ public sealed class ModEntry : Mod, IHelperHoldPort
                 HarnessFileIo.AtomicWrite(path, JsonSerializer.Serialize(new {
                     utc = DateTime.UtcNow, run_id = cfg.RunId, runtime_id = session, world_ready = Context.IsWorldReady, // ADR 256: runtime_id
                     saving = Game1.game1.IsSaving || Game1.newDay || Game1.showingEndOfNightStuff || !Context.IsWorldReady,
-                    rendered, stopped }));
+                    rendered, stopped, accepting = HostAcceptingFacts.Read(cfg.FarmhandId) })); // whether this HOST can accept her farmhand
             }
             if (!stopped) Step(e);
             WriteWait(); // review M4d item 3: a periodic, fresh wait row (or clear / inert)
@@ -608,7 +683,7 @@ public sealed class ModEntry : Mod, IHelperHoldPort
                 Log("gift_not_exercised", new { time, reason = "peer_not_" + cfg.GiftWhen });
             // Review M4e item 1: the sleep state is not reset here (Step does not run while he is active); the game's
             // DayStarted ends it, and his input or any stop ends it sooner.
-            day = Game1.Date.TotalDays; gifts.Clear(); walking = false;
+            day = Game1.Date.TotalDays; gifts.Clear();
             Log("native_day", new { day, Game1.timeOfDay });
         }
         lastTime = Game1.timeOfDay;
@@ -649,33 +724,47 @@ public sealed class ModEntry : Mod, IHelperHoldPort
             }
         }
         var menu = Game1.activeClickableMenu;
-        if (!ReferenceEquals(menu, seenMenu)) { seenMenu = menu; menuSince = DateTime.UtcNow; Log("host_menu", new { type = menu?.GetType().Name }); }
-        // ADR 255 (M4c rule 2): the helper acts only on what it opened itself (its own sleep prompt, its gift prompt and the
-        // gift reply) and on the end-of-night menus of a night it started itself. Any other menu or dialogue is not clean:
+        if (!ReferenceEquals(menu, ownSleepPrompt)) ownSleepPrompt = null;
+        bool nativeSleep = menu is not null && OwnsBedTouch(menu);
+        if (!ReferenceEquals(menu, seenMenu))
+        {
+            seenMenu = menu; menuSince = DateTime.UtcNow;
+            Log("host_menu", new { type = menu?.GetType().Name });
+            if (nativeSleep) Log("host_bed_question", new { own_prompt = true, native_touch = true });
+        }
+        // The helper acts only on its own sleep and gift prompts, the gift reply and the menus of its own night.
+        // The solo HOST's native sleep prompt belongs to the bed walk that produced it. Any other menu is not clean:
         // the helper does nothing (it never closes, answers or advances it) and says so once per episode.
         if (menu != null)
         {
             sleep.Capture(menu, menu is ReadyCheckDialog { checkName: "sleep" }, Today()); // only right after its own Yes, today
-            bool own = ReferenceEquals(menu, ownSleepPrompt) || ReferenceEquals(menu, ownedGiftPrompt) || ReferenceEquals(menu, ownedGiftResponse);
+            bool ownSleep = nativeSleep || ReferenceEquals(menu, ownSleepPrompt);
+            bool own = ownSleep || ReferenceEquals(menu, ownedGiftPrompt) || ReferenceEquals(menu, ownedGiftResponse);
             bool ownNightMenu = sleep.OwnNight(Today()) && (menu is ShippingMenu || menu is SaveGameMenu || menu is LevelUpMenu { isProfessionChooser: false });
             if (!own && !ownNightMenu) { NotClean("menu:" + menu.GetType().Name); return; }
-            if ((DateTime.UtcNow - menuSince).TotalSeconds < Math.Max(1, cfg.HostDelaySeconds)) return;
+            // A modal question blocks movement; the game abandons a stalled controller after five seconds.
+            // The configured sleep delay already ran before the walk. Keep the one-second minimum for a native touch.
+            if ((DateTime.UtcNow - menuSince).TotalSeconds < (nativeSleep ? 1 : Math.Max(1, cfg.HostDelaySeconds))) return;
             switch (menu)
             {
                 case SaveGameMenu: return; // Native update/draw owns persistence. Never force-close.
                 case ShippingMenu shipping:
                     var center = shipping.okButton.bounds.Center;
+                    if (!CanPressMenu(menu)) return;
                     shipping.receiveLeftClick(center.X, center.Y);
                     Log("host_shipping_ok", new { own_night = true }); return;
                 case LevelUpMenu level:
-                    if (level.isActive) { level.okButtonClicked(); Log("host_level_ok", new { own_night = true }); } return;
+                    if (level.isActive && CanPressMenu(menu)) { level.okButtonClicked(); Log("host_level_ok", new { own_night = true }); } return;
                 case DialogueBox dialogue:
                     if (dialogue.transitioning || dialogue.safetyTimer > 0) return;
-                    bool ownSleep = ReferenceEquals(menu, ownSleepPrompt);
+                    if (ownSleep && dialogue.characterIndexInDialogue < dialogue.getCurrentString().Length - 1) return;
+                    if (ownSleep && (!dialogue.isQuestion || host.currentLocation?.lastQuestionKey != "Sleep"))
+                    { NotClean("menu:" + menu.GetType().Name); return; }
                     var plan = PassiveDialoguePolicy.Plan(dialogue.isQuestion, host.currentLocation?.lastQuestionKey,
                         ownSleep, ReferenceEquals(menu, ownedGiftPrompt), cfg.Answers);
                     if (plan.Advance)
                     {
+                        if (!CanPressMenu(menu)) return;
                         dialogue.receiveLeftClick(dialogue.xPositionOnScreen + 32, dialogue.yPositionOnScreen + 32);
                         Log("host_text_ok", new { own = true });
                         if (Game1.activeClickableMenu != dialogue) ownedGiftResponse = null;
@@ -690,16 +779,39 @@ public sealed class ModEntry : Mod, IHelperHoldPort
                     int index = Array.FindIndex(dialogue.responses, r => r.responseKey == answer);
                     if (index < 0 || dialogue.responseCC == null || index >= dialogue.responseCC.Count) return;
                     var p = dialogue.responseCC[index].bounds.Center;
-                    dialogue.performHoverAction(p.X, p.Y); dialogue.receiveLeftClick(p.X, p.Y);
+                    int answerDay = Today();
+                    if (ownSleep)
+                    {
+                        if (nativeSleep && !SoloHostLaunch.Verified(cfg.OutputDirectory))
+                        { DropBedPath(); NotClean("menu:" + menu.GetType().Name); return; }
+                        SampleOwner();
+                        if (Inert() || !CanAnswerSleep(dialogue, nativeSleep, answerDay)) return;
+                    }
+                    dialogue.performHoverAction(p.X, p.Y);
+                    if (ownSleep)
+                    {
+                        if (dialogue.selectedResponse != index || !CanAnswerSleep(dialogue, nativeSleep, answerDay)) return;
+                        if (!HostStop.TryClickSleep(cfg.OutputDirectory, dialogue, p, sleep, answerDay, out var stop))
+                        {
+                            if (stop is not null) Inert(stop);
+                            return;
+                        }
+                    }
+                    else
+                    {
+                        if (!CanPressMenu(menu)) return;
+                        dialogue.receiveLeftClick(p.X, p.Y);
+                    }
                     Log("host_answer", new { answer, gift = ReferenceEquals(menu, ownedGiftPrompt), own_sleep = ownSleep });
                     if (ownSleep)
                     {
                         ownSleepPrompt = null;
+                        DropBedPath();
                         // Review M4e item 1: its own night, recorded with its day; the sleep wait that follows is captured by
                         // reference (now, or on the next step before anything clears the record).
                         if (answer == "Yes")
                         {
-                            sleep.Answered(Today());
+                            sleep.Answered(answerDay);
                             sleep.Capture(Game1.activeClickableMenu, Game1.activeClickableMenu is ReadyCheckDialog { checkName: "sleep" }, Today());
                         }
                     }
@@ -729,6 +841,7 @@ public sealed class ModEntry : Mod, IHelperHoldPort
         { Stop("passive_ready_check_bound"); return; }
         foreach (var check in checks.Where(c => startup.State != "held" && passiveReady.ShouldReady(c, cfg.HostId, cfg.FarmhandId)))
         {
+            if (Inert()) return;
             Game1.netReady.SetLocalReady(check.Check, true); // local HOST only; never opens a check for ARTI
             passiveReady.Readied();
             Log("host_ready_check", new { check = check.Check, before = check.Players,
@@ -741,23 +854,40 @@ public sealed class ModEntry : Mod, IHelperHoldPort
         { NotClean("away:" + host.currentLocation?.NameOrUniqueName); return; }
         if (peer.timeWentToBed.Value != 0 || Game1.timeOfDay >= cfg.SleepAt)
         {
+            if (!sleep.MayPressYes(Today())) return;
             if (!sleep.Due) { sleep.Due = true; sleepSince = DateTime.UtcNow; Log("host_sleep_due", new { peer_ready = peer.timeWentToBed.Value, Game1.timeOfDay }); }
             if ((DateTime.UtcNow - sleepSince).TotalSeconds < cfg.HostDelaySeconds) return;
-            var bed = house.GetPlayerBedSpot();
+            var site = soloHost ? CurrentBedSite() : null;
+            if (soloHost && site is null) { NotClean("own_bed_missing"); return; }
+            var bed = site is { } ownBed ? new Point(ownBed.Destination.X, ownBed.Destination.Y) : house.GetPlayerBedSpot();
             if (host.TilePoint == bed)
             {
-                walking = false;
+                if (bedApproach is not null || host.controller is not null && !OwnsBedPath()) return;
+                if (soloHost && !SoloHostLaunch.Verified(cfg.OutputDirectory)) return;
+                if (Inert()) return;
+                DropBedPath();
+                bedPathStarted = null;
                 house.createQuestionDialogue(Game1.content.LoadString("Strings\\Locations:FarmHouse_Bed_GoToSleep"), house.createYesNoResponses(), "Sleep", null);
                 ownSleepPrompt = Game1.activeClickableMenu; // its OWN prompt, by reference: the only sleep prompt it answers
                 Log("host_bed_question", new { bed, own_prompt = ownSleepPrompt is DialogueBox }); return;
             }
-            if (!walking)
+            if (bedPathStarted is null)
             {
-                walking = true; pathSince = DateTime.UtcNow;
-                host.controller = new PathFindController(host, house, bed, 2);
+                if (host.controller is not null || !house.farmers.Contains(host)
+                    || soloHost && !SoloHostLaunch.Verified(cfg.OutputDirectory) || Inert()) return;
+                var origin = host.TilePoint;
+                var started = Environment.TickCount64;
+                var controller = new PathFindController(host, house, bed, 2, BedPathArrived);
+                bedWalker = host;
+                bedPath = controller;
+                bedPathStarted = started;
+                bedPathInitialSteps = controller.pathToEndPoint?.Count ?? 0;
+                if (site is { } walkSite)
+                    bedApproach = new BedApproach(walkSite, controller, (origin.X, origin.Y), started);
+                host.controller = controller;
                 Log("host_path_to_own_bed", new { bed });
             }
-            if ((DateTime.UtcNow - pathSince).TotalSeconds > 20) Stop("host_bed_path_timeout");
+            if (Environment.TickCount64 - bedPathStarted >= BedApproach.TimeoutMs) Stop("host_bed_path_timeout");
             return;
         }
         if (proposal != null || !armed || !giftReady || !this.GiftSafe(peer)) return;

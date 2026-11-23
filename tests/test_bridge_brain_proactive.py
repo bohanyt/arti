@@ -230,7 +230,7 @@ def test_stardew_live_reads_cache_and_refreshes_off_thread(tmp_path, monkeypatch
     import time
 
     scans = []
-    real = guard.active_live7_run_dir
+    real = guard.active_live7_cycles
     entered = threading.Event()
     release = threading.Event()
     expired = threading.Event()
@@ -243,7 +243,7 @@ def test_stardew_live_reads_cache_and_refreshes_off_thread(tmp_path, monkeypatch
             raise AssertionError("foreground waited for the blocked scan")
         return real(config, now=now)
 
-    monkeypatch.setattr(guard, "active_live7_run_dir", slow_spy)
+    monkeypatch.setattr(guard, "active_live7_cycles", slow_spy)
     _live7(tmp_path, lock=True)
     cfg = {"live7_help_dir": str(tmp_path), "stardew_live_cache_sec": 0.5}
     first = guard.stardew_live(cfg)
@@ -267,7 +267,7 @@ def test_live_refresher_never_raises_and_stops(monkeypatch, tmp_path):
     def boom(config, now=None):
         raise RuntimeError("disk gone")
 
-    monkeypatch.setattr(guard, "active_live7_run_dir", boom)
+    monkeypatch.setattr(guard, "active_live7_cycles", boom)
     cfg = {"live7_help_dir": str(tmp_path)}
     assert guard.stardew_live(cfg) is False
     assert guard._refresh_live_cache(cfg) is False

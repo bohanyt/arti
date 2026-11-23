@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from scripts.livepath import mabar  # noqa: E402
+from scripts.livepath.halt_authority import session_kind  # noqa: E402
 
 SAVE = """<SaveGame><uniqueIDForThisGame>100000001</uniqueIDForThisGame>
 <player><name>Bohan</name><UniqueMultiplayerID>111</UniqueMultiplayerID></player>
@@ -70,8 +71,29 @@ def test_install_copies_the_booked_helper_and_host_controller_follows(tmp_path, 
     assert cfg["SaveFolder"] == "farmA_100000001" and cfg["GiftTimes"] == []
     mabar.set_host_controller(run, "harness")
     assert json.loads((run / "trial-config.json").read_text())["stardew_host_controller"] == "harness"
+    assert session_kind(run) == "solo"
     mabar.remove_host_helper(run)
     assert not (run / "runtime/batch-host/host-mods/ArtiHostHelper").exists()
+
+
+def test_owner_host_removes_a_stale_helper_before_launch(tmp_path, monkeypatch):
+    helper = tmp_path / "runtime/batch-host/host-mods/ArtiHostHelper"
+    helper.mkdir(parents=True)
+    (helper / "config.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "trial-config.json").write_text('{"stardew_host_controller":"harness"}', encoding="utf-8")
+    assert session_kind(tmp_path) == "solo"
+    monkeypatch.setattr(mabar, "PREP", tmp_path / "unused-prep")
+    monkeypatch.setattr(mabar, "processes", lambda: [])
+    monkeypatch.setattr(mabar, "log", lambda *args, **kwargs: None)
+    launches = []
+
+    def launch(run, script, args, label, **kwargs):
+        assert not helper.exists() and session_kind(run) == "owner"
+        launches.append(label)
+
+    monkeypatch.setattr(mabar, "tool", launch)
+    mabar.host(argparse.Namespace(run=tmp_path, helper=False))
+    assert launches == ["launch-host"]
 
 
 def test_release_is_a_noop_without_a_gated_helper(tmp_path):

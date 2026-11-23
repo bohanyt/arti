@@ -27,7 +27,8 @@ EXPECTED_BRIDGE = dict(owner_chat_as_owner=True, stream_game_notes=True, live_vo
                        voice_context_timeout_sec=20.0, voice_context_rollover_keeps_lines=True,
                        # V14 (ADR 238): her recall says which farm a session note is from
                        vault_farm_labels=True)
-EXPECTED_MOD = dict(CharacterCreationEnabled=True, UiPadMenusEnabled=True, GenericWorldInputEnabled=True)
+EXPECTED_MOD = dict(CharacterCreationEnabled=True, UiPadMenusEnabled=True, GenericWorldInputEnabled=True,
+                    FestivalReflexEnabled=True, ReflexFishingEnabled=True)
 
 
 def test_the_profile_is_pinned():

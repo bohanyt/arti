@@ -867,7 +867,7 @@ public sealed partial class ModEntry
         // A stolen prop cancels the next leg, not a verified step already in flight.
         if (run.Replan && run.Pending && this.festivalRun is { Ending: false } f
             && this.FestivalPhaseValid(f) && this.FestivalLeaseValid(f)) return;
-        if (!run.Acting && (!run.Cleanup || !this.EventEggPinValid(run) || Game1.ticks - run.Started >= (run.Automatic || run.ApproachTarget is not null ? 7200 : EventControlAction.MaxRouteTicks)
+        if (run.Automatic && run.Stopping || !run.Acting && (!run.Cleanup || !this.EventEggPinValid(run) || Game1.ticks - run.Started >= (run.Automatic || run.ApproachTarget is not null ? 7200 : EventControlAction.MaxRouteTicks)
             || run.ApproachTarget is null && run.Event.festivalTimer <= (run.Automatic ? 0 : 3000)
             || run.Presses >= (run.Automatic ? 512 : run.InputLimit) || NowUnixMs() >= run.ExecutionDeadline
             || !this.ReflexLeaseHeld))
@@ -1072,7 +1072,7 @@ public sealed partial class ModEntry
         if (this.backgroundMove?.FestivalContainmentFault is { } containment) Fault("containment:" + containment);
         if (this.backgroundMove?.FestivalFaultPanics != run.FaultPanics)
             Fault("pad_panic:" + (this.backgroundMove?.FestivalLastFaultPanicReason ?? "unknown"));
-        if (this.padAdapter?.RestoreWritePending == true) Fault("pad_restore_pending");
+        if (!run.Automatic && this.padAdapter?.RestoreWritePending == true) Fault("pad_restore_pending");
     }
 
     private void FinishEventEggRoute(string outcome, bool success)
@@ -1080,24 +1080,37 @@ public sealed partial class ModEntry
         if (this.eggRun is not { } run) return;
         this.AggregateEventRouteCleanup(run);
         run.Cleanup &= this.backgroundMove?.Busy == false && this.backgroundMove.PressOverrideOutstanding == false
-            && this.padAdapter?.RestoreWritePending != true;
+            && (run.Automatic || this.padAdapter?.RestoreWritePending != true);
         this.eggRun = null;
         if (run.ApproachTarget is not null && this.backgroundMove is not null) this.backgroundMove.EventRouteAuthority = null;
         if (run.Automatic)
         {
+            // The route's own slot attempt ends with it (the same release proof as the body guard's leg).
+            FestivalRun.ReleaseAction(this, run.Request, "festival_egg_done");
             // A bounded end summary may already have reported cleanup debt. A late
             // terminal cannot certify it or fall into the unrelated manual inbox path.
             if (this.festivalRun is not { } festival) return;
             festival.Cleanup &= run.Cleanup && this.backgroundMove?.Busy != true && this.backgroundMove?.PressOverrideOutstanding != true;
-            if (success && festival.Cleanup) festival.Verified++;
+            if (success && festival.Cleanup) { festival.Verified++; festival.UnverifiedStreak = 0; }
             festival.Effects.Add(new() { ["kind"] = "egg", ["verified"] = success && festival.Cleanup,
                 ["score_before"] = run.StartScore, ["score_after"] = run.Player.festivalScore,
                 ["prop_removed"] = !run.Event.festivalProps.Contains(run.Prop), ["tile"] = new[] { run.Tile.X, run.Tile.Y },
                 ["cleanup"] = run.Cleanup, ["steps"] = run.Trace.Count,
-                ["all_steps_verified"] = run.Trace.All(t => (bool)t["verified"] && (bool)t["cleanup"]) });
+                ["all_steps_verified"] = run.Trace.All(t => (bool)t["verified"] && (bool)t["cleanup"]),
+                ["acted"] = run.Acting, ["last_label"] = run.Trace.Count > 0 ? run.Trace[^1]["label"] : "" });
             this.Monitor.Log("FESTIVAL_REFLEX egg " + System.Text.Json.JsonSerializer.Serialize(festival.Effects[^1]), LogLevel.Info);
             if (run.Replan && festival.Cleanup && !run.Acting && this.FestivalPhaseValid(festival) && this.FestivalLeaseValid(festival)) festival.Replans++;
-            else if (!success) this.EndFestival("egg_unverified");
+            else if (!success)
+            {
+                // One unverified egg does not end the hunt. It is marked tried and the next plan picks another
+                // published egg after a short pause; a bounded streak, cleanup debt, lease,
+                // stop, phase/timer or save still end the run exactly as before.
+                festival.EggTries[run.Prop] = (festival.EggTries.TryGetValue(run.Prop, out int tries) ? tries : 0) + 1;
+                if (++festival.UnverifiedStreak < FestivalRun.UnverifiedLimit && festival.Cleanup && !festival.Ending
+                    && this.FestivalPhaseValid(festival) && this.FestivalLeaseValid(festival) && this.padAdapter?.SaveWindow != true)
+                { festival.Replans++; festival.NextEggTick = Game1.ticks + FestivalRun.RetryTicks; }
+                else this.EndFestival("egg_unverified");
+            }
             return;
         }
         success &= run.Cleanup && this.backgroundMove?.Busy != true && this.backgroundMove?.PressOverrideOutstanding != true;

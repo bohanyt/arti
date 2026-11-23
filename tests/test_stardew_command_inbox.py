@@ -26,6 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 import arti_stardew_command as C  # noqa: E402
+from tests._fake_mod_files import read_json_retry, replace_retry, unlink_retry  # noqa: E402
 
 
 SESI_SIAP = {
@@ -94,8 +95,8 @@ class ModPalsu:
         req = self.folder / C.NAMA_REQUEST
         while not self._stop.is_set():
             if req.exists():
-                self.permintaan = json.loads(req.read_text(encoding="utf-8"))
-                req.unlink()
+                self.permintaan = read_json_retry(req)
+                unlink_retry(req)
                 if self.jeda:
                     time.sleep(self.jeda)
                 if self.envelope is not None:
@@ -103,7 +104,7 @@ class ModPalsu:
                     isi.setdefault("request_id", self.permintaan["request_id"])
                     tmp = self.folder / (C.NAMA_RESULT + ".tmp")
                     tmp.write_text(json.dumps(isi), encoding="utf-8")
-                    tmp.replace(self.folder / C.NAMA_RESULT)
+                    replace_retry(tmp, self.folder / C.NAMA_RESULT)
                 return
             time.sleep(0.01)
 

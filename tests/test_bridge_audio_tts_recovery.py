@@ -33,6 +33,54 @@ def playback(monkeypatch, tmp_path):
     return eng, wav
 
 
+@pytest.mark.parametrize("engine", ["supertone", "edge_tts"])
+@pytest.mark.parametrize("edge", ["expiry", "revoked"])
+def test_host_reply_expires_during_synthesis_before_playback(monkeypatch, tmp_path, engine, edge):
+    import os
+
+    from arti_runtime.host_story import HostStoryRelay
+    from tests.test_host_story import presence, revoke_presence, row, write
+
+    if edge == "revoked" and os.name != "nt":
+        pytest.skip("Windows HOST event")
+
+    now = [100.]
+    relay = HostStoryRelay(tmp_path / "host_story.jsonl", clock=lambda: now[0])
+    write(relay.path, row(1, "line", text="A fresh HOST letter", utc_ms=100_000), utc_ms=100_000)
+    sent = []
+    assert relay.tick(lambda text, **kw: sent.append(text) or True)
+    [story] = sent
+    eng, wav = playback(monkeypatch, tmp_path)
+    monkeypatch.setattr(bridge, "tts", eng)
+    monkeypatch.setattr(bridge, "tts_stop_flag", False)
+    bridge.CONFIG["tts_engine"] = engine
+
+    def expire():
+        if edge == "revoked":
+            heartbeat = relay.presence_path.read_bytes()
+            revoke_presence(relay.path)
+            assert relay.presence_path.read_bytes() == heartbeat
+        else:
+            now[0] = 161.
+            presence(relay.path, utc_ms=161_000)
+
+    async def acquire(_text):
+        expire()
+        return str(wav), []
+
+    async def stream():
+        expire()
+        yield {"type": "audio", "data": b"fake mp3"}
+
+    monkeypatch.setattr(eng, "_acquire_supertone", acquire)
+    monkeypatch.setattr(bridge.edge_tts, "Communicate", lambda *args: SimpleNamespace(stream=stream))
+    assert story.is_current()
+    result = asyncio.run(bridge._speak_reply_chunks(["I heard the letter."], bridge.screen_privacy.epoch,
+                                                   host_story=(story,)))
+    assert not result
+    bridge.sd.play.assert_not_called()
+
+
 @pytest.mark.parametrize("error", [bridge.sd.PortAudioError("Invalid device"), ValueError("Invalid device")])
 def test_device_reenumerated_once_and_configured_name_retained(monkeypatch, tmp_path, error):
     devices = Mock(side_effect=[
@@ -97,6 +145,49 @@ def test_edge_path_also_recovers_rejected_device(monkeypatch):
     asyncio.run(eng._speak_edge_tts("halo"))
     assert bridge.sd.play.call_count == 2
     assert not bridge.tts_is_playing
+
+
+@pytest.mark.parametrize("engine", ["supertone", "edge_tts"])
+def test_stream_stop_acknowledges_drain_during_playback_tail(monkeypatch, tmp_path, engine):
+    from arti_live_safety import SpeechControl
+    from scripts.livepath import bridge as rehearsal
+
+    eng, wav = playback(monkeypatch, tmp_path)
+    bridge.CONFIG.update(tts_engine=engine, rehearsal_parent_pid=None)
+    monkeypatch.setattr(bridge, "tts", eng)
+    monkeypatch.setattr(bridge, "speech_control", SpeechControl())
+    monkeypatch.setattr(bridge, "voice_trigger_queue", bridge.queue.Queue())
+    monkeypatch.setattr(bridge, "voice_trigger_buffer", bridge.arti_voice_queue.VoiceTriggerQueue())
+    monkeypatch.setattr(bridge, "tts_stop_flag", False)
+    monkeypatch.setattr(bridge.sd, "stop", Mock())
+    monkeypatch.setattr(bridge, "_subtitle_broadcast_status", AsyncMock())
+    monkeypatch.setattr(bridge.arti_expression_runtime, "apply_turn_end", AsyncMock())
+    monkeypatch.setattr(eng, "_acquire_supertone", AsyncMock(return_value=(str(wav), [])))
+    monkeypatch.setenv("ARTI_REHEARSAL_CONFIG", str(tmp_path / "rehearsal-config.json"))
+    monkeypatch.setattr(rehearsal, "_idle_since", None)
+
+    async def stream():
+        yield {"type": "audio", "data": b"fake mp3"}
+
+    async def tail(delay):
+        assert delay == 0.3 and bridge.tts_is_playing
+        (tmp_path / "bridge-stop-request").touch()
+        await asyncio.Event().wait()
+
+    async def answer(*_args):
+        return await bridge._speak_reply_chunks(["One clip."], bridge.screen_privacy.epoch)
+
+    monkeypatch.setattr(bridge.edge_tts, "Communicate", lambda *_: SimpleNamespace(stream=stream))
+    monkeypatch.setattr(bridge.asyncio, "sleep", tail)
+    monkeypatch.setattr(bridge, "_handle_voice_trigger", answer)
+    asyncio.run(bridge._handle_voice_trigger_traced(bridge.VoiceTrigger("question", "mic"), [], "persona"))
+    bridge.sd.play.assert_called_once()
+    bridge.sd.stop.assert_called_once()
+    assert not bridge.tts_is_playing
+    assert rehearsal.drain_stop(tmp_path, pending=0, busy=bridge.tts_is_playing, clock=lambda: 1)
+    with pytest.raises(KeyboardInterrupt):
+        rehearsal.drain_stop(tmp_path, pending=0, busy=bridge.tts_is_playing, clock=lambda: 4)
+    assert (tmp_path / "bridge-drained").is_file()
 
 
 def test_midplay_error_and_late_cleanup_error_never_repeat_via_edge(monkeypatch, tmp_path):

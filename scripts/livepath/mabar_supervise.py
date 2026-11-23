@@ -11,7 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from scripts.livepath.bringup import HARD_HEADROOM_GB, headroom_check, headroom_gb as snapshot_headroom
-from scripts.livepath.halt_authority import HandsHeld
+from scripts.livepath.halt_authority import HELPER_CONFIG, HandsHeld, session_kind  # the launch gate reads it too
 from scripts.m1_operator.farmhand_focus import FOCUS_INDEPENDENT, release_farmhand_focus
 
 POLL_S = 10
@@ -40,7 +40,6 @@ DRAINING_FAULTS = ("hands_not_engaged", "menu_held_recover", EFFECT_LADDER_DRAIN
 LADDER_DRAINS = ("menu_held_recover", EFFECT_LADDER_DRAIN)
 HOUR_CAP_ALERT_S = 600  # ADR 241 C: a drain waiting this long on the rejoin hour cap is said once, as an ALERT
 GAME_EXIT_WAIT_S = 120  # ADR 256: after its exiting answer, each game must be gone within this
-HELPER_CONFIG = "runtime/batch-host/host-mods/ArtiHostHelper/config.json"
 
 SELF_HEAL_EXACT = {
     "continuation_not_ready",
@@ -651,21 +650,6 @@ def _ladder_words(log_rows):
             rungs = "menu_held_recover %s" % (row.get("menu") or "unknown")  # ADR 241 C: a held-menu drain
         parts.append("%s: %s" % (row.get("cycle"), rungs or "rows unread"))
     return " | ".join(parts)
-
-
-def session_kind(run):
-    """ADR 241 C: who hosts this session, from what mabar itself recorded when it launched the HOST. 'solo': the run's
-    trial config names the helper program as the HOST farmer's controller (`mabar host --helper` writes
-    stardew_host_controller=harness) and the helper is installed in this run's HOST. 'owner': the owner hosts
-    (controller=owner, no helper). None when the two are missing or disagree: rung 6 is refused, never guessed."""
-    run = Path(run)
-    controller = (_read_json(run / "trial-config.json") or {}).get("stardew_host_controller")
-    helper = (run / HELPER_CONFIG).is_file()
-    if controller == "harness" and helper:
-        return "solo"
-    if controller == "owner" and not helper:
-        return "owner"
-    return None
 
 
 def session_games(run, kind):

@@ -40,7 +40,7 @@ def test_plain_uses_current_mabar_quiet_chat_and_media_config(tmp_path):
     assert cfg['codex_thread_max_turns'] == 6
 
 
-def test_raw_quiet_chat_uses_bridge_admission_and_merges_beyond_old_cap(tmp_path, monkeypatch):
+def test_raw_quiet_chat_uses_bridge_admission_and_acknowledges_overflow(tmp_path, monkeypatch):
     s = session(tmp_path, [owner()] + [chat(1001+i/10, i+1) for i in range(10)])
     cfg = {**R.build_config('plain', s), 'chat_busy_messages': 100}
     bind = replay_policy.bind
@@ -56,17 +56,19 @@ def test_raw_quiet_chat_uses_bridge_admission_and_merges_beyond_old_cap(tmp_path
     monkeypatch.setattr(replay_policy, 'bind', recording_bind)
     worker = run(s, cfg)
     assert len(calls) == 10
-    assert result(worker)['chat_messages'] == dict(incoming=10, answered=10, share_answered=1)
-    assert result(worker)['chat_replies_total'] == 1
+    assert result(worker)['chat_messages'] == dict(incoming=10, answered=1, share_answered=.1)
+    assert result(worker)['chat_replies_total'] == 2
+    [ack] = [e for _, _, kind, e in worker.audio if kind == 'yt_chat' and e.data.get('chat_acknowledgement')]
+    assert len(ack.data['chat_ids']) == 9
     assert len(worker.b._quiet_chat._messages) == 10
 
 
-def test_busy_chat_keeps_real_rotation_cap_and_does_not_count_dropped_messages(tmp_path):
+def test_busy_chat_acknowledgement_is_not_counted_as_an_answer(tmp_path):
     s = session(tmp_path, [owner()] + [chat(1001+i/10, i+1) for i in range(10)])
     worker = run(s)
-    # The eighth eligible message makes the room busy; the normal W3 merge
-    # cap then applies. The two messages beyond that cap were never voiced.
-    assert result(worker)['chat_messages'] == dict(incoming=10, answered=8, share_answered=.8)
+    assert result(worker)['chat_messages'] == dict(incoming=10, answered=1, share_answered=.1)
+    [ack] = [e for _, _, kind, e in worker.audio if kind == 'yt_chat' and e.data.get('chat_acknowledgement')]
+    assert len(ack.data['chat_ids']) == 9
 
 
 def test_quiet_admission_bypasses_cooldown_and_throttle_without_w3(tmp_path):

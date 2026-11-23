@@ -622,6 +622,56 @@ def festival_free_roam(offer):
             and offer.get("main_event_running") is False and offer.get("player_control") is True)
 
 
+def festival_leave_chosen(run, movement=None):
+    """A current trip chosen from inside this festival can ask to leave it."""
+    if (getattr(run, "status", None) != "running" or getattr(run, "pending", None) is not None
+            or getattr(getattr(run, "call", None), "name", None) != "pergi_ke"):
+        return False
+    festival = (getattr(run, "state", None) or {}).get("festival_leave_chosen")
+    return bool(festival and (movement is None or festival == movement.get("festival_id")))
+
+
+def festival_walk_target(tile, size, *, here=None):
+    """Keep free movement inside the map, allowing an actor on the edge to step inward."""
+    if tile is None or min(size) < 3:
+        return False
+    if all(0 < pos < length - 1 for pos, length in zip(tile, size)):
+        return True
+    if here is None:
+        return False
+    # A corner takes two steps to get fully inside; the unchanged axis stays at the edge.
+    return any(0 < tile[i] < size[i] - 1 and not 0 < here[i] < size[i] - 1
+               and tile[1 - i] == here[1 - i] for i in (0, 1))
+
+
+def festival_step_target(here, direction):
+    delta = {"up": (0, -1), "right": (1, 0), "down": (0, 1), "left": (-1, 0)}.get(direction)
+    if here is None or delta is None:
+        return None
+    dx, dy = delta
+    return here[0] + dx, here[1] + dy
+
+
+def festival_walk_calls(calls, here, size):
+    """The festival page offers interior movement and leaves travel as its own choice."""
+    allowed = []
+    for call in calls:
+        if call.name == "langkah":
+            tile = festival_step_target(here, call.arg)
+        elif call.name in ("hadap", "jalan_ke"):
+            try:
+                x, y = map(int, call.arg.split(","))
+                tile = x, y
+            except (AttributeError, ValueError):
+                continue
+        else:
+            allowed.append(call)
+            continue
+        if festival_walk_target(tile, size, here=here if call.name != "jalan_ke" else None):
+            allowed.append(call)
+    return allowed
+
+
 def festival_leave_offered(facts):
     """fix63A (ADR 94): ui.context says Select asks the native leave question now. An older DLL has no such cell."""
     if not isinstance(facts, Mapping) or not festival_free_roam(movement_offer(facts)):

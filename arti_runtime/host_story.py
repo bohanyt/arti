@@ -1,15 +1,16 @@
 """HOST-witnessed native story for the persona (mabar): what the HOST watches while she is not in it.
 
-The HOST mod appends `host_story.jsonl` (contract v1: an internal note "Relay contract"); this reader
-only tails it. Each native line reaches her once as a game moment with its event id and speaker, as facts; the model
-chooses whether and how to react. Lines that arrive while she is busy wait in order and are never dropped. Every row is
-also written to the existing native_story ledger (ADR 63) under the save's `host` scope, so she remembers the episode
-after she joins the same save. No event/NPC/intro names live here.
+The HOST mod appends `host_story.jsonl` and publishes its current relay window in `host_story.session.json`.
+Only lines from the current HOST-only window can reach the voice or native story memory. Speech also expires
+60 seconds after the HOST saw the line, even after the voice queue has accepted it.
 """
 from __future__ import annotations
 
+from contextvars import ContextVar
 import json
+import os
 import threading
+import time
 from pathlib import Path
 
 from arti_runtime import ipc
@@ -22,6 +23,13 @@ READ_MAX = 1 << 20
 LINES_MAX = 64
 CHANGES_MAX = 32
 CONTEXT_CHARS = 12000
+MAX_LINE_AGE_MS = 60_000
+PRESENCE_MAX_AGE_MS = 3_000
+playback_story = ContextVar("host_story_playback", default=())
+
+
+def playback_current():
+    return all(story.is_current() for story in playback_story.get())
 
 
 def host_scope(scope):
@@ -47,13 +55,33 @@ def parse(line):
     return row
 
 
+class HostStoryText(MomentText):
+    _host_story = True
+    _host_story_guarded = True
+
+    def is_current(self):
+        return self.generation == self.relay.generation and self.relay.is_current(self.window, self.oldest_ms)
+
+    def with_text(self, value):
+        text = HostStoryText(value)
+        text.relay, text.window, text.generation, text.oldest_ms = self.relay, self.window, self.generation, self.oldest_ms
+        return text
+
+
 class HostStoryRelay:
     owner_name = "Bohan"  # the bridge sets the live streamer_name
 
-    def __init__(self, path, *, mind_base=None, state_path=None, clock=None):
+    def __init__(self, path, *, mind_base=None, state_path=None, clock=time.time, stopped=lambda: False):
         self.path = Path(path)
         self.mind_base = Path(mind_base) if mind_base else None
         self.state_path = Path(state_path) if state_path else self.path.with_name(self.path.stem + ".bridge-state.json")
+        self.presence_path = self.path.with_name(self.path.stem + ".session.json")
+        self._clock = clock
+        self._started_ms = int(clock() * 1000)
+        self._stopped = stopped
+        self._closed = False
+        self._window = None
+        self.generation = 0
         self.offset, self.last_seq, self.pending, self.episodes = 0, 0, [], {}
         self._lock = threading.RLock()
         self.context_lines = []  # independent of the moment delivery cursor (ADR 168)
@@ -63,23 +91,78 @@ class HostStoryRelay:
         try:
             state = json.loads(ipc.read_text(self.state_path, encoding="utf-8"))
             self.offset, self.last_seq = int(state["offset"]), int(state["last_seq"])
-            self.pending = [r for r in state.get("pending", ()) if isinstance(r, dict)]
-            self.episodes = {k: v for k, v in (state.get("episodes") or {}).items() if isinstance(v, dict)}
             self.save_hint = state.get("save_hint")
             self.last_runtime = state.get("last_runtime")
-            self.context_lines = state.get("context_lines", [])[-LINES_MAX:]
-            if not self.context_lines:  # pre-ADR168 checkpoint, including already queued episodes
-                self.context_lines = [dict(line, save_id=d.get("save_id"), source=d.get("event_type"),
-                                           location=d.get("location"), date=d.get("date"))
-                                      for d in self.episodes.values() for line in d.get("lines", ())][-LINES_MAX:]
         except (OSError, ValueError, KeyError, TypeError):
             pass
+        try:
+            # Start at the append point, including rows the previous process
+            # had not polled. A pre-restart partial line is discarded too.
+            self.offset = self.path.stat().st_size
+        except OSError:
+            pass
+
+    def _read_presence(self):
+        try:
+            status = ipc.read_json(self.presence_path)
+        except (OSError, ValueError):
+            return None
+        now_ms = self._clock() * 1000
+        if not isinstance(status, dict):
+            return None
+        runtime, window = status.get("runtime_id"), status.get("relay_window")
+        epoch = status.get("window")
+        stamp, pid = status.get("utc_ms"), status.get("pid")
+        if not (isinstance(runtime, str) and runtime and type(epoch) is int and epoch > 0 and "relay_window" in status
+                and (window is None or type(window) is int and window == epoch)
+                and type(stamp) is int and 0 <= now_ms - stamp <= PRESENCE_MAX_AGE_MS
+                and type(pid) is int and pid > 0):
+            return None
+        if os.name == "nt":
+            from scripts.m1_operator.win_facts import pid_alive
+            if not pid_alive(pid):
+                return None
+        return status
+
+    @staticmethod
+    def _open_window(presence):
+        if presence is None or presence["relay_window"] is None:
+            return None
+        if os.name == "nt":
+            from scripts.m1_operator.win_facts import event_signaled
+            gate = presence.get("gate")
+            if not (isinstance(gate, str) and gate.startswith("Local\\ArtiHostStory-") and event_signaled(gate)):
+                return None
+        return presence["runtime_id"], presence["relay_window"]
+
+    def _read_window(self):
+        return None if self._closed or self._stopped() else self._open_window(self._read_presence())
+
+    def _fresh(self, stamp, now_ms):
+        return (type(stamp) is int and stamp >= self._started_ms
+                and 0 <= now_ms - stamp <= MAX_LINE_AGE_MS)
+
+    def is_current(self, window, oldest_ms):
+        return (window is not None and self._read_window() == window
+                and self._fresh(oldest_ms, self._clock() * 1000))
+
+    def _discard(self):
+        self.generation += 1
+        self.pending.clear()
+        self.episodes.clear()
+        self.context_lines.clear()
+        self.save_hint = None
+
+    def stop(self):
+        with self._lock:
+            self._closed = True
+            self._window = None
+            self._discard()
 
     def _save(self):
         try:
             ipc.atomic_write(self.state_path, json.dumps(dict(
-                offset=self.offset, last_seq=self.last_seq, pending=self.pending,
-                episodes=self.episodes, save_hint=self.save_hint, context_lines=self.context_lines,
+                offset=self.offset, last_seq=self.last_seq, save_hint=self.save_hint,
                 last_runtime=self.last_runtime), ensure_ascii=False).encode("utf-8"))
         except OSError:
             pass  # the source file stays; the next poll may repeat at most the unsaved rows
@@ -94,13 +177,30 @@ class HostStoryRelay:
                 stream.seek(self.offset)
                 data = stream.read(READ_MAX)
         except OSError:
-            return 0
+            data = b""
+        stopped = self._closed or self._stopped()
+        presence = None if stopped else self._read_presence()
+        window = self._open_window(presence)
+        now_ms = self._clock() * 1000
+        if window != self._window:
+            self._discard()
+            self._window = window
+        expired = {r["key"] for r in self.pending if not self._fresh(r["utc_ms"], now_ms)}
+        self.pending = [r for r in self.pending if self._fresh(r["utc_ms"], now_ms)]
+        self.context_lines = [r for r in self.context_lines if self._fresh(r["utc_ms"], now_ms)]
+        for key in expired:
+            self._retire_if_done(key)
         end = data.rfind(b"\n")
         if end < 0:
             return 0
-        fresh = 0
+        fresh = consumed = 0
         for raw in data[:end].split(b"\n"):
             row = parse(raw.decode("utf-8", errors="replace"))
+            if row is not None and not stopped and self._awaiting_presence(row, presence, now_ms):
+                # A background window write can lag the line. Leave this row
+                # and the rest of the tail at the cursor for the next poll.
+                break
+            consumed += len(raw) + 1
             if row is None:
                 self.invalid += raw.strip() != b""
                 continue
@@ -112,8 +212,12 @@ class HostStoryRelay:
             self.last_seq = row["seq"]
             self.rows += 1
             fresh += 1
-            self._episode(row)
-        self.offset += end + 1
+            if (window is not None and (runtime, row.get("relay_window")) == window
+                    and self._fresh(row.get("utc_ms"), now_ms)):
+                self._episode(row)
+        if not consumed:
+            return 0
+        self.offset += consumed
         if self.save_hint:
             for line in self.context_lines:
                 if not line.get("save_id"):
@@ -126,6 +230,18 @@ class HostStoryRelay:
                     self._retire_if_done(key)
         self._save()
         return fresh
+
+    def _awaiting_presence(self, row, presence, now_ms):
+        stamp, epoch = row.get("utc_ms"), row.get("relay_window")
+        runtime = row.get("runtime_id")
+        if (not isinstance(runtime, str) or not runtime or type(epoch) is not int or epoch <= 0
+                or not self._fresh(stamp, now_ms)):
+            return False
+        if presence is None:
+            return True
+        if runtime == presence["runtime_id"]:
+            return epoch > presence["window"]
+        return stamp >= presence["utc_ms"]
 
     def _retire_if_done(self, key):
         detail = self.episodes.get(key, {})
@@ -151,14 +267,14 @@ class HostStoryRelay:
             self.context_lines.append(dict(speaker=_text(row.get("speaker"), 64),
                 text=safe_fact(row.get("text"), 2048), save_id=save or self.save_hint,
                 source=_text(row.get("source") or row.get("event_type"), 96),
-                location=detail["location"], date=detail["date"]))
+                location=detail["location"], date=detail["date"], utc_ms=row["utc_ms"]))
             self.context_lines = self.context_lines[-LINES_MAX:]
             line = dict(speaker=_text(row.get("speaker"), 64), text=safe_fact(row.get("text"), LINE_CHARS))
             if type(row.get("narration")) is bool:
                 line["narration"] = row["narration"]
             if len(detail["lines"]) < LINES_MAX:
                 detail["lines"].append(line)
-            self.pending.append(dict(key=key, seq=row["seq"], **line))
+            self.pending.append(dict(key=key, seq=row["seq"], utc_ms=row["utc_ms"], **line))
         elif phase == "change" and safe_fact(row.get("change"), LINE_CHARS) not in ("", "UNKNOWN"):
             if len(detail["changes"]) < CHANGES_MAX:
                 detail["changes"].append(safe_fact(row.get("change"), LINE_CHARS))
@@ -202,11 +318,16 @@ class HostStoryRelay:
                 last = row["key"]
             who = "narasi" if row.get("narration") else row["speaker"]
             parts.append('%s: "%s"' % (who, row["text"]))
-        text = MomentText("[Stardew] Tampil di layar HOST sekarang (%s yang main HOST, kamu ikut nonton, " % self.owner_name +
-                          "kamu tidak ada di adegan ini). Baris asli game: " + " | ".join(parts))
-        text._live7_hold = True  # waits behind a long turn instead of the 28 s moment cull
-        text._host_story = True
+        text = self._guarded("[Stardew] Ditampilkan di layar HOST (%s yang main HOST, kamu ikut nonton, " % self.owner_name +
+                            "kamu tidak ada di adegan ini). Baris asli game: " + " | ".join(parts),
+                            min(row["utc_ms"] for row in batch))
+        text._live7_hold = True  # the source timestamp, below, controls expiry
         text.batch_size = len(batch)
+        return text
+
+    def _guarded(self, value, oldest_ms):
+        text = HostStoryText(value)
+        text.relay, text.window, text.generation, text.oldest_ms = self, self._window, self.generation, oldest_ms
         return text
 
     def tick(self, enqueue, *, ready=lambda: True):
@@ -214,10 +335,12 @@ class HostStoryRelay:
             return self._tick(enqueue, ready=ready)
 
     def _tick(self, enqueue, *, ready):
-        self.poll()
+        self._poll()
         if not self.pending or not ready():
             return False
         text = self.text()
+        if not text.is_current():
+            return False
         try:
             accepted = bool(enqueue(text, trigger_type="game"))
         except Exception:  # noqa: BLE001 - fail closed this tick, retried next tick
@@ -228,17 +351,23 @@ class HostStoryRelay:
             self.voiced += len(done)
             for key in {k for k, _ in done}:
                 self._retire_if_done(key)
-            self._save()
             print(f"[HostStory] voiced lines={len(done)} pending={len(self.pending)}", flush=True)
         return accepted
 
     def attention_situation(self):
-        """Memory-only HOST episode state, separate from moment delivery (ADR 172)."""
+        """Current HOST episode state, separate from moment delivery."""
         with self._lock:
+            if self._window is None or self._read_window() != self._window:
+                return dict(cutscene=False)
+            now_ms = self._clock() * 1000
             active = [d for d in self.episodes.values() if not d.get("complete")
                       and (d.get("event_type") == "Event" or d.get("source") in {"event", "farm_event", "minigame:GrandpaStory"})]
-            return dict(cutscene=bool(active) if self.rows else None, witness="host", lines=[dict(speaker=r.get("speaker", "UNKNOWN"),
-                        text=r.get("text", "")) for r in self.context_lines[-16:]])
+            lines = [r for r in self.context_lines[-16:] if self._fresh(r["utc_ms"], now_ms)]
+            situation = dict(cutscene=bool(active) if self.rows else None, witness="host",
+                             lines=[dict(speaker=r["speaker"], text=r["text"]) for r in lines])
+            if active:
+                situation["host_story"] = self._guarded("", min((r["utc_ms"] for r in lines), default=int(now_ms)))
+            return situation
 
     def reply_context(self):
         """Read stored native lines before the next model call, even while busy.
@@ -252,15 +381,16 @@ class HostStoryRelay:
                      if not self.save_hint or line.get("save_id") == self.save_hint]
             if not lines:
                 return ""
-            parts = ['%s: "%s" (sumber: %s; %s; %s)' % (
+            parts = [('%s: "%s" (sumber: %s; %s; %s)' % (
                 line["speaker"], line["text"], line.get("source", "baris asli game"),
-                line.get("location", "UNKNOWN"), line.get("date", "UNKNOWN")) for line in lines]
-            shown, size = [], 0
-            for part in reversed(parts):
+                line.get("location", "UNKNOWN"), line.get("date", "UNKNOWN")), line["utc_ms"]) for line in lines]
+            shown, stamps, size = [], [], 0
+            for part, stamp in reversed(parts):
                 if size + len(part) > CONTEXT_CHARS:
                     break
                 shown.append(part)
+                stamps.append(stamp)
                 size += len(part) + 3
             quoted = " | ".join(reversed(shown))
-            return ("\n[STARDEW STATUS] Cerita yang kuterima dari layar game %s lewat relay native; "
-                    "aku ikut membaca, bukan berada di adegannya. %s\n" % (self.owner_name, quoted))
+            return self._guarded("\n[STARDEW STATUS] Cerita yang kuterima dari layar game %s lewat relay native; "
+                                 "aku ikut membaca, bukan berada di adegannya. %s\n" % (self.owner_name, quoted), min(stamps))

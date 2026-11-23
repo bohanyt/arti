@@ -104,7 +104,8 @@ public sealed partial class ModEntry
             && (request.ExpectedPlayerName is not { Length: > 0 } name || name == pin.PlayerName)
             && request.ExpectedScreenId == pin.ScreenId, surface.Epoch,
             request.ExpectedLocationId == pin.LocationId && Game1.overlayMenu is null && Game1.emoteMenu is null
-                && Game1.textEntry is null && Game1.currentMinigame is null && Game1.CurrentEvent is null,
+                && Game1.textEntry is null && Game1.currentMinigame is null
+                && (Game1.CurrentEvent is null || this.festivalRun?.CastBinding(request) == true),
             NativeControllerPhase: true), surface, tool, own, (Game1.player?.TilePoint, Game1.player?.FacingDirection),
             ui?.UiKey?.Ready ?? ui?.IsActive ?? true, // DialogueBox removes the current native queue entry at receiveLeftClick (Q13 pinned source, :438).
             surface.Top?.Instance is DialogueBox { isQuestion: false } prose ? prose.dialogues?.Count ?? 0 : ui?.PageIndex ?? 0,

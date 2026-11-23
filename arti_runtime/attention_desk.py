@@ -123,6 +123,7 @@ class Candidate:
     waiting: tuple = ()
     value: float = 0.0
     platform: str | None = None
+    host_story: object | None = None
 
 
 def score(candidate):
@@ -165,7 +166,9 @@ class AttentionDesk:
         self.last_spoke = None
         self.scene_active = False
         self.scene_lines = []
+        self.scene_host_story = None
         self.ended = None
+        self.ended_host_story = None
         self._lock = threading.RLock()
 
     def audio(self, speaking, seconds, *, now):
@@ -197,6 +200,7 @@ class AttentionDesk:
             self.last_spoke = now
             if candidate.kind == "scene_ended":
                 self.ended = None
+                self.ended_host_story = None
 
     def ranked(self, pool, *, now, config, busy, situation):
         present = {id(raw) for raw in pool}
@@ -205,7 +209,17 @@ class AttentionDesk:
             self.announced = False
         people, candidates = [], []
         active = situation.get("cutscene")
+        host_story = situation.get("host_story")
+        if self.ended_host_story is not None and not self.ended_host_story.is_current():
+            self.ended = self.ended_host_story = None
+        if self.scene_host_story is not None and not self.scene_host_story.is_current():
+            self.scene_active = False
+            self.scene_lines = []
+            self.scene_host_story = None
         if active is True:
+            if (self.scene_host_story is None) != (host_story is None):
+                self.scene_lines = []
+            self.scene_host_story = host_story
             self.scene_active = True
             for line in situation.get("lines", ()):
                 if line not in self.scene_lines:
@@ -215,6 +229,7 @@ class AttentionDesk:
             self.scene_active = False
             self.ended = (now, json.dumps(dict(situation="The witnessed cutscene just ended.",
                            witnessed_lines=self.scene_lines), ensure_ascii=False)[:4096])
+            self.ended_host_story, self.scene_host_story = self.scene_host_story, None
             self.scene_lines = []
         for raw in pool:
             kind, text = raw.trigger_type, raw.text
@@ -259,7 +274,8 @@ class AttentionDesk:
             candidates.append(c)
         talking = self.owner_speaking(now)
         if self.ended is not None and now-self.ended[0] <= GAME_TTL_SEC:
-            c = Candidate(None, "scene_ended", "own_play", now-self.ended[0], salience=0.85, facts=self.ended[1])
+            c = Candidate(None, "scene_ended", "own_play", now-self.ended[0], salience=0.85, facts=self.ended[1],
+                          host_story=self.ended_host_story)
             c.value = score(c)
             candidates.append(c)
         if talking and (self.talk_seconds >= OWNER_TALK_SEC or self.utterances >= OWNER_UTTERANCES) and now-self.last_cut_in >= CUT_IN_GAP_SEC:

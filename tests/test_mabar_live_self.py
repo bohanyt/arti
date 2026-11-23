@@ -37,8 +37,8 @@ def test_mabar_config_is_her_live_self_but_keeps_mabar_rules(tmp_path):
     assert not cfg["vault_rag_reindex_on_shutdown"]
     assert cfg["vault_rag_root"] == str(mabar.STREAM) and cfg["vault_rag_db_path"] == str(mabar.VAULT_INDEX)
     assert cfg["expression_nod_enabled"] and cfg["reflex_enabled"] and cfg["provider_probe_enabled"]
-    assert cfg["codex_web_search"] == "disabled" and cfg["web_lookup_enabled"] is False  # owner: no internet
-    assert cfg["vision_enabled"] is False and cfg["observer_enabled"] is False  # live-writing peripherals stay off
+    assert cfg["codex_web_search"] == "disabled" and cfg["web_lookup_provider_chain"] == ["codex"]
+    assert cfg["vision_enabled"] is True and cfg["observer_enabled"] is False
     assert cfg["vts_api_port"] == 8002  # her VTS window, not the live value
     plain = rehearse.bridge_config(tmp_path / "p", tmp_path / "p" / "runtime")
     assert plain["vault_rag_enabled"] is False and "vault_rag_root" not in plain  # plain rehearsal unchanged

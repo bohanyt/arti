@@ -48,6 +48,7 @@ def _w():
         u32.EnumWindows.argtypes = [ctypes.WINFUNCTYPE(W.BOOL, W.HWND, W.LPARAM), W.LPARAM]
         u32.GetAsyncKeyState.argtypes = [ctypes.c_int]; u32.GetAsyncKeyState.restype = ctypes.c_short
         k32.OpenProcess.argtypes = [W.DWORD, W.BOOL, W.DWORD]; k32.OpenProcess.restype = W.HANDLE
+        k32.OpenEventW.argtypes = [W.DWORD, W.BOOL, W.LPCWSTR]; k32.OpenEventW.restype = W.HANDLE
         k32.CloseHandle.argtypes = [W.HANDLE]; k32.CloseHandle.restype = W.BOOL
         k32.WaitForSingleObject.argtypes = [W.HANDLE, W.DWORD]; k32.WaitForSingleObject.restype = W.DWORD
         k32.GetExitCodeProcess.argtypes = [W.HANDLE, ctypes.POINTER(W.DWORD)]; k32.GetExitCodeProcess.restype = W.BOOL
@@ -158,6 +159,18 @@ def pid_alive(pid) -> bool:
         return k32.WaitForSingleObject(h, 0) == WAIT_TIMEOUT
     finally:
         k32.CloseHandle(h)
+
+
+def event_signaled(name: str) -> bool:
+    """Read a local Windows event without waiting or modifying it."""
+    _, k32 = _w()
+    handle = k32.OpenEventW(SYNCHRONIZE, False, name)
+    if not handle:
+        return False
+    try:
+        return k32.WaitForSingleObject(handle, 0) == WAIT_OBJECT_0
+    finally:
+        k32.CloseHandle(handle)
 
 
 def wait_pid_exit(pid, timeout_s: float):

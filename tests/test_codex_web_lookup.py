@@ -64,6 +64,22 @@ def test_lookup_search_allowed_and_sources(fake):
     assert fake.runs[0] == {"model": "gpt-6-luna", "effort": "low"}
 
 
+def test_live_profile_dispatches_through_the_audited_codex_lane(fake, monkeypatch, tmp_path):
+    from scripts.livepath.mabar import mabar_bridge_config
+
+    cfg = mabar_bridge_config(tmp_path / "r")
+    for provider in ("groq_compound", "cursor"):
+        monkeypatch.setitem(wl._PROVIDERS, provider, lambda *args: pytest.fail("non-Codex search"))
+    fact = wl.lookup_block("harga emas hari ini", cfg)
+    assert "[INFO INTERNET" in fact and "Emas hari ini" in fact
+    start, = fake.starts
+    assert start["config"] == {"web_search": "live"} and start["ephemeral"]
+    assert fake.clients[0].lookup_tool_policy.tool_names == ("web.run",)
+
+    fake.kinds.append("commandExecution")
+    assert wl.lookup_block("harga emas hari ini", cfg) == ""
+
+
 @pytest.mark.parametrize("role", ["scout", "observer", "catchup", "diary"])
 def test_other_roles_still_reject_search(fake, role):
     with pytest.raises(cr.CodexRoleError, match="unexpected tool event"):

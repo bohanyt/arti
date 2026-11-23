@@ -84,11 +84,22 @@ public static class HelperHolds
 /// </summary>
 public sealed class HelperSleep
 {
+    int pressedDay = -1;
     int answeredDay = -1;
     object? wait;
 
     /// <summary>The sleep-due flag of this night (the walk delay runs from it).</summary>
     public bool Due { get; set; }
+
+    internal bool MayPressYes(int today) => today >= 0 && pressedDay != today;
+
+    // Releasing the ready check on owner input must never re-arm a Yes for this day.
+    internal bool TryPressYes(int today)
+    {
+        if (!MayPressYes(today)) return false;
+        pressedDay = today;
+        return true;
+    }
 
     /// <summary>It answered its own sleep prompt Yes today.</summary>
     public void Answered(int today) { answeredDay = today; wait = null; }

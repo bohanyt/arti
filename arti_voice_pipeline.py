@@ -49,16 +49,32 @@ def mic_transcript_facts(config):
 
 MODEL_LOOKUP_INSTRUCTION = (
     "\nKalau jawaban memerlukan fakta terbaru atau fakta yang belum kamu tahu, "
-    "balas HANYA [CARI: <query singkat>]."
+    "balas HANYA [CARI: <query singkat>]. Pakai kata kunci publik saja. "
+    "Jangan kirim isi layar, identitas penonton, atau ingatan pribadi ke pencarian."
 )
 _SEARCH_TAG = re.compile(r"^\s*\[\s*CARI\s*:\s*([^\]\r\n]{1,500})\]", re.IGNORECASE)
 _ANY_SEARCH_TAG = re.compile(r"\[\s*CAR[^\]]*(?:\]|$)", re.IGNORECASE)
 _LOOKUP_UNCERTAIN = "Aku belum bisa memastikan faktanya sekarang. Coba cek sumber resminya dulu, ya."
+_LOOKUP_FOLLOWUP = (
+    "\nJawab pertanyaan awal sekarang tanpa tag CARI atau permintaan pencarian lagi. "
+    "Kalau faktanya belum terverifikasi, katakan jujur belum bisa memastikan."
+)
+
+
+@dataclass
+class ModelLookupTurn:
+    """Keep one lookup result across a refresh of native game facts."""
+
+    fact_block: str | None = None
 
 
 async def model_lookup_reply(ask, system: str, config: dict, *,
-                             regex_lookup_done: bool = False, abort=None, private_contexts=()):
-    """One model-requested search and one re-ask, before any public output."""
+                             regex_lookup_done: bool = False, abort=None, private_contexts=(),
+                             announce=None, lookup_turn: ModelLookupTurn | None = None):
+    """One model-requested search and one re-ask. Keep the tag out of public output."""
+    if lookup_turn is not None and lookup_turn.fact_block is not None:
+        system = system.replace(MODEL_LOOKUP_INSTRUCTION, "") + lookup_turn.fact_block + _LOOKUP_FOLLOWUP
+        regex_lookup_done = True
     reply, chunks = await ask(system)
     if not config.get("web_lookup_model_decides", False):
         return reply, chunks
@@ -71,10 +87,11 @@ async def model_lookup_reply(ask, system: str, config: dict, *,
         # RAG blocks can contain private excerpts beyond the explicit memory
         # list. Compare locally; no memory/system text crosses the lookup seam.
         rag_blocks = re.split(r"\[VAULT RAG[^\]]*\]", system, flags=re.IGNORECASE)[1:]
-        denied = model_query_deny_reason(query, (*private_contexts, *rag_blocks))
+        screen_lines = re.findall(r"(?m)^\[LAYAR: ([^\n]+)", system)
+        denied = model_query_deny_reason(query, (*private_contexts, *rag_blocks, *screen_lines))
         block = ""
         try:
-            if not denied:
+            if not denied and (announce is None or await announce()):
                 block = await arti_web_lookup.lookup_block_async(query, config, abort=abort)
         except asyncio.CancelledError:
             raise
@@ -82,10 +99,9 @@ async def model_lookup_reply(ask, system: str, config: dict, *,
             print(f"[WebLookup] Model request failed: {type(exc).__name__}")
         if abort and abort():
             raise asyncio.CancelledError()
-        followup_system = system.replace(MODEL_LOOKUP_INSTRUCTION, "") + block + (
-            "\nJawab pertanyaan awal sekarang tanpa tag CARI atau permintaan pencarian lagi. "
-            "Kalau faktanya belum terverifikasi, katakan jujur belum bisa memastikan."
-        )
+        if lookup_turn is not None:
+            lookup_turn.fact_block = block
+        followup_system = system.replace(MODEL_LOOKUP_INSTRUCTION, "") + block + _LOOKUP_FOLLOWUP
         reply, chunks = await ask(followup_system)
         if abort and abort():
             raise asyncio.CancelledError()
@@ -215,6 +231,8 @@ async def prepare_turn_context(
         Pemicu konservatif (needs_web_lookup); budget keras via wait_for karena
         thread requests tidak bisa dibatalkan dari dalam. Gagal/timeout = "".
         """
+        if not config.get("web_lookup_regex_enabled", True):
+            return ""
         if is_moment or speech.startswith(("[VIDEO", "[Inisiatif", "[MINECRAFT")):
             # Temuan audit: judul video "Berita Kripto: Harga..." menembak
             # lookup dan menambah 12 dtk ke reaksi — turn proaktif/reaksi
@@ -404,6 +422,9 @@ async def prepare_curious_turn_context(
             ctx.llm_system = base_system
 
     max_lines = int(config.get("curious_max_history_lines", 8))
+    if (config.get("web_lookup_enabled") and config.get("web_lookup_model_decides")
+            and not config.get("web_lookup_regex_enabled", True)):
+        ctx.llm_system += MODEL_LOOKUP_INSTRUCTION
     full_history = arti_live_safety.public_context(await arti_executors.run("voice", get_categorized_history))
     ctx.formatted_history = _trim_history_lines(full_history, max_lines)
 

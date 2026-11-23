@@ -41,7 +41,8 @@ def test_ping_pemanasan_tidak_meledak_saat_lmstudio_mati(monkeypatch, capsys):
 
 
 def test_wizard_memanaskan_embedding_di_awal():
-    blok = _SRC.split("ARTI BRIDGE — Startup Checklist")[1][:600]
+    source = (Path(__file__).resolve().parents[1] / "arti_runtime" / "startup_wizard.py").read_text(encoding="utf-8")
+    blok = source.split("ARTI BRIDGE — Startup Checklist")[1][:600]
     assert "prewarm_embedding" in blok, \
         "pemanasan harus mulai di awal wizard, selagi Bohan menjawab checklist"
 

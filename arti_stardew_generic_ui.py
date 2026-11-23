@@ -152,6 +152,28 @@ def controls(view):
     return actions
 
 
+def unexpected_festival_leave(view, run):
+    from arti_stardew_event_control import festival_leave_chosen
+    return (getattr(view, "menu_type", None) == "ReadyCheckDialog"
+            and (getattr(view, "ready_check", None) or {}).get("check") == "festivalEnd"
+            and not festival_leave_chosen(run))
+
+
+def festival_cancel_control(view):
+    """Use the native Cancel widget so the input has a readiness readback."""
+    if (view.ready_check or {}).get("cancelable") is not True:
+        return None
+    close_ids = {c["id"] for c in view.components if c.get("kind") == "close"}
+    actions = controls(view)
+    for entry in (published(view) or {}).get("list", ()):
+        if (entry.get("role") == "exit" and type(entry.get("control")) is int
+                and entry["control"] in close_ids):
+            key = "press:A:%d" % entry["control"]
+            if key in actions:
+                return actions[key]
+    return None
+
+
 UI_LATCH_CLOSE_S = 5.0  # PM-1 fix4 #1 / fix9: a latched receiver offers its exit once native shows input released
 MENU_DECISION_BOUND_S = 20.0  # PM-1 fix9: a released open menu gets a new decision, or a named FAULT, within this
 
@@ -2329,11 +2351,46 @@ class GenericUiMixin:
                 self._ui_pad_uncertain[receiver] = run.reason
         return run
 
+    def _live7_cancel_festival_leave(self, session, view):
+        chosen = festival_cancel_control(view)
+        if chosen is None:
+            return self._live7_ui_hold(session, "festival_leave_cancel_unavailable", view.receiver_token)
+        key = (session.session_id, view.receiver_token)
+        last, attempts, retry_at = getattr(self, "_live7_festival_cancel", (None, 0, 0))
+        if last != key:
+            attempts, retry_at = 0, 0
+        if attempts >= 3:
+            return self._live7_ui_hold(session, "festival_leave_cancel_spent", view.receiver_token)
+        if time.monotonic() < retry_at:
+            return True
+
+        def guard():
+            fresh = self._live7_unknown_ui_view(session, publishing=True)
+            if (self._skill_session is not session or not unexpected_festival_leave(fresh, session.current)
+                    or stable_identity(fresh) != stable_identity(view) or festival_cancel_control(fresh) != chosen):
+                raise ValueError("festival_leave_prompt_changed")
+
+        with self._lock:
+            if self._action_busy or self._inflight_generation is not None:
+                return True
+            self._action_busy = True
+        try:
+            run, _ = self._run_ui_pad(*chosen, origin="festival_leave_cancel", revalidate_extra=guard)
+            self._live7_festival_cancel = (key, 3 if run.submitted else attempts + 1, time.monotonic() + 10)
+            self._journal(dict(ev="festival_leave_cancel", receiver=view.receiver_token, request_id=run.request_id,
+                               verified=run.verified, cleanup=run.cleanup, reason=run.reason, effect=run.effect))
+        finally:
+            with self._lock:
+                self._action_busy = False
+        return "unsafe" if run.hard_uncertain else True
+
     @W.span('validation', 76, runtime=True)
     def _live7_generic_ui(self, session, *, recovery_close=False):
         """False = unavailable/unsafe read; True = a safe pause; 'unsafe' = unverified input."""
         from arti_stardew_skills import SkillCall
         view = self._live7_unknown_ui_view(session)
+        if unexpected_festival_leave(view, session.current):
+            return self._live7_cancel_festival_leave(session, view)
         if self._live7_routine_owns_ready_check(session, view):
             return False
         sleep_waiting = view is not None and self._live7_sleep_waiting(session, view)

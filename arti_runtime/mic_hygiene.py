@@ -4,8 +4,8 @@ CONFIG["passive_mic_hygiene"] (default False) leaves today's path unchanged. mab
 When on:
 - a whole transcript that is a known Whisper bleed (the old vocabulary prompt, outro phrases) is noise;
 - during a mediashare hold a passive mic line goes to history only, unless it names her.
-Owner-direct kinds (mic / ptt / wake_word) are never touched. Which lines are addressed to her is a
-priority question, not a gate, and lives elsewhere.
+Vocabulary-list filtering applies only to passive mic transcripts.
+Which lines are addressed to her is a priority question and lives elsewhere.
 """
 from __future__ import annotations
 
@@ -42,11 +42,28 @@ def normalize_transcript(text: str) -> str:
     return re.sub(r"[^\w\s]", "", str(text).lower()).strip()
 
 
-def is_hallucination_transcript(text: str) -> bool:
+def has_question_mark(text: str) -> bool:
+    return "?" in text or "？" in text
+
+
+def is_prompt_echo(text: str, prompt: str) -> bool:
+    """A passive vocabulary echo includes both prompted names and has no question mark."""
+    if has_question_mark(text):
+        return False
+    words = set(re.findall(r"\w+", text.casefold()))
+    terms = [re.findall(r"\w+", term.casefold()) for term in prompt.split(",")]
+    prompt_words = {word for term in terms for word in term}
+    names = {term[0] for term in terms if len(term) == 1}
+    return len(names) >= 2 and names <= words <= prompt_words
+
+
+def is_hallucination_transcript(text: str, *, prompt: str = "") -> bool:
     """True when the whole transcript is a listed Whisper bleed, not a real sentence."""
     raw = str(text or "").strip()
-    if not raw:
+    if not raw or has_question_mark(raw):
         return False
+    if prompt and is_prompt_echo(raw, prompt):
+        return True
     t = normalize_transcript(raw)
     if not t:
         return False

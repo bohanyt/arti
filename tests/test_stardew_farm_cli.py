@@ -31,6 +31,7 @@ from arti_stardew_command import (  # noqa: E402
     baca_sesi as baca_sesi_asli,
 )
 from arti_stardew_farm_v0 import SESSION_CHANGED, SESSION_UNREADABLE  # noqa: E402
+from tests._fake_mod_files import read_json_retry, replace_retry, unlink_retry  # noqa: E402
 from arti_stardew_farm_v1 import (  # noqa: E402
     INSPECT_REJECTED,
     NO_TARGET,
@@ -709,8 +710,8 @@ class ModBerantai:
         i = 0
         while not self._stop.is_set() and i < len(self.envelopes):
             if req.exists():
-                perm = json.loads(req.read_text(encoding="utf-8"))
-                req.unlink()
+                perm = read_json_retry(req)
+                unlink_retry(req)
                 self.permintaan.append(perm)
                 if self.on_op is not None:
                     self.on_op(perm)
@@ -718,7 +719,7 @@ class ModBerantai:
                 isi.setdefault("request_id", perm["request_id"])
                 tmp = self.folder / (NAMA_RESULT + ".tmp")
                 tmp.write_text(json.dumps(isi), encoding="utf-8")
-                tmp.replace(self.folder / NAMA_RESULT)
+                replace_retry(tmp, self.folder / NAMA_RESULT)
                 i += 1
             else:
                 time.sleep(0.01)

@@ -12,6 +12,7 @@ from collections import deque
 from dataclasses import dataclass, field, replace
 import logging
 import math
+from pathlib import Path
 import re
 import threading
 import time
@@ -88,20 +89,24 @@ class HelpRelay:
         if config.get("host_story_relay_file"):
             import arti_mind
             from arti_runtime.host_story import HostStoryRelay
-            self._host_story = HostStoryRelay(config["host_story_relay_file"], mind_base=arti_mind.mind_dir(config))
+            self._host_story = HostStoryRelay(config["host_story_relay_file"], mind_base=arti_mind.mind_dir(config),
+                                              clock=clock, stopped=self._host_story_stopped)
             self._host_story.owner_name = str(config.get("streamer_name") or "Bohan")
 
     def status_block(self):
         return self._status_facts.status_block()
 
-    def reply_facts(self):
+    def reply_facts(self, *, include_host_story=True):
         """Refresh story at reply preparation, independently of moment delivery."""
+        if not include_host_story:
+            return self._session_facts.block()
         try:
             story = self._host_story.reply_context() if self._host_story is not None else ""
         except (OSError, ValueError, TypeError, KeyError) as exc:
             _LOG.warning("Host story context read failed (%s)", type(exc).__name__)
             story = ""  # keep the human reply; source remains available for the next read
-        return self._session_facts.block() + story
+        block = self._session_facts.block() + story
+        return story.with_text(block) if getattr(story, "_host_story_guarded", False) else block
 
     def note_session_owner(self, text):
         self._session_facts.note_owner(text)
@@ -125,6 +130,30 @@ class HelpRelay:
         # discovery. Static fallback with cycle_dir still None is not a stop.
         return bool(cycle is not None and resolver is not None
                     and not getattr(resolver, "has_active_cycle", True))
+
+    def _host_story_stopped(self):
+        from arti_stardew_stop import read_stop
+
+        # WATCH_STOP ends the farmhand's watcher even on normal exit. A
+        # host_left sentinel also drains only that leg; native HOST presence
+        # decides whether the owner is still playing.
+        run = self._host_story.path.parent
+        if self._stopped or (run / "bridge-stop-request").exists():
+            return True
+        paths = [run / "runtime" / "LIVE7_STOP"]
+        cycle = getattr(self._channel_resolver, "cycle_dir", None)
+        if cycle is not None:
+            cycle = Path(cycle)
+            paths.extend((cycle / "OPERATOR_STOP", cycle / "LIVE7_STOP"))
+        for path in paths:
+            try:
+                raw, stop = read_stop(path)
+            except (OSError, ValueError):
+                return True
+            if raw is not None and not (path.name == "LIVE7_STOP" and isinstance(stop, dict)
+                                        and stop.get("writer") == "supervisor.host_left"):
+                return True
+        return False
 
     def event_dir(self):
         """Resolved generic event inbox, shared with the text-only discovery consumer."""
@@ -425,7 +454,7 @@ class HelpRelay:
                     self._status_facts.deliver(self._enqueue, now=now, help_open=help_open)
             except Exception as exc:  # noqa: BLE001
                 _LOG.warning("Moments tick failed (%s)", type(exc).__name__)
-            if self._host_story is not None and not session_over:
+            if self._host_story is not None:
                 try:
                     self._host_story.tick(self._enqueue, ready=lambda: not help_open and self._host_story_ready())
                 except Exception as exc:  # noqa: BLE001 - never blocks help replies
@@ -455,6 +484,8 @@ class HelpRelay:
             thread = self._thread
             self._finish_locked(self._clock())
         self._status_facts.stop()
+        if self._host_story is not None:
+            self._host_story.stop()
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout=2.0)
         self._flush()

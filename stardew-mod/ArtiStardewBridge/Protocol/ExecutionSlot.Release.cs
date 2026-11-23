@@ -11,6 +11,7 @@ public sealed partial class ExecutionSlot
     public JsonElement? CoreReceipt { get; private set; }
     public JsonElement? ProgressionReceipt { get; private set; }
     public JsonElement? GuardReceipt { get; private set; }
+    public JsonElement? FestivalReceipt { get; private set; }
     public object InputIdle => new { core = CoreReceipt, progression = ProgressionReceipt };
     // B1 subscribes; it assigns occ_seq and persists the complete record in its existing ring.
     public event Action<JsonElement>? OpClosed;
@@ -104,6 +105,8 @@ public sealed partial class ExecutionSlot
         // ADR 181: the body guard's receipt is its own; the runtime's release proof reads CoreReceipt.
         if (a.Client == "progression") ProgressionReceipt = a.Receipt;
         else if (a.Client == BodyGuardClient) GuardReceipt = a.Receipt;
+        // Festival attempts also keep their receipt separate from the runtime's input_idle.core.
+        else if (a.Client == FestivalClient) FestivalReceipt = a.Receipt;
         else CoreReceipt = a.Receipt;
         this.RefreshClosure(a); this.ReceiptChanged?.Invoke(null);
     }

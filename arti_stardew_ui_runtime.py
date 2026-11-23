@@ -27,7 +27,8 @@ import arti_stardew_command as command
 import arti_stardew_ui_pad as ui_pad
 from arti_stardew_reading_dwell import DWELL_CONTEXTS
 from arti_stardew_ui_key_runtime import _DWELL_UI_PAD_ORIGINS, LeasedRun
-from arti_stardew_event_control import EventActionsRuntimeMixin
+from arti_stardew_event_control import (FESTIVAL_LEAVE_DETAIL, EventActionsRuntimeMixin, festival_leave_chosen,
+                                        festival_leave_offered, movement_offer)
 
 UI_PAD_OPS = ("ui_inspect", "ui_nav", "ui_press", "pad_button")
 _PAD_BUTTON_MENUS = {"Start": "GameMenu", "Y": "GameMenu", "Select": "QuestLog"}
@@ -162,11 +163,11 @@ class UiPadRuntimeMixin(EventActionsRuntimeMixin):
         if run is not None and run.call.name in ("pegang_slot", "inventori", "cek_jurnal"):
             button = {"pegang_slot": "RB", "inventori": "Start", "cek_jurnal": "Select"}[run.call.name]
         festival_leave = False
-        if button is None and run is not None and run.call.name == "pergi_ke" and player_id is not None:
+        if button is None and festival_leave_chosen(run) and player_id is not None:
             # fix63A (ADR 94): her own trip out of a festival asks the game's leave question; never offered otherwise.
-            from arti_stardew_event_control import festival_leave_offered
             leave_rec, _ = self._ui_key_record(player_id)
-            festival_leave = leave_rec is not None and festival_leave_offered(leave_rec.facts)
+            festival_leave = (leave_rec is not None and festival_leave_offered(leave_rec.facts)
+                              and festival_leave_chosen(run, movement_offer(leave_rec.facts)))
             button = "Select" if festival_leave else None
         other_row_tools = ()
         if button is None and run is not None and player_id is not None:
@@ -190,6 +191,8 @@ class UiPadRuntimeMixin(EventActionsRuntimeMixin):
         pad = rec.facts.get("pad")
         cell = pad.get("buttons", {}).get(button) if isinstance(pad, Mapping) and pad.get("enabled") is True else None
         if not isinstance(cell, Mapping) or cell.get("family") != command.PRIMITIVE_PAD_BUTTON:
+            return None
+        if cell.get("detail") == FESTIVAL_LEAVE_DETAIL and not festival_leave:
             return None
         if run is not None and run.call.name == "cek_jurnal" and not str(cell.get("detail", "")).startswith("QuestLog"):
             return None  # Select may now mean event skip or festival leave; it is no longer a journal offer.
@@ -348,6 +351,14 @@ class UiPadRuntimeMixin(EventActionsRuntimeMixin):
                     rec, _ = self._ui_key_record(pid)
                     if rec is None or isinstance(rec.facts.get("interactive"), Mapping):
                         raise ValueError("pad_button_menu_already_open")
+                    if args.get("button") == "Select":
+                        pad = rec.facts.get("pad") or {}
+                        cell = (pad.get("buttons") or {}).get("Select") or {}
+                        if cell.get("detail") == FESTIVAL_LEAVE_DETAIL:
+                            current = getattr(getattr(self, "_skill_session", None), "current", None)
+                            movement = movement_offer(rec.facts)
+                            if not festival_leave_offered(rec.facts) or not festival_leave_chosen(current, movement):
+                                raise ValueError("festival_leave_not_chosen")
                     return
                 view = self._ui_pad_view(pid)
                 if (view is None or not view.available or view.receiver_token != args["receiver_token"]

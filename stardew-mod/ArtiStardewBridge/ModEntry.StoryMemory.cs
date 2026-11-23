@@ -138,7 +138,7 @@ public sealed partial class ModEntry
             object? instance = (object?)grandpa ?? (object?)Game1.CurrentEvent ?? (object?)Game1.farmEvent
                 ?? (menu is LetterViewerMenu or DialogueBox ? menu : null);
             // A title screen is not a native story scope; still close the last observed episode on exit.
-            if (instance is null && this.hostStoryRelay is null) return;
+            if (instance is null && !Context.IsWorldReady && this.hostStoryRelay is null) return;
             if (this.hostStoryRelay is null) {
                 string configured = this.config.HostStoryRelayDirectory?.Trim() ?? "";
                 if (configured.Length == 0) configured = this.config.CommandInboxDirectory?.Trim() ?? "";
@@ -146,20 +146,27 @@ public sealed partial class ModEntry
                     : Path.IsPathRooted(configured) ? configured : Path.Combine(this.Helper.DirectoryPath, configured);
                 this.hostStoryRelay = new(directory, this.runtimeInstanceId);
             }
+            ulong save = Game1.uniqueIDForThisGame; // Value copy; formatting must not take a protected game-field address.
+            string saveId = save.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            long now = NowUnixMs();
+            // Mabar has one separate farmhand. The HOST's online roster is
+            // authoritative for whether that farmhand is in the same world.
+            bool alone = !Context.IsWorldReady || Game1.getOnlineFarmers().Take(2).Count() == 1;
+            this.hostStoryRelay.PublishPresence((Context.IsWorldReady || grandpa is not null) && alone, saveId, now, Game1.ticks);
+            if (instance is null && !this.hostStoryRelay.HasVisibleStory) return;
             string source = grandpa is not null ? "minigame:GrandpaStory"
                 : Game1.CurrentEvent is not null ? "event" : Game1.farmEvent is not null ? "farm_event"
                 : menu is LetterViewerMenu ? "letter" : menu is DialogueBox ? "dialogue" : "";
             var shown = grandpa is not null ? this.ShownGrandpaStory(grandpa)
                 : (Text: ShownStoryLine(menu), TextInstance: (object?)menu, TextPage: (menu as LetterViewerMenu)?.page ?? 0,
                     Narration: menu is DialogueBox { characterDialogue: null });
-            ulong save = Game1.uniqueIDForThisGame; // Value copy; formatting must not take a protected game-field address.
-            this.hostStoryRelay.Observe(this.config.HostStoryRelayEnabled, Context.IsMainPlayer, Context.IsSplitScreen,
-                new(instance, save.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            this.hostStoryRelay.Capture(
+                new(instance, saveId,
                     grandpa is null ? Game1.CurrentEvent?.id : null, instance?.GetType().Name ?? "UNKNOWN", source,
                     $"{Game1.year}:{Game1.currentSeason}:{Game1.dayOfMonth}", Game1.timeOfDay,
                     Game1.currentLocation?.NameOrUniqueName ?? "UNKNOWN", shown.Text,
                     grandpa is null ? (menu as DialogueBox)?.characterDialogue?.speaker?.Name : null,
-                    shown.Narration, Game1.ticks, NowUnixMs(), shown.TextInstance, shown.TextPage,
+                    shown.Narration, Game1.ticks, now, shown.TextInstance, shown.TextPage,
                     Game1.player?.UniqueMultiplayerID.ToString(System.Globalization.CultureInfo.InvariantCulture) ?? "UNKNOWN"));
         } catch (Exception e) {
             if (NowUnixMs() - this.hostStoryFaultMs >= 1000) {

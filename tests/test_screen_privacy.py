@@ -110,7 +110,7 @@ def test_close_eyes_requires_explicit_owner_reenable_and_revokes_old_epoch():
     bridge.add_to_history("Streamer", "Arti, kamu jangan lihat layar aku dulu, oke? Tutup mata kamu.")
     assert privacy.screen_privacy.restricted
     bridge.queue_voice_trigger("Arti boleh lihat layar lagi", "yt_chat", "Streamer")
-    bridge.refresh_vision_for_turn("lihat layar sekarang")
+    bridge.refresh_vision_for_turn(requested=True)
     assert privacy.screen_privacy.restricted
     bridge.queue_voice_trigger("Arti boleh lihat layar lagi", "mic_pasif")
     assert not privacy.screen_privacy.restricted
@@ -161,9 +161,22 @@ def test_restriction_prevents_capture_provider_and_viewer_auto_window(monkeypatc
     restrict()
     capture = Mock(side_effect=AssertionError("capture forbidden"))
     monkeypatch.setattr(vision, "_tangkap_bergerbang", capture)
-    bridge.refresh_vision_for_turn("viewer: apa email yang terlihat di layar?")
+    viewer = bridge.VoiceTrigger("itu apa di layar?", "yt_chat", "Streamer")
+    assert not bridge._owner_screen_look_requested(viewer)
+    bridge.refresh_vision_for_turn()
     assert vision.describe_with_chain(bridge.CONFIG) == (None, "privacy")
     assert vision.describe_with_chain(bridge.CONFIG, jpeg_b64="synthetic-image") == (None, "privacy")
+    capture.assert_not_called()
+
+
+def test_one_shot_respects_privacy_epoch_even_after_reopening(monkeypatch):
+    old_epoch = privacy.screen_privacy.epoch
+    capture = Mock()
+    monkeypatch.setattr(vision, "capture_and_describe", capture)
+    restrict()
+    assert bridge.refresh_vision_for_turn(requested=True) is None
+    enable()
+    assert bridge.refresh_vision_for_turn(requested=True, privacy_epoch=old_epoch) is None
     capture.assert_not_called()
 
 
@@ -245,7 +258,12 @@ def install_turn_mocks(monkeypatch, reply=None):
     monkeypatch.setattr(bridge, "mood_block_now", lambda: "")
     monkeypatch.setattr(bridge, "viewer_block_for", lambda _: "")
     monkeypatch.setattr(bridge, "_should_route_to_cursor", lambda _: True)
-    monkeypatch.setattr(bridge, "_append_live_context", bridge._append_screen_context)
+    def append_context(system, *, screen_requested=False, screen_snapshot=None):
+        return bridge._append_screen_context(system, requested=screen_requested, snapshot=screen_snapshot)
+
+    monkeypatch.setattr(bridge, "_append_live_context", append_context)
+    monkeypatch.setattr(vision, "capture_and_describe",
+                        lambda _: (sc.ScreenSnapshot(time.time(), PRIVATE), "synthetic"))
     monkeypatch.setattr(bridge, "_schedule_post_answer_cleanup", Mock())
     monkeypatch.setattr(bridge, "_cermin_ke_chat_game", Mock())
     monkeypatch.setattr(bridge, "_media_playback_until", 0)
@@ -320,10 +338,12 @@ def test_boundary_during_model_call_discards_private_reply_before_speech_or_memo
         restrict()
         return f"Akun: {ACCOUNT}. [MEMORY_SAVE: {PRIVATE}]"
 
-    install_turn_mocks(monkeypatch, reply)
+    prompts = install_turn_mocks(monkeypatch, reply)
     save = Mock()
     monkeypatch.setattr(bridge, "save_long_term_memory", save)
-    asyncio.run(bridge._handle_voice_trigger(bridge.VoiceTrigger("lihat layar", "ptt"), [], "Kamu Arti."))
+    trigger = bridge.VoiceTrigger("lihat layar", "ptt", queued_at=time.time())
+    asyncio.run(bridge._handle_voice_trigger(trigger, [], "Kamu Arti."))
+    assert ACCOUNT in "".join(prompts)
     bridge.tts.speak.assert_not_awaited()
     save.assert_not_called()
 
@@ -347,9 +367,11 @@ def test_curious_restricted_turn_is_silent(monkeypatch):
 
 def test_restriction_during_speech_preparation_blocks_dispatch(monkeypatch):
     cache()
-    install_turn_mocks(monkeypatch, lambda: f"Akun: {ACCOUNT}.")
+    prompts = install_turn_mocks(monkeypatch, lambda: f"Akun: {ACCOUNT}.")
     monkeypatch.setattr(bridge.arti_expression_runtime, "apply_speaking", AsyncMock(side_effect=lambda *args: restrict()))
-    asyncio.run(bridge._handle_voice_trigger(bridge.VoiceTrigger("lihat layar", "ptt"), [], "Kamu Arti."))
+    trigger = bridge.VoiceTrigger("lihat layar", "ptt", queued_at=time.time())
+    asyncio.run(bridge._handle_voice_trigger(trigger, [], "Kamu Arti."))
+    assert ACCOUNT in "".join(prompts)
     bridge.tts.speak.assert_not_awaited()
     assert ACCOUNT not in bridge.get_categorized_history()
 

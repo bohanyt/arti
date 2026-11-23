@@ -279,7 +279,7 @@ def test_owner_stop_and_prompt_wiring_unchanged(alerts, monkeypatch):
     finally:
         b._note_owner_speech("boleh ngomong lagi", "mic", None)
     ptt = SRC[SRC.index("def init_global_hotkey"): SRC.index("def init_global_hotkey") + 8000]
-    assert "tts_stop_flag = True" in ptt
+    assert ptt.count("_stop_voice_now(ptt=True)") == 2
     assert "DOUBLE TOGGLE" in ptt
 
 

@@ -7,7 +7,7 @@ Terukur di spike 2026-08-02:
 
 Tangga ingest (internet tidak stabil saat playback — concern Bohan):
   T3 Gemini (server-side) -> T1 transkrip (KB-an) -> [T2 frame, HANYA pasca-
-  playback & bila dua-duanya gagal] -> metadata saja -> gagal jujur.
+  playback & bila dua-duanya gagal] -> gagal jujur.
 
 Worker thread sendiri; bridge menyuntik hooks (queue reaksi, hold playback,
 QA window) supaya modul ini tetap bisa diuji tanpa bridge.
@@ -24,8 +24,13 @@ import time
 from dataclasses import dataclass, field
 
 from arti_runtime.chat_media import MEDIA_REACTION_INSTRUCTION
-from arti_runtime import chat_media
-from arti_runtime.media_watch import ClipReaction, SummaryBudget, SUMMARY_UNAVAILABLE_INSTRUCTION
+from arti_runtime import chat_media, owner_chat
+from arti_runtime.media_watch import (
+    ClipReaction,
+    SummaryBudget,
+    SUMMARY_UNAVAILABLE_INSTRUCTION,
+    TRANSCRIPT_ONLY_INSTRUCTION,
+)
 
 # --------------------------------------------------------------------------- #
 # Helper MURNI
@@ -151,15 +156,25 @@ def check_submit_allowed(
     queue_depth: int,
     config: dict,
 ) -> tuple[bool, str]:
-    """Gerbang antrean — pure. Donasi berbayar (saweria) bebas rate limit viewer."""
+    """Paid Saweria shares and configured owner handles skip the viewer cooldown."""
     if queue_depth >= int(config.get("video_queue_max", 3)):
         return False, "antrean penuh"
-    if job.source in ("chat", "streamlabs") and job.viewer:
+    if job.source in ("chat", "streamlabs") and job.viewer and not owner_chat.is_owner(job.viewer, config):
         gap = float(config.get("video_rate_limit_sec", 300.0))
-        last = last_by_viewer.get(job.viewer, 0.0)
-        if now - last < gap:
-            return False, f"rate limit {job.viewer}"
+        last = last_by_viewer.get(job.viewer)
+        if last is not None and now - last < gap:
+            interval = f"{gap / 60:g} menit" if gap % 60 == 0 else f"{gap:g} detik"
+            return False, f"batasnya satu video per {interval} per orang"
     return True, ""
+
+
+def queue_media_refusal(queue_reaction, viewer: str, reason: str) -> None:
+    print(f"[Video] Ditolak: {reason}")
+    queue_reaction(
+        f"[MEDIA SHARE DITOLAK] Video dari {viewer or 'pengirim'} ditolak karena {reason}. "
+        "Sampaikan fakta itu dengan singkat.",
+        viewer or None,
+    )
 
 
 def format_reaction_trigger(job: VideoJob, digest: str, title: str, *, media_watch_mode: bool = False) -> str:
@@ -196,11 +211,21 @@ def format_reaction_trigger(job: VideoJob, digest: str, title: str, *, media_wat
 
 
 def format_unavailable_reaction_trigger(job: VideoJob, title: str, transcript: str = "") -> str:
+    """The legacy callback supplies a title. Fallback turns use clip evidence only."""
+    who = job.viewer or "seseorang"
+    if job.source == "saweria" and job.donation_label:
+        sender = f"media share DONASI {job.donation_label} dari {who}"
+        thanks = " Sebut nama donatur dan jumlahnya, lalu bilang makasih."
+    else:
+        sender = f"dikirim {who}"
+        thanks = ""
     message = _YT_URL_RE.sub("", job.message or "").strip(" -:,")
     captions = f"\nTranskrip yang tersedia: {transcript[:900]}" if transcript else ""
-    return (f"[VIDEO SELESAI DITONTON — media share DONASI {job.donation_label} "
-            f"dari {job.viewer}] Judul: {title or job.video_id}. "
-            f"Pesan pengirim: {message}{captions}\n{SUMMARY_UNAVAILABLE_INSTRUCTION}")
+    limits = TRANSCRIPT_ONLY_INSTRUCTION if transcript else "Bilang terus terang kamu belum bisa menonton klipnya."
+    return (
+        f"[VIDEO — {sender}] Pesan pengirim: {message}{captions}\n"
+        f"{SUMMARY_UNAVAILABLE_INSTRUCTION} {limits}{thanks}"
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -261,7 +286,8 @@ def _gemini_watch(video_id, key, model, prompt, timeout):
     import requests  # noqa: PLC0415
 
     r = requests.post(
-        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}",
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+        headers={"x-goog-api-key": key},
         json={"contents": [{"parts": [
             {"file_data": {"file_uri": f"https://www.youtube.com/watch?v={video_id}"}},
             {"text": prompt},
@@ -284,6 +310,8 @@ def gemini_video_digest(video_id: str, config: dict, *, clip: tuple[int, int] | 
     remaining `video_gemini_total_timeout_sec` (90 s named bound). Clips longer than
     VIDEO_LONG_SEC go straight to the second model, still inside that total.
     """
+    from requests import HTTPError  # noqa: PLC0415
+
     key = (os.environ.get("ARTI_VIDEO_GEMINI_API_KEY") or config.get("gemini_api_key")
            or os.environ.get("GEMINI_API_KEY") or "").strip()
     if not key:
@@ -294,20 +322,44 @@ def gemini_video_digest(video_id: str, config: dict, *, clip: tuple[int, int] | 
     total = float(config.get("video_gemini_total_timeout_sec", VIDEO_TOTAL_TIMEOUT_SEC))
     first_timeout = max(0.1, min(first_timeout, total))
     span = (clip[1] - clip[0]) if clip and clip[1] > clip[0] else float(duration or 0)
+    title = str(title or "")
     prompt = video_digest_prompt(title, clip)
+
+    def watch(model, timeout):
+        try:
+            return _gemini_watch(video_id, key, model, prompt, timeout)
+        except HTTPError as exc:
+            response = exc.response
+            if response is not None:
+                try:
+                    message = response.json()["error"]["message"]
+                except (KeyError, TypeError, ValueError):
+                    message = ""
+                if isinstance(message, str):
+                    # Google may echo request values in its diagnostic.
+                    message = message.replace(prompt, "[redacted]")
+                    message = re.sub(r"https?://\S+", "[redacted]", message, flags=re.IGNORECASE)
+                    for value in (key, video_id, title, title[:120]):
+                        if value:
+                            message = message.replace(value, "[redacted]")
+                    message = " ".join(message.split())[:500]
+                detail = message if isinstance(message, str) and message else "no API error message"
+                print(f"[Video] {model} HTTP {response.status_code}: {detail}")
+            raise
+
     if span > float(config.get("video_gemini_long_sec", VIDEO_LONG_SEC)):
         long_timeout = min(total, max(first_timeout, float(config.get("video_gemini_long_timeout_sec", VIDEO_LONG_TIMEOUT_SEC))))
-        return _gemini_watch(video_id, key, second, prompt, long_timeout)
+        return watch(second, long_timeout)
     started = clock()
     try:
-        return _gemini_watch(video_id, key, primary, prompt, first_timeout)
+        return watch(primary, first_timeout)
     except Exception as e:  # noqa: BLE001
         if second == primary:
             raise
         remaining = max(0.1, total - (clock() - started))
         print(f"[Video] {primary} gagal ({type(e).__name__}) — coba {second} ({remaining:.0f}s sisa dari {total:.0f}s)")
         # The ordinary path waits for this ladder; watch mode owns a separate first-reaction deadline.
-        return _gemini_watch(video_id, key, second, prompt, remaining)
+        return watch(second, remaining)
 
 
 def fetch_transcript_text(meta: dict, timeout: float = 15.0, *, deadline: float | None = None) -> str:
@@ -348,29 +400,33 @@ class VideoWatcher(threading.Thread):
         self.runtime_enabled = True   # veto console: video off/on
         self._skip_current = threading.Event()
         self._stop_event = threading.Event()
+        self._submit_lock = threading.Lock()
         self._watcher_v2_lock = threading.Lock()
 
     # --- API dipanggil bridge (thread mana pun) ---
 
     def submit(self, job: VideoJob) -> bool:
-        if not self.runtime_enabled:
-            print("[Video] runtime OFF (veto) — job diabaikan")
-            return False
-        ok, why = check_submit_allowed(
-            job, now=time.time(), last_by_viewer=self.last_by_viewer,
-            queue_depth=self.jobs.qsize(), config=self.config,
-        )
+        with self._submit_lock:
+            now = time.time()
+            if self.runtime_enabled:
+                ok, why = check_submit_allowed(
+                    job, now=now, last_by_viewer=self.last_by_viewer,
+                    queue_depth=self.jobs.qsize(), config=self.config,
+                )
+            else:
+                ok, why = False, "fitur analisis video dimatikan"
+            if ok:
+                if self.config.get("media_watch_mode") and job.source == "saweria" and job.donation_label:
+                    chat_media.holds.reserve_reaction(id(job))
+                    if self.config.get("video_watcher_v2"):
+                        from arti_runtime.watcher_v2 import start_watch
+                        start_watch(self, job)
+                if job.viewer:
+                    self.last_by_viewer[job.viewer] = now
+                self.jobs.put(job)
         if not ok:
-            print(f"[Video] Ditolak: {why} ({job.video_id} dari {job.viewer or job.source})")
+            queue_media_refusal(self.hooks["queue_reaction"], job.viewer, why)
             return False
-        if job.viewer:
-            self.last_by_viewer[job.viewer] = time.time()
-        if self.config.get("media_watch_mode") and job.source == "saweria" and job.donation_label:
-            chat_media.holds.reserve_reaction(id(job))
-            if self.config.get("video_watcher_v2"):
-                from arti_runtime.watcher_v2 import start_watch
-                start_watch(self, job)
-        self.jobs.put(job)
         print(f"[Video] Antre: {job.video_id} ({job.source}"
               + (f", {job.viewer}" if job.viewer else "") + ")")
         return True
@@ -422,16 +478,16 @@ class VideoWatcher(threading.Thread):
             print(f"[Video] Metadata gagal ({type(e).__name__}) — lanjut seadanya")
 
         dur = meta.get("duration") or 0
-        if job.source in ("chat", "console") and dur > float(
-            cfg.get("video_max_duration_sec", 600)
-        ):
-            print(f"[Video] {job.video_id} kepanjangan ({mmss(dur)}) — ditolak")
+        max_duration = float(cfg.get("video_max_duration_sec", 600))
+        if job.source in ("chat", "console") and dur > max_duration:
+            queue_media_refusal(self.hooks["queue_reaction"], job.viewer,
+                                f"durasi videonya melampaui batas {mmss(max_duration)}")
             return
 
-        # Tangga ingest: T3 -> T1 -> metadata saja. (T2 frame ditunda sampai ada
+        # Tangga ingest: T3 -> T1 -> gagal jujur. (T2 frame ditunda sampai ada
         # kebutuhan nyata — Gemini + transkrip dua-duanya harus tumbang dulu,
         # dan bandwidth adalah raja saat playback.)
-        digest, tier = "", "metadata"
+        digest, tier = "", "unavailable"
         clip = (job.clip_start, job.clip_end) if job.clip_seconds else None
         if self._skip_current.is_set():
             return
@@ -444,24 +500,21 @@ class VideoWatcher(threading.Thread):
             print(f"[Video] Gemini gagal ({type(e).__name__}) — coba transkrip")
             try:
                 digest = fetch_transcript_text(meta)
-                tier = "transkrip" if digest else "metadata"
+                if digest:
+                    tier = "transkrip"
             except Exception:  # noqa: BLE001
                 digest = ""
-        if not digest:
-            digest = (
-                f"(Hanya info dasar) Judul: {meta['title']}. Channel: {meta['channel']}. "
-                f"Durasi: {mmss(dur)}."
-            )
         print(f"[Video] Ingest {job.video_id} via {tier} ({len(digest)} char)")
 
         if self._skip_current.is_set():
             return
 
         # Dokumen vault (Q&A timecode) — best effort, reaksi tidak bergantung ini.
-        try:
-            self._write_doc(job, meta, digest)
-        except Exception as e:  # noqa: BLE001
-            print(f"[Video] Tulis dokumen gagal: {type(e).__name__}: {e}")
+        if tier == "gemini":
+            try:
+                self._write_doc(job, meta, digest)
+            except Exception as e:  # noqa: BLE001
+                print(f"[Video] Tulis dokumen gagal: {type(e).__name__}: {e}")
 
         # Reaksi PAS playback selesai (nonton bareng), atau sekarang kalau
         # ingest lebih lambat dari klip.
@@ -472,12 +525,15 @@ class VideoWatcher(threading.Thread):
                 return
         if self._skip_current.is_set():
             return
-        trigger = format_reaction_trigger(job, digest, meta["title"],
-                                          media_watch_mode=bool(self.config.get("media_watch_mode")))
+        if tier == "gemini":
+            trigger = format_reaction_trigger(job, digest, meta["title"],
+                                              media_watch_mode=bool(self.config.get("media_watch_mode")))
+        else:
+            trigger = format_unavailable_reaction_trigger(job, "", digest)
         self.hooks["queue_reaction"](trigger, job.viewer or None)
 
         qa_window = float(self.config.get("video_qa_window_sec", 300.0))
-        if qa_window > 0 and self.hooks.get("set_qa"):
+        if tier == "gemini" and qa_window > 0 and self.hooks.get("set_qa"):
             self.hooks["set_qa"](f"video-{job.video_id}", qa_window)
 
     def _process_watch(self, job: VideoJob) -> None:

@@ -18,14 +18,15 @@ public sealed partial class ModEntry
         player = this.EventObject(Game1.player!), identity = this.CurrentCommandIdentity() with { ContextGeneration = 0 } }));
     private sealed class FestivalRun
     {
+        public ModEntry Mod = null!;
         public Event Event = null!;
         public GameLocation Location = null!;
         public Farmer Player = null!;
         public CommandInboxIdentity Identity;
         public string Pin = "", Kind = "", Owner = "", EndReason = "", LifecycleId = "";
         public Dictionary<string, int> PrizeBaseline = new();
-        public string? FishRequestId;
-        public long Generation, StartTick, EndTick;
+        public MenuStepCommandRequest? ActionRequest;
+        public long Generation, StartTick, EndTick, ResultSince = -1;
         public int StartScore, Verified, Replans, CastScore, FaultPanics;
         public bool Cleanup = true, Ending;
         public FestivalMapSearch? Search;
@@ -38,6 +39,67 @@ public sealed partial class ModEntry
         public Vector2 IceBefore;
         public string IceDirection = "";
         public MenuStepCommandRequest? IceStep;
+        // Egg hunt: an unverified egg is
+        // marked tried and the hunt replans; a bounded streak still ends it. The first
+        // plan waits until she has held control (no menu/dialogue) for a settle window.
+        // Members live here, not on ModEntry, so no ModEntry closure is renumbered.
+        public const int EggTriesPerProp = 2, UnverifiedLimit = 8, RetryTicks = 30, ControlSettleTicks = 60;
+        public const int ResultObservationTicks = 90 * 60;
+        // Give the fishing runner its full native exit grace, then drain the verdict and slot.
+        public const int ReleaseTicks = FishingReflexRunner.FinishBudgetTicks + FishingReflexRunner.FinishNativeExitGraceTicks + 2;
+        public Dictionary<Prop, int> EggTries = new();
+        public int UnverifiedStreak;
+        public long NextEggTick, ControlSince = -1;
+        public string WaitReason = "";
+        public string[] TimedScript = null!;
+        public int TimedCommand;
+        public bool EggExhausted(Prop prop) => this.EggTries.TryGetValue(prop, out int tries) && tries >= EggTriesPerProp;
+
+        public string EggWaitReason()
+        {
+            if (this.Kind != "eggHunt" || this.Mod.eggRun is not null || !ReferenceEquals(Game1.CurrentEvent, this.Event)
+                || !ReferenceEquals(this.Location.currentEvent, this.Event) || !Game1.eventUp
+                || this.Event.festivalTimer <= 0 || !this.Event.playerControlSequence || !this.Event.eventSwitched
+                || !ReferenceEquals(this.Event.eventCommands, this.TimedScript) || this.Event.CurrentCommand != this.TimedCommand)
+                return "";
+            return Game1.activeClickableMenu is not null ? "menu" : Game1.dialogueUp ? "dialogue"
+                : !this.Player.CanMove ? "cannot_move" : "";
+        }
+
+        public static string? EggPin(ModEntry mod, Event ev) => ev is { id: "festival_spring13", playerControlSequenceID: "eggHunt", festivalTimer: > 0 }
+            && mod.EventActionsReady ? NativeEventControl.Token() : null;
+
+        public static string? IcePin(ModEntry mod) => mod.ReflexFishReady && mod.UiG3On ? NativeFestivalFishing.Token() : null;
+
+        public bool TryAdmitAction(MenuStepCommandRequest request)
+        {
+            if (this.Mod.padAdapter?.RestoreWritePending == true
+                || !this.Mod.commandInbox.ExecutionSlot.TryAdmitFestival(request, this.Mod.actionOwner)) return false;
+            this.ActionRequest = request;
+            return true;
+        }
+
+        public static void ReleaseAction(ModEntry mod, MenuStepCommandRequest request, string reason)
+        {
+            var slot = mod.commandInbox.ExecutionSlot;
+            if (slot.ActiveAttempt?.Client == ExecutionSlot.FestivalClient && slot.Owns(request))
+                slot.Neutralize(NowUnixMs(), reason);
+        }
+
+        public bool CastBinding(MenuStepCommandRequest request) =>
+            this.Kind == "iceFishing" && this.ActionRequest is { } cast && MenuStepCommandInbox.IsReflexFish(request)
+            && request.EventToken == this.Pin && cast.RequestId == request.RequestId
+            && this.Mod.commandInbox.ExecutionSlot.Owns(request) && this.CastCleanupBinding()
+            && (this.Ending || this.Event.festivalTimer <= 0 || this.Mod.FestivalPhaseValid(this));
+
+        public bool CastCleanupBinding()
+        {
+            var identity = this.Mod.CurrentCommandIdentity();
+            return ReferenceEquals(this.Mod.festivalRun, this) && Context.IsWorldReady && !Context.IsMainPlayer && !Context.IsSplitScreen
+                && ReferenceEquals(Game1.CurrentEvent, this.Event) && ReferenceEquals(Game1.player, this.Player)
+                && ReferenceEquals(Game1.currentLocation, this.Location) && ReferenceEquals(this.Location.currentEvent, this.Event)
+                && identity == this.Identity with { ContextGeneration = identity.ContextGeneration };
+        }
     }
 
     private bool FestivalReflexBusy => this.festivalRun is not null;
@@ -89,41 +151,62 @@ public sealed partial class ModEntry
                 || this.backgroundMove?.Busy != false || this.backgroundMove.MenuDebtActive || this.ReflexBusy
                 || this.MutationInflight || this.eggRun is not null
                 || Game1.CurrentEvent is not Event ev || ReferenceEquals(ev, this.festivalAttempted)) return;
-            string? egg = this.EventActionsReady && ev.id == "festival_spring13" && ev.playerControlSequenceID == "eggHunt"
-                ? NativeEventControl.Token() : null;
-            string? ice = this.ReflexFishReady && this.UiG3On ? NativeFestivalFishing.Token() : null;
+            string? egg = FestivalRun.EggPin(this, ev);
+            string? ice = FestivalRun.IcePin(this);
             if (egg is null && ice is null) return;
             if (ice is not null && !ev.canPlayerUseTool()) return;
             this.festivalAttempted = ev;
-            run = this.festivalRun = new FestivalRun { Event = ev, Location = Game1.currentLocation, Player = Game1.player,
+            run = this.festivalRun = new FestivalRun { Mod = this, Event = ev, Location = Game1.currentLocation, Player = Game1.player,
                 Identity = this.CurrentCommandIdentity(), Pin = egg ?? ice!, Kind = egg is not null ? "eggHunt" : "iceFishing",
                 Owner = this.actionOwner.OwnerId, Generation = this.actionOwner.Generation, StartScore = Game1.player.festivalScore,
                 StartTick = Game1.ticks, FaultPanics = this.backgroundMove.FestivalFaultPanics,
+                TimedScript = ev.eventCommands, TimedCommand = ev.CurrentCommand,
                 LifecycleId = this.FestivalLifecycleId(ev), PrizeBaseline = FestivalInventory(Game1.player) };
             this.festivalSummary = null;
             this.Monitor.Log("FESTIVAL_REFLEX start kind=" + run.Kind + " score=" + run.StartScore, LogLevel.Info);
         }
         this.AggregateFestivalCleanupFaults(run);
-        if (!run.Ending && (!run.Cleanup || !this.FestivalLeaseValid(run) || !this.FestivalPhaseValid(run)
+        string wait = run.EggWaitReason();
+        if (!run.Ending && (!run.Cleanup || !this.FestivalLeaseValid(run) || wait == "" && !this.FestivalPhaseValid(run)
             || this.padAdapter?.SaveWindow == true))
             this.EndFestival(run.CleanupFaults.Count > 0 ? run.CleanupFaults[0] : !this.FestivalLeaseValid(run) ? "stop_or_lease_lost"
                 : run.Event.festivalTimer <= 0 ? "timer_end" : "phase_or_containment_changed");
         if (run.Ending)
         {
-            if (this.eggRun is null && this.reflexRunner?.Active != true && this.backgroundMove?.Busy != true)
+            if (this.eggRun is null && this.reflexRunner?.Active != true && this.backgroundMove?.Busy != true
+                && this.commandInbox.ExecutionSlot.ActiveAttempt?.Client != ExecutionSlot.FestivalClient
+                && this.backgroundMove?.CleanupPending != true && this.padAdapter?.RestoreWritePending != true)
                 this.FinishFestival();
-            else if (Game1.ticks - run.EndTick > FishingReflexRunner.FinishBudgetTicks)
-            { run.Cleanup = false; this.FinishFestival(); } // report debt; never disarm the underlying containment
+            else if (Game1.ticks - run.EndTick > FestivalRun.ReleaseTicks)
+            {
+                run.Cleanup = false;
+                run.CleanupFaults.Add("release_timeout");
+                this.FinishFestival();
+            }
             return;
         }
         if (run.Kind == "eggHunt")
         {
             if (this.eggRun is not null) return;
+            // Never plan or press while a native menu or dialogue holds her, nor in the
+            // first frames after control returns (the dialogue-closing input is still
+            // settling). Bounded by the native timer: the phase exit above ends the run.
+            if (wait != "")
+            {
+                run.ControlSince = -1;
+                run.Search = null;
+                if (run.WaitReason != wait)
+                { run.WaitReason = wait; this.Monitor.Log("FESTIVAL_REFLEX wait reason=" + wait, LogLevel.Debug); }
+                return;
+            }
+            run.WaitReason = "";
+            if (run.ControlSince < 0) run.ControlSince = Game1.ticks;
+            if (Game1.ticks - run.ControlSince < FestivalRun.ControlSettleTicks || Game1.ticks < run.NextEggTick) return;
             this.PlanFestivalEgg(run);
         }
         else if (this.reflexRunner?.Active != true && this.backgroundMove?.Busy == false)
         {
-            if (run.IcePath is not null) return;
+            if (run.IcePath is not null || this.commandInbox.ExecutionSlot.InputBusy) return;
             // canPlayerUseTool mutates previousFacingDirection; invoke only at each idle cast admission.
             if (!run.Event.canPlayerUseTool()) { this.EndFestival("tool_use_refused"); return; }
             float power = 0;
@@ -139,10 +222,10 @@ public sealed partial class ModEntry
             if (refusal is not null) { this.EndFestival(refusal); return; }
             var args = FishReflexArgs.Default with { CastPower = power, Treasure = false };
             var req = this.FestivalRequest(ReflexFishTarget.Primitive, run.Pin) with { ReflexFish = args };
+            if (!run.TryAdmitAction(req)) return;
             run.CastScore = run.Player.festivalScore;
-            run.FishRequestId = req.RequestId;
             this.ReflexRunner.Start(req, args, () => this.FestivalLeaseValid(run) && !run.Ending && this.FestivalPhaseValid(run),
-                () => run.Player.festivalScore);
+                () => run.Player.festivalScore, run.CastCleanupBinding);
         }
     }
 
@@ -192,6 +275,7 @@ public sealed partial class ModEntry
             run.IceBefore = run.Player.Position; run.IceBeforeTile = run.Player.TilePoint; run.IceWaypoint = waypoint;
             run.IceDirection = direction; run.IceTicks = ticks;
             var req = this.FestivalRequest(MenuStepCommandInbox.PrimitiveMoveCardinal,run.Pin) with { Direction = direction,Ticks = ticks };
+            if (!run.TryAdmitAction(req)) return;
             run.IceStep = req;
             if (this.backgroundMove.TryArm(req) is { } refused) this.RouteFestivalIceTerminal(refused);
         }
@@ -202,6 +286,7 @@ public sealed partial class ModEntry
     {
         if (terminal is null || this.festivalRun is not { IceStep: not null } run || terminal.Request.RequestId != run.IceStep.Value.RequestId) return false;
         run.IceStep = null;
+        FestivalRun.ReleaseAction(this, terminal.Request, "festival_ice_step_done");
         bool clean = terminal.Kind is BackgroundTerminalKind.Completed or BackgroundTerminalKind.NotCompleted
             || terminal.Label.StartsWith("NOT_COMPLETED:RELEASED_EARLY",StringComparison.Ordinal)
             || terminal.ConsumedH == 0 && terminal.Label.StartsWith("RELEASED_BEFORE_LATCH:",StringComparison.Ordinal);
@@ -220,12 +305,17 @@ public sealed partial class ModEntry
         if (run.Search is null)
         {
             run.Eggs.Clear();
+            int exhausted = 0;
             foreach (Prop prop in run.Event.festivalProps.Take(128))
             {
                 Rectangle box = this.Helper.Reflection.GetField<Rectangle>(prop, "boundingRect").GetValue();
                 if (box.Width == 64 && box.Height == 64 && box.X % 64 == 0 && box.Y % 64 == 0)
-                    run.Eggs.Add((new Point(box.X / 64, box.Y / 64), prop));
+                {
+                    if (run.EggExhausted(prop)) exhausted++; // tried EggTriesPerProp times this run
+                    else run.Eggs.Add((new Point(box.X / 64, box.Y / 64), prop));
+                }
             }
+            if (run.Eggs.Count == 0 && exhausted > 0) { this.EndFestival("eggs_exhausted"); return; }
             var layer = run.Location.Map.Layers[0];
             run.Search = new FestivalMapSearch(layer.LayerWidth, layer.LayerHeight, (run.Player.TilePoint.X, run.Player.TilePoint.Y));
         }
@@ -248,16 +338,20 @@ public sealed partial class ModEntry
         run.Search = null;
         if (path.Any(t => !Clear(t.X, t.Y))) { run.Replans++; return; }
         var req = this.FestivalRequest(WorldInteractionTarget.Primitive, run.Pin) with { EventToken = null };
+        // Hold the execution slot for this one route; without it every step is refused COMMAND_BUSY.
+        // Busy slot (an earlier route still releasing): plan again on a later tick.
+        if (!run.TryAdmitAction(req)) return;
         this.eggRun = new EventEggRun { Request = req, Event = run.Event, Location = run.Location, Player = run.Player,
             Prop = candidate.Prop, Pin = run.Pin, Tile = candidate.Tile, Stand = pose.Stand, Facing = pose.Facing, Path = path,
             StartScore = run.Player.festivalScore, Started = Game1.ticks, ExecutionDeadline = req.DeadlineUnixMs,
-            Automatic = true };
+            Automatic = true, FaultPanics = run.FaultPanics };
     }
 
     private bool FestivalFishOutcome(FishReflexOutcome outcome)
     {
-        if (this.festivalRun is not { Kind: "iceFishing" } run || outcome.RequestId != run.FishRequestId) return false;
-        run.FishRequestId = null;
+        if (this.festivalRun is not { Kind: "iceFishing", ActionRequest: { } cast } run
+            || outcome.RequestId != cast.RequestId) return false;
+        FestivalRun.ReleaseAction(this, cast, "festival_cast_done");
         run.Cleanup &= outcome.CleanupConfirmed;
         bool caught = outcome.Verdict == ReflexContracts.FishCaught && outcome.CleanupConfirmed && this.FestivalPhaseValid(run)
             && this.FestivalLeaseValid(run) && run.Player.festivalScore == run.CastScore + 1;
@@ -271,10 +365,16 @@ public sealed partial class ModEntry
 
     private void EndFestival(string reason)
     {
-        if (this.festivalRun is not { } run) return;
-        if (!run.Ending) { run.Ending = true; run.EndReason = reason; run.EndTick = Game1.ticks; }
-        this.backgroundMove?.RequestRelease("FESTIVAL_REFLEX_END");
-        if (this.eggRun is { Automatic: true } egg) egg.ExecutionDeadline = 0;
+        if (this.festivalRun is not { Ending: false } run) return;
+        run.Ending = true; run.EndReason = reason; run.EndTick = Game1.ticks;
+        if (run.Event.festivalTimer <= 0) run.ResultSince = Game1.ticks;
+        this.festivalCompletedRun = run;
+        this.festivalSummary = new();
+        if (run.ActionRequest is { } action && this.commandInbox.ExecutionSlot.Owns(action))
+            this.backgroundMove?.RequestRelease(reason == "timer_end" ? BackgroundMoveRuntime.FestivalTimerRelease : "FESTIVAL_REFLEX_END");
+        if (this.eggRun is { Automatic: true } egg) { egg.Stopping = true; egg.ExecutionDeadline = 0; }
+        else if (run.IceStep is null && this.reflexRunner?.Active != true && run.ActionRequest is { } request)
+            FestivalRun.ReleaseAction(this, request, "festival_end");
     }
 
     private void AggregateFestivalCleanupFaults(FestivalRun run)
@@ -295,8 +395,9 @@ public sealed partial class ModEntry
         this.AggregateFestivalCleanupFaults(run);
         run.Cleanup &= this.backgroundMove?.Busy == false && this.backgroundMove.PressOverrideOutstanding == false
             && this.padAdapter?.RestoreWritePending != true;
-        this.festivalSummary = this.FestivalFields(run, "end");
-        this.festivalCompletedRun = run;
+        var end = this.FestivalFields(run, "end");
+        foreach (var fact in this.festivalSummary!) end[fact.Key] = fact.Value;
+        this.festivalSummary = end;
         this.Monitor.Log("FESTIVAL_REFLEX end " + System.Text.Json.JsonSerializer.Serialize(this.festivalSummary), LogLevel.Info);
         this.festivalRun = null;
     }
@@ -307,13 +408,13 @@ public sealed partial class ModEntry
         ["state"] = state, ["kind"] = run.Kind, ["auto_started"] = true, ["start_score"] = run.StartScore,
         ["score"] = run.Player.festivalScore, ["verified_pickups"] = run.Verified, ["timer_ms"] = run.Event.festivalTimer,
         ["cleanup"] = run.Cleanup, ["cleanup_faults"] = run.CleanupFaults.ToArray(), ["reason"] = run.EndReason, ["replans"] = run.Replans,
-        ["effects"] = run.Effects.TakeLast(16).ToArray(), ["result"] = "pending_native_result" };
+        ["effects"] = run.Effects.TakeLast(16).ToArray() };
 
     private void EnrichFestivalContext(Dictionary<string, object> snapshot)
     {
-        if (!this.config.FestivalReflexEnabled && (this.EventActionsReady
-                && Game1.CurrentEvent is { id: "festival_spring13", playerControlSequenceID: "eggHunt" }
-            || this.ReflexFishReady && this.UiG3On && NativeFestivalFishing.Token() is not null))
+        var ev = Game1.CurrentEvent;
+        string? pin = ev is null ? null : FestivalRun.EggPin(this, ev) ?? FestivalRun.IcePin(this);
+        if (!this.config.FestivalReflexEnabled && pin is not null)
         {
             snapshot["festival_reflex"] = new Dictionary<string, object> {
                 ["state"] = "disabled", ["auto_started"] = false,
@@ -325,12 +426,10 @@ public sealed partial class ModEntry
         if (this.festivalRun is { } run) snapshot["festival_reflex"] = this.FestivalFields(run, run.Ending ? "stopping" : "live");
         else if (this.festivalSummary is not null && this.FestivalResultScopeValid())
             snapshot["festival_reflex"] = this.festivalSummary;
-        else if (this.EventActionsReady && Game1.CurrentEvent is { id: "festival_spring13", playerControlSequenceID: "eggHunt" }
-            || this.ReflexFishReady && this.UiG3On && NativeFestivalFishing.Token() is not null)
-            snapshot["festival_reflex"] = new Dictionary<string, object> { ["state"] = "ready", ["kind"] = Game1.CurrentEvent.playerControlSequenceID,
-                ["run_id"] = NativeEventControl.Token() ?? NativeFestivalFishing.Token()!,
-                ["lifecycle_id"] = this.FestivalLifecycleId(Game1.CurrentEvent),
-                ["timer_ms"] = Game1.CurrentEvent.festivalTimer, ["auto_started"] = false };
+        else if (pin is not null && ev is not null)
+            snapshot["festival_reflex"] = new Dictionary<string, object> { ["state"] = "ready", ["kind"] = ev.playerControlSequenceID,
+                ["run_id"] = pin, ["lifecycle_id"] = this.FestivalLifecycleId(ev),
+                ["timer_ms"] = ev.festivalTimer, ["auto_started"] = false };
         else if (this.FestivalIntro() is { } intro) snapshot["festival_reflex"] = intro;
     }
 
@@ -375,7 +474,15 @@ public sealed partial class ModEntry
         // Observe that command having passed; a timer ending alone cannot establish the result.
         if (this.festivalSummary is null || this.festivalAttempted is not { } ev || this.festivalCompletedRun is not { } run
             || !this.FestivalResultScopeValid()) return;
-        string command = (string)this.festivalSummary["kind"] == "eggHunt" ? "eggHuntWinner" : "iceFishingWinner";
+        if (this.festivalSummary.ContainsKey("final_verified") || this.festivalSummary.ContainsKey("result_observation_ended")) return;
+        if (run.Event.festivalTimer <= 0 && run.ResultSince < 0) run.ResultSince = Game1.ticks;
+        if (run.ResultSince >= 0 && Game1.ticks - run.ResultSince > FestivalRun.ResultObservationTicks)
+        {
+            this.festivalSummary.TryAdd("result", "unobserved");
+            this.festivalSummary["result_observation_ended"] = "timeout";
+            return;
+        }
+        string command = run.Kind == "eggHunt" ? "eggHuntWinner" : "iceFishingWinner";
         if (!this.festivalSummary.ContainsKey("winner_command"))
         {
             int winnerIndex = Array.FindIndex(ev.eventCommands, s => s == "cutscene " + command);
@@ -413,7 +520,7 @@ public sealed partial class ModEntry
                 : offered.Length > 0 ? "native_menu_offered" : "not_observed",
             ["items"] = gains.Length > 0 ? gains : offered };
         bool complete = (!won || prizePassed) && !Game1.dialogueUp && Game1.activeClickableMenu is not StardewValley.Menus.DialogueBox;
-        if (complete && !this.festivalSummary.ContainsKey("final_verified"))
+        if (complete)
         {
             this.festivalSummary["final_verified"] = true;
             this.Monitor.Log("FESTIVAL_REFLEX result " + System.Text.Json.JsonSerializer.Serialize(this.festivalSummary), LogLevel.Info);

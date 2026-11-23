@@ -3,14 +3,14 @@
     "schema": "python-source-shape-v1",
     "base": "3420e209faaf445c07047a36e5ee49ee0f077cf7",
     "modules": {
-      "arti_bridge.py": "a84a15cf6f4f1738f796659ba99a3d8c14412f26a66cb780f6a5d5bfc1da48e8",
+      "arti_bridge.py": "9bb00fb7cfabe59a832fac189d14526ddfd958bd76bb905d04ce690caa0edcee",
       "arti_stardew_live7.py": "6d8a835dd57ae797753e7a9fc888985aff2d8942fc927b6e0b08d0d4c9035ffd"
     },
     "voice": {
-      "_handle_voice_trigger": "d3c689ad7010bb652332aa04f53b253427c7fb4a618d06c3af0952f4fb418821",
+      "_handle_voice_trigger": "beb726fadf85bed7c0de7731ab50816d0404b43bab560926ee94649f8ad6ae0a",
       "add_to_history": "4f644084fe94496449d8d6497d477de22d077347faac097571ab6ee9765c02fb",
       "_clear_screen_privacy_context": "c355e269a0ba6f0be9e04e99568357f6ec8e23741713b712d76af15f1d1ed6c4",
-      "_speak_reply_chunks": "a1785dea6c9153a0527e163c93b08f9d78cfd41d64997d7c05fbfdd53774867b",
+      "_speak_reply_chunks": "ef3e5de567af5919b042b9364af31e8f4bed239596286305aa8f906346d7c3aa",
       "_cursor_reply_with_fallback": "ae53db924da7ded9441c4cf0cb5a4526b1e5de92a3052ab545b133726500bc90"
     }
   },

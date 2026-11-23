@@ -212,6 +212,34 @@ def _matches_expected(session, expected, startup, act):
                if k in expected)
 
 
+def _exit_record_malformed(raw, record):
+    """A present `mod_exit.json` that is not the mod's exact `{runtime_id, ms}` record (unreadable is malformed)."""
+    return raw is not None and (
+        not isinstance(record, Mapping) or record.keys() != {"runtime_id", "ms"}
+        or not isinstance(record.get("runtime_id"), str)
+        or not record["runtime_id"] or type(record.get("ms")) is not int or record["ms"] <= 0
+    )
+
+
+def _clean_exit(session, record):
+    """The mod's exit record proves this very runtime exited after its last session.json publication."""
+    return (session is not None and isinstance(record, Mapping)
+            and record.get("runtime_id") == session["runtime_instance_id"]
+            and type(session.get("native_ms")) is int and type(record.get("ms")) is int
+            and record["ms"] >= session["native_ms"])
+
+
+def _closed_title_screen(session, exit_raw, exit_record):
+    """A game that never left the title screen (no world, player 0, no name) and whose own well-formed exit
+    record proves this very runtime has exited. At the title screen every game is its own main player, so
+    `is_main_player` names no one there; such a session is neither a live player nor a foreign one. Read only by
+    `decide` for a launch in a solo run (`_solo_run`): what follows (the latch, the lock that would be lost) is decided
+    as for any launch."""
+    return (session.get("world_ready") is False and type(session.get("is_main_player")) is bool
+            and session.get("player_id") in (0, "0") and session.get("player_name") == ""
+            and not _exit_record_malformed(exit_raw, exit_record) and _clean_exit(session, exit_record))
+
+
 def _disk_key(record):
     """The persisted record's key when it is a valid `arti.halt/1` record, else None."""
     if (not isinstance(record, Mapping) or record.get("v") != "arti.halt/1"
@@ -297,6 +325,64 @@ def read_launch_record(path):
     if isinstance(launch, dict) and launch.get("not_started") is True and launch.get("pid") is None:
         return None, None
     return raw, launch
+
+
+def _run_has_launched(ev):
+    """Read by `decide` for a launch in a solo run only (`_solo_run`): this run has launched her game, or
+    has already played. A launch record exists (any bytes, also unreadable ones; a `not_started` record, read as none by
+    `read_launch_record`, is none), or the run has a cycle folder (a run that has played must have launched, so a
+    missing record there still holds). Only then must her inbox's session.json be the latest launch's own publication.
+    A solo run fresh from `mabar prepare` has neither, and its launch skips only that publication check: the run's stops
+    and archive proof still apply, and the launch relies on the clean-exit witness of the earlier runtime (a missing
+    launch record is not proof that no process started)."""
+    launch_raw, _ = ev.launch
+    return launch_raw is not None or (ev.run is not None and (ev.newest is not None or bool(cycle_dirs(ev.run))))
+
+
+HELPER_CONFIG = "runtime/batch-host/host-mods/ArtiHostHelper/config.json"  # the helper, installed in this run's HOST
+
+
+def _read_json(path, default=None):
+    """The reader `session_kind` always used (mabar_supervise._read_json): absent or unreadable is `default`."""
+    path = Path(path)
+    if not path.is_file():
+        return default
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return default
+
+
+def session_kind(run):
+    """Who hosts this session, from what mabar itself recorded when it launched the HOST. 'solo': the run's
+    trial config names the helper program as the HOST farmer's controller (`mabar host --helper` writes
+    stardew_host_controller=harness) and the helper is installed in this run's HOST. 'owner': the owner hosts
+    (controller=owner, no helper). None when the two are missing or disagree: rung 6 is refused, never guessed.
+    Lives here so that the launch gate (`_solo_run`) reads the same rule; mabar_supervise imports it. A trial config
+    that is JSON but not an object names no controller."""
+    run = Path(run)
+    trial = _read_json(run / "trial-config.json")
+    controller = trial.get("stardew_host_controller") if isinstance(trial, Mapping) else None
+    helper = (run / HELPER_CONFIG).is_file()
+    if controller == "harness" and helper:
+        return "solo"
+    if controller == "owner" and not helper:
+        return "owner"
+    return None
+
+
+def _solo_run(ev):
+    """The program's helper hosts this run, `session_kind(run) == "solo"`,
+    read now. Only then may a launch pass the two admissions in `decide` (a closed title screen at the
+    `foreign_session` row, a fresh run at the `latest_launch_session_unconfirmed` row). In an owner-hosted run her
+    title-screen join can send input to the owner's foreground game, so there both rows decide as on main. No run
+    folder, an owner run, a kind that is not recorded, or a trial config that cannot be read is not solo."""
+    if ev.run is None:
+        return False
+    try:
+        return session_kind(ev.run) == "solo"
+    except OSError:
+        return False
 
 
 def _part_of_latch(halt, name, raw):
@@ -604,10 +690,14 @@ def decide(ev, *, act, held=None, water=False, own_relaunch=None, switch=OWN_REL
         return hold("session_unreadable")  # row 6
     if raw is None and (act != "launch" or ev.expected or held or ev.prior_launch or ev.mod_exit[0] is not None):
         return hold("session_absent")  # row 6: her hands are never started or her game closed on no evidence
+    # The two launch admissions below (a closed title screen; a fresh run) hold only in a solo run. Who hosts
+    # is read once per decision, here; every other act and every non-solo launch decides both rows as main does.
+    solo_launch = act == "launch" and session is not None and _solo_run(ev)
     if session is not None:
         if not _complete(session):
             return hold("halt_evidence_unknown")
-        if not _matches_expected(session, ev.expected, ev.startup, act):
+        if not _matches_expected(session, ev.expected, ev.startup, act) and not (
+                solo_launch and _closed_title_screen(session, *ev.mod_exit)):
             return hold("foreign_session")
         if (act != "join" and isinstance(held, Mapping) and held.get("runtime_instance_id")
                 and session["runtime_instance_id"] != held["runtime_instance_id"]):
@@ -628,20 +718,14 @@ def decide(ev, *, act, held=None, water=False, own_relaunch=None, switch=OWN_REL
         return hold("halt_malformed", halt)
     binding = bind(session, halt, held) if halt is not None else None
     launch_raw, launch = ev.launch
-    if (act == "launch" and session is not None and (ev.run is not None or launch_raw is not None)
+    if (act == "launch" and session is not None
+            and (_run_has_launched(ev) if solo_launch else (ev.run is not None or launch_raw is not None))
             and not launch_published(launch, session)):
         return hold("latest_launch_session_unconfirmed", halt, binding)
     exit_raw, exit_record = ev.mod_exit
-    if act == "launch" and exit_raw is not None and (
-        not isinstance(exit_record, Mapping) or exit_record.keys() != {"runtime_id", "ms"}
-        or not isinstance(exit_record.get("runtime_id"), str)
-        or not exit_record["runtime_id"] or type(exit_record.get("ms")) is not int or exit_record["ms"] <= 0
-    ):
+    if act == "launch" and _exit_record_malformed(exit_raw, exit_record):
         return hold("exit_record_unreadable", halt, binding)
-    clean_exit = (session is not None and isinstance(exit_record, Mapping)
-                  and exit_record.get("runtime_id") == session["runtime_instance_id"]
-                  and type(session.get("native_ms")) is int and type(exit_record.get("ms")) is int
-                  and exit_record["ms"] >= session["native_ms"])
+    clean_exit = _clean_exit(session, exit_record)
     for name in sorted(ev.stops):  # a raw native STOP the mod has not latched (yet) is a stop
         stop_raw, _ = ev.stops[name]
         if stop_raw is UNREADABLE:
@@ -801,11 +885,36 @@ def child_recovery_gate(config, *, saved_launch=None, window_fn=None, reservatio
     if (config.get("cabin") or decision.watchdog) and not host_save_matches(
             run, config.get("save_id"), config.get("host_hwnd"), window_fn=window_fn):
         raise HandsHeld(Decision("hold", "host_save_identity_unconfirmed"))
+    if decision.watchdog and not host_save_matches(
+            run, config.get("save_id"), config.get("host_hwnd"), window_fn=window_fn, accepting=True):
+        raise HandsHeld(Decision("hold", "host_not_accepting"))  # never at cabin selection
     return decision
 
 
-def host_save_matches(run, save_id, hwnd, *, window_fn=None, now=None):
-    """Use the enrolled helper's live, PID-bound Own() heartbeat before selecting a cabin."""
+def stop_guards(run, *, stop_file=None):
+    """Every stop marker the guarded watchdog path reads by its existence, as absolute paths: the run's own
+    markers (`stops_outranking`, `helper_status`), each cycle folder's markers and the newest state's `live7_stop_file`
+    (`read_evidence`), and the caller's cycle marker (`stop_check`). A watchdog re-arm token carries this list and the
+    native stats each path when it consumes the token; the inbox stop files stay the native's own check."""
+    run = Path(os.path.abspath(run))
+    paths = [run / "host/HOST_STOP", run / "host/STOP", run / "SUPERVISE_STOP", run / "bridge-stop-request",
+             run / "bridge-drained", run / "LIVE7_STOP", run / "runtime/LIVE7_STOP"]
+    cycles = cycle_dirs(run)
+    for cycle in cycles:
+        paths += [cycle / "LIVE7_STOP", cycle / "OPERATOR_STOP"]
+    if cycles:
+        _, state = read_record(cycles[-1] / "cycle_state.json")
+        if isinstance(state, Mapping) and isinstance(state.get("live7_stop_file"), str):
+            paths.append(Path(state["live7_stop_file"]))
+    if stop_file:
+        paths.append(Path(stop_file))
+    return list(dict.fromkeys(os.path.abspath(p) for p in paths))
+
+
+def host_save_matches(run, save_id, hwnd, *, window_fn=None, now=None, accepting=False):
+    """Use the enrolled helper's live, PID-bound Own() heartbeat before selecting a cabin. `accepting` (the
+    watchdog token and the watchdog launch only) also needs the helper's fresh `accepting.ok` in the same barrier.json:
+    a missing field holds, so an older helper build fails closed."""
     if not save_id or not hwnd:
         return False
     if window_fn is None:
@@ -828,6 +937,8 @@ def host_save_matches(run, save_id, hwnd, *, window_fn=None, now=None):
             or not barrier.get("runtime_id") or barrier.get("world_ready") is not True
             or barrier.get("stopped") is not False or barrier.get("saving") is not False or not isinstance(host, dict)
             or type(cfg.get("HostId")) is not int or host.get("host_id") != cfg["HostId"]):
+        return False
+    if accepting and (not isinstance(barrier.get("accepting"), dict) or barrier["accepting"].get("ok") is not True):
         return False
     try:
         observed = [datetime.fromisoformat(row["utc"]).timestamp() for row in (barrier, status)]

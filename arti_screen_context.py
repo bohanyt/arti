@@ -261,15 +261,19 @@ def _parse_vision_response_raw(
     )
 
 
-def format_screen_context(ring: ScreenRing | None = None, max_chars: int = 200) -> str:
+def format_screen_context(
+    ring: ScreenRing | None = None, max_chars: int = 200, *, snapshot: ScreenSnapshot | None = None,
+) -> str:
     """Baris `[LAYAR: ...]` untuk prompt Arti.
 
     Kalau model vision mengisi `hook`, ikutkan — itulah bahan yang bikin Arti punya
     sesuatu untuk ditanyakan, bukan cuma sesuatu untuk dilaporkan. `max_chars` berlaku
     untuk scene supaya perilaku lama tidak berubah saat hook kosong.
     """
-    latest = (ring or screen_ring).latest()
+    latest = snapshot if snapshot is not None else (ring or screen_ring).latest()
     if not latest or not latest.scene or time.time() - latest.wall_ts > 30.0:
+        return ""
+    if not screen_privacy.allows_screen(latest.privacy_epoch):
         return ""
     if any(looks_like_bridge_log(text) for text in (latest.scene, latest.hook, latest.ocr_text)):
         return ""

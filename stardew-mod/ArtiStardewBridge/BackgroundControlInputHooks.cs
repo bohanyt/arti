@@ -1801,6 +1801,14 @@ internal sealed partial class BackgroundMoveRuntime
         if (this.request is not { } req || this.phase is Phase.Closing or Phase.HoldSettle)
             return;
 
+        // The timed festival withdraws H before native changes the event pin.
+        // Settle through the same Suppress/latch/readback path as other early exits.
+        if (this.releaseReason == FestivalTimerRelease && this.executionAttempt?.Client == ExecutionSlot.FestivalClient)
+        {
+            this.Close(BackgroundTerminalKind.Uncertain, "NOT_COMPLETED:RELEASED_EARLY:" + FestivalTimerRelease);
+            return;
+        }
+
         // FIXB53: a menu/warp can suppress UpdateControlInput entirely. Event pins must
         // be checked before every retained Press tick too, not only inside the hook.
         if (req.EventToken is not null && !this.PinnedEventValid(req))
