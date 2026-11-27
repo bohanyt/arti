@@ -5,11 +5,14 @@ public static class EventControlAction
 {
     public const string Target = "event_target", Npc = "festival_npc", Shop = "festival_shop",
         Seat = "festival_seat", Egg = "festival_egg", EggRoute = "festival_egg_route";
+    /// <summary>The one control while she sits on a festival seat: the game's own A on a seat stands her up
+    /// (GameLocation.checkAction calls Farmer.StopSitting() before any festival interceptor).</summary>
+    public const string Stand = "festival_stand";
     public const string TargetRoute = "event_target_route", NpcRoute = "festival_npc_route",
         ShopRoute = "festival_shop_route", SeatRoute = "festival_seat_route";
     public const string Interact = "event_interact", InteractRoute = "event_interact_route";
     public static readonly string[] Kinds = { Target, Npc, Shop, Seat, Egg, EggRoute, TargetRoute, NpcRoute, ShopRoute, SeatRoute,
-        Interact, InteractRoute };
+        Interact, InteractRoute, Stand };
     public static bool IsApproach(string? kind) => kind is TargetRoute or NpcRoute or ShopRoute or SeatRoute or InteractRoute;
     public static bool IsRoute(string? kind) => kind == EggRoute || IsApproach(kind);
     public static string NativeKind(string kind) => IsRoute(kind) ? kind[..^6] : kind;
@@ -67,6 +70,7 @@ public static class EventControlAction
             Npc => !before.ExpectedMenu && now.ExpectedMenu && now.MenuType == "DialogueBox",
             Shop => !before.ExpectedMenu && now.ExpectedMenu && now.MenuType == "ShopMenu",
             Seat => !before.Sitting && now.Sitting && now.MenuType is null,
+            Stand => before.Sitting && !now.Sitting && now.MenuType is null,
             Egg or EggRoute => before.TimerPositive && now.TimerPositive && before.Present
                 && !now.Present && now.Score == before.Score + 1 && now.MenuType is null,
             _ => false,
@@ -76,7 +80,7 @@ public static class EventControlAction
     {
         bool success = before is not null && now is not null && Effect(before, now);
         return new(success ? now!.Kind switch { Target => "EventTargetActivated", Npc => "DialogueOpened",
-            Shop => "MenuOpened", Seat => "FestivalSeated", Interact => "EventInteractionObserved", _ => "FestivalEggCollected" }
+            Shop => "MenuOpened", Seat => "FestivalSeated", Stand => "FestivalStood", Interact => "EventInteractionObserved", _ => "FestivalEggCollected" }
             : BgHoldCompletion.InteractionUncertain, success, success ? null : "EVENT_EFFECT_UNVERIFIED", null,
             success && now!.Kind is Egg or EggRoute ? 1 : 0);
     }

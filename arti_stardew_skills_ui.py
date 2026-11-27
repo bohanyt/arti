@@ -276,6 +276,47 @@ def _page_wait(state, view):
     return S._wait(state, "morning_ready", "morning_ui_not_ready", "Tunggu teks native siap", S.MORNING_READY_WAIT_S)
 
 
+def mail_close_linked(state):
+    handoff = state.get("mail_handoff")
+    trace = state.get("native_ui_episode") or {}
+    opened = trace.get("opened") or {}
+    scope = state.get("ui_effect_scope")
+    return bool(handoff and scope and (opened.get("request_id"), opened.get("receiver"), opened.get("menu")) ==
+                (handoff["request_id"], handoff["receiver"], handoff["menu"])
+                and any(p.get("linked") and p.get("scope") == scope and p.get("effect") == "closed"
+                        and p.get("result_menu") is None for p in trace["inputs"]))
+
+
+def mail_close_current(state, context, motor):
+    """The opener's UI chain closed and a newer sample belongs to the same farmhand."""
+    if not mail_close_linked(state):
+        return False
+    handoff = state["mail_handoff"]
+    pin = handoff["context"]
+    trace = state["native_ui_episode"]
+    identity = tuple(context.get("identity") or ())
+    date = tuple(S._g(motor, key) for key in ("year", "season", "day"))
+    return (identity == tuple(pin[k] for k in ("runtime_instance_id", "command_session_id", "observation_session_id",
+                                               "player_id", "screen_id", "location"))
+            and trace["identity"] == identity[:5] and same_date(trace["date"], date)
+            and context.get("ui_domain_revision", -1) > handoff["ui_domain_revision"]
+            and context.get("context_generation", -1) > pin["context_generation"]
+            and S._g(motor, "is_player_free") is True)
+
+
+def _letters_stand(snap, state, result, count, reason):
+    """Letters already verified read in this visit stand; a hand-off that cannot be verified after them ends
+    the visit as finished with those letters counted, so a real read is never filed as a failure. Before any
+    verified letter, the same reason still fails; the unverified letter itself is never counted."""
+    if not state.get("morning_letters_read"):
+        return _fail(reason)
+    if S._g(S._g(snap, "motor"), "is_player_free") is not True:
+        return S._wait(state, "morning_free", "morning_not_free", "Amati keadaan bebas", S.WAIT_S)
+    result.update(complete=True, hold=None, mailbox_end=count, letters_read=state["morning_letters_read"],
+                  menu_closed=True, mail_last_unverified=reason)
+    return S.Step("done", reason="observed_morning_plan_input")
+
+
 def _morning(snap, state, view, context, *, selection=None):
     # Bare S29 retains the historical Part C TV+mail composition. Live7 offers explicit,
     # independent choices: one supported native channel or mail with no TV prerequisite.
@@ -321,12 +362,16 @@ def _morning(snap, state, view, context, *, selection=None):
                                "Amati jumlah surat native", S.WAIT_S)
             if count != state["mail_unread_before"] - 1:
                 return _fail("mail_unread_delta_unexpected")
+            if state.get("mail_handoff_required") and not mail_close_current(state, context, S._g(snap, "motor")):
+                step = S._wait(state, "mail_handoff", "mail_handoff_identity_unverified",
+                               "Amati keadaan setelah surat ditutup", S.WAIT_S)
+                return _letters_stand(snap, state, result, count, step.reason) if step.kind == "fail" else step
             trace = state.get("native_ui_episode") or {}
             if trace and (tuple(trace.get("identity") or ()) != identity[:5]
                           or not same_date(trace.get("date"), context.get("date"))
                           or (trace.get("opened") or {}).get("kind") not in (None, "mailbox")
                           or (trace.get("opened") or {}).get("menu") != "LetterViewerMenu"):
-                return _fail("mail_handoff_identity_unverified")
+                return _letters_stand(snap, state, result, count, "mail_handoff_identity_unverified")
             proof = dict(before=state.pop("mail_unread_before"), after=count)
             if state.get("mail_arrival") is not None and not state["mail_arrival"].get("credited"):
                 state["mail_arrival"]["credited"] = True
@@ -344,7 +389,8 @@ def _morning(snap, state, view, context, *, selection=None):
             result.update(letters_read=state["morning_letters_read"], mailbox_remaining=count)
             for key in ("morning_pending", "mail_receiver", "mail_pages", "native_ui_episode",
                         "ui_continuation_receiver", "wait:mail_decrement", "wait:morning_open",
-                        "mail_attachment_wait", "morning_letter_held", "wait:mail_attachment", "wait:mail_ui"):
+                        "mail_attachment_wait", "morning_letter_held", "wait:mail_attachment", "wait:mail_ui",
+                        "mail_handoff", "mail_handoff_required", "wait:mail_handoff", "ui_effect_scope"):
                 state.pop(key, None)
             result.pop("held_letter", None)
             pending = None

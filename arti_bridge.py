@@ -93,6 +93,7 @@ from arti_runtime import attention_desk, attention_bridge
 from arti_runtime.host_story import playback_story, playback_current as host_story_playback_current
 from arti_runtime import streamer_voice
 from arti_runtime import mic_hygiene
+from arti_runtime import thanks_once
 from arti_runtime import live_rules
 from arti_runtime import mic_priority
 from arti_runtime import chat_rotation, chat_media
@@ -1352,6 +1353,7 @@ CONFIG = {
     # On: address rules become a priority mark (not a gate), unmarked mic_pasif cannot discard
     # viewer chat, chat rotates fairly, and a donation thank-you is queued before the hold.
     "mic_priority_mark": False,
+    "thanks_once_enabled": False,
     "chat_quiet_answer_all": False,
     "chat_busy_messages": 8,
     "chat_busy_window_sec": 180.0,
@@ -2448,6 +2450,8 @@ def clear_trigger_queue(*, keep_chat=False, keep_addressed=False, stop=False):
         epoch = getattr(item, "stardew_voice_epoch", None)
         if epoch is not None:
             _discard_stardew_capture(epoch)
+        if tok := getattr(getattr(item, "text", None), "thanks_token", ""):
+            __import__("arti_runtime.thanks_once", fromlist=["mark_state"]).mark_state(tok, "stopped")
     if discarded:  # Counts by type only, never a viewer's text or name.
         counts = {}
         for item in discarded:
@@ -2473,6 +2477,8 @@ def _dequeue_buffered_trigger_if_brain_ready(*, owner_only=False):
                     return None
                 trigger = _normalize_voice_trigger(item)
                 if _speech_trigger_expired(trigger) or _game_reaction_expired(trigger):
+                    if tok := getattr(trigger.text, "thanks_token", ""):
+                        __import__("arti_runtime.thanks_once", fromlist=["mark_state"]).mark_state(tok, "dropped")
                     continue
                 _brain_busy = True
                 _brain_busy_since = time.time()
@@ -6824,9 +6830,21 @@ def schedule_donation_trigger(text: str, viewer_name: str | None, message: str, 
     if CONFIG.get("stream_game_notes"):
         from arti_runtime import stream_notes  # ADR 228: a donation message is a source, attributed "donasi"
         stream_notes.bridge_viewer(__import__(__name__), viewer_name, message, donation=True)
+    if not getattr(text, "thanks_token", "") and CONFIG.get("thanks_once_enabled"):
+        dec = thanks_once.claim_trigger(CONFIG, text, viewer_name, message)
+        if not dec.is_new:
+            _merge_thanks_extra(dec)
+            if on_queued: on_queued()
+            return
+        text = thanks_once.tag_trigger(text, dec.token)
     _request_alert_yield("donasi")
     def enqueue():
-        if queue_voice_trigger(text, trigger_type="donation", viewer_name=viewer_name) and on_queued:
+        tok = getattr(text, "thanks_token", "")
+        extra = thanks_once.take_added_message(tok) if tok else ""
+        queued = queue_voice_trigger(thanks_once.tag_trigger(f"{text} Pesan: {extra}", tok) if extra else text,
+                                     trigger_type="donation", viewer_name=viewer_name)
+        if tok: thanks_once.mark_state(tok, "queued" if queued else "dropped")
+        if queued and on_queued:
             on_queued()
 
     delay = donation_alert_delay_sec(message)
@@ -6968,15 +6986,18 @@ def start_video_watcher() -> None:
     _video_watcher.start()
 
 
-def _queue_instant_donation_thanks(ev) -> None:
+def _merge_thanks_extra(dec) -> None:
+    thanks_once.merge_pending(dec, voice_trigger_buffer, voice_trigger_queue, bool(CONFIG.get("voice_queue_enabled", False)), _normalize_voice_trigger)
+
+
+def _queue_instant_donation_thanks(ev, *, thanks_token: str = "") -> None:
     """One-line thank-you, queued before a mediashare hold (VOICE_CHAT_ANALYSIS change 6)."""
     name = str(getattr(ev, "name", "") or "kamu")
     amount = str(getattr(ev, "amount_label", "") or "donasinya")
-    queue_voice_trigger(
-        f"[DONASI] Terima kasih {name} untuk {amount}.",
-        trigger_type="donation",
-        viewer_name=name,
-    )
+    text = thanks_once.tag_trigger(f"[DONASI] Terima kasih {name} untuk {amount}.", thanks_token)
+    ok = queue_voice_trigger(text, trigger_type="donation", viewer_name=name)
+    if thanks_token:
+        thanks_once.mark_state(thanks_token, "queued" if ok else "dropped")
 
 
 def _on_donation(ev) -> None:
@@ -6989,7 +7010,7 @@ def _on_donation(ev) -> None:
     import arti_donations  # noqa: PLC0415
 
     kind = getattr(ev, "kind", "donation")
-    if kind == "membership" and str(getattr(ev, "platform", "")).lower() in (
+    if not thanks_once.enabled(CONFIG) and kind == "membership" and str(getattr(ev, "platform", "")).lower() in (
         "youtube", "youtube_account",
     ):
         if not arti_donations.claim_membership_alert(ev.name):
@@ -7010,11 +7031,17 @@ def _on_donation(ev) -> None:
         )
         print(f"[Membership] {ev.platform}: {ev.name}{detail}")
         trigger = arti_donations.format_membership_trigger(ev)
+        dec = thanks_once.claim_event(CONFIG, ev)
+        if not dec.is_new:
+            return _merge_thanks_extra(dec)  # her history holds it once too
+        if (thanks_once.enabled(CONFIG) and not thanks_once.is_gift(ev) and str(getattr(ev, "platform", "")).lower() in
+                ("youtube", "youtube_account") and not arti_donations.claim_membership_alert(ev.name)):
+            return  # the 30 s rule by name stays: sources may disagree on the month
         add_to_history(
             f"Viewer {ev.name} ({ev.platform_label})",
             trigger,
         )
-        schedule_donation_trigger(trigger, ev.name, ev.message, gate_desktop=False)
+        schedule_donation_trigger(thanks_once.tag_trigger(trigger, dec.token), ev.name, ev.message, gate_desktop=False)
         return
 
     if kind == "media_points":
@@ -7030,15 +7057,23 @@ def _on_donation(ev) -> None:
         return
 
     print(f"[Donasi] {ev.platform}: {ev.name} kirim {ev.amount_label}!")
-    add_to_history(
-        f"Viewer {ev.name} ({ev.platform.title()})",
-        f"[DONASI {ev.amount_label}] {ev.message or '(tanpa pesan)'}",
-    )
+    dec = thanks_once.claim_event(CONFIG, ev)
+    if dec.is_new:  # her history holds one event once
+        add_to_history(
+            f"Viewer {ev.name} ({ev.platform.title()})",
+            f"[DONASI {ev.amount_label}] {ev.message or '(tanpa pesan)'}",
+        )
+    if not dec.is_new:
+        _merge_thanks_extra(dec)
+        if dec.added_clip and ev.media_url:
+            arti_donations.pending_media.append(ev)
+            _submit_media_job(ev, donation_label=ev.amount_label, thanks_token=dec.token)
+        return
     if CONFIG.get("mic_priority_mark") and ev.media_url:
-        _queue_instant_donation_thanks(ev)
+        _queue_instant_donation_thanks(ev, thanks_token=dec.token)
     if ev.media_url:
         arti_donations.pending_media.append(ev)
-        if _submit_media_job(ev, donation_label=ev.amount_label):
+        if _submit_media_job(ev, donation_label=ev.amount_label, thanks_token=dec.token):
             # Reaksi DIGABUNG: terima kasih + komentar isi video SETELAH
             # playback. Terima kasih terpisah TIDAK dikirim.
             # Flag on: the one-line thank-you was already queued before this hold.
@@ -7053,11 +7088,12 @@ def _on_donation(ev) -> None:
         if CONFIG.get("mic_priority_mark"):
             return
     schedule_donation_trigger(
-        arti_donations.format_donation_trigger(ev), ev.name, ev.message, gate_desktop=False
+        thanks_once.tag_trigger(arti_donations.format_donation_trigger(ev), dec.token),
+        ev.name, ev.message, gate_desktop=False,
     )
 
 
-def _submit_media_job(ev, donation_label: str) -> bool:
+def _submit_media_job(ev, donation_label: str, *, thanks_token: str = "") -> bool:
     """Media share -> antre job video; HOLD hanya kalau job diterima.
 
     Return False bila watcher mati/URL tak dikenal/ditolak guard — pemanggil
@@ -7085,6 +7121,7 @@ def _submit_media_job(ev, donation_label: str) -> bool:
         clip_start=ev.media_start,
         clip_end=ev.media_end,
         playback_end=time.time() + hold if CONFIG.get("media_watch_mode") else 0.0,
+        thanks_token=thanks_token,
     ))
     if not accepted:
         return False
@@ -7808,7 +7845,11 @@ def ssn_chat_worker():
                 last_addressed[viewer] = now
             return
         if decision.kind == "donation":
-            schedule_donation_trigger(decision.label, viewer, line.text)
+            dec = thanks_once.claim_ssn(CONFIG, line)
+            if dec.is_new:
+                schedule_donation_trigger(thanks_once.tag_trigger(decision.label, dec.token), viewer, line.text)
+            else:
+                _merge_thanks_extra(dec)
         elif decision.kind == "trigger":
             extra = {}
             if CONFIG.get("mic_priority_mark"):
@@ -9503,6 +9544,12 @@ def mind_intent_block_now() -> str:
     Silent context: never voiced by itself."""
     if not CONFIG.get("arti_mind_intent_enabled", True):
         return ""
+    if CONFIG.get("live7_mind_scope") is True:
+        try:
+            from arti_runtime import mind_scope
+            return mind_scope.bridge_intent_block(__import__(__name__))
+        except Exception:  # noqa: BLE001 - a persona turn never fails on the mind file
+            return ""
     try:
         return arti_mind.intent_block(arti_mind.mind_dir(CONFIG), max_age_sec=float(
             CONFIG.get("arti_mind_now_max_age_sec", arti_mind.NOW_MAX_AGE_SEC)))
@@ -9521,6 +9568,9 @@ def stardew_role_block_now() -> str:
         # The asynchronous live-cycle cache starts false. A fresh native pose already
         # proves that Stardew is running, including the first discovery-triggered turn.
         row = arti_mind.read_now(arti_mind.mind_dir(CONFIG)) or {}
+        if CONFIG.get("live7_mind_scope") is True:
+            from arti_runtime import mind_scope
+            row = mind_scope.bridge_read_now(__import__(__name__)) or {}
         from arti_runtime.time_grounding import current_state
         if row.get("game") != "stardew" or current_state(row).get("basis") != "latest_observation":
             return ""
@@ -12346,6 +12396,8 @@ async def main_loop():
             trigger = _normalize_voice_trigger(raw)
 
             if _speech_trigger_expired(trigger) or _game_reaction_expired(trigger):
+                if tok := getattr(trigger.text, "thanks_token", ""):
+                    __import__("arti_runtime.thanks_once", fromlist=["mark_state"]).mark_state(tok, "dropped")
                 if use_buffer:
                     with _brain_busy_lock:
                         _brain_busy = False
@@ -12900,6 +12952,8 @@ async def _handle_voice_trigger_traced(
     token = tel.set_turn_id(turn_id)
     epoch = speech_control.epoch if expected_epoch is None else expected_epoch
     if not speech_control.allows(epoch) or _speech_trigger_expired(trigger):
+        if tok := getattr(trigger.text, "thanks_token", ""):
+            __import__("arti_runtime.thanks_once", fromlist=["mark_state"]).mark_state(tok, "stopped")
         tel.reset_turn_id(token)
         return
     epoch_token = speech_turn_epoch.set(epoch)
@@ -12939,6 +12993,9 @@ async def _handle_voice_trigger_traced(
         if not task.done():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+        if tok := getattr(trigger.text, "thanks_token", ""):
+            ran = task.done() and not task.cancelled() and task.exception() is None and bool(task.result())
+            __import__("arti_runtime.thanks_once", fromlist=["mark_state"]).mark_state(tok, "ran" if ran else "stopped")
         speech_turn_epoch.reset(epoch_token)
         _viewer_floor_revision.reset(floor_token)
         tel.reset_turn_id(token)
@@ -13608,6 +13665,12 @@ async def _handle_voice_trigger(
             await (do_api_call_with_lookup() if CONFIG.get("web_lookup_model_decides", False)
                    else do_api_call())
             return ai_reply, tts_sentence_chunks
+        if CONFIG.get("live7_mind_scope") is True:
+            from arti_runtime import mind_scope
+            ai_reply, tts_sentence_chunks = await fresh_reply(
+                ask, llm_system, lambda: mind_scope.bridge_read_now(__import__(__name__)),
+                prepare=prepare if discovery else None)
+            return
         ai_reply, tts_sentence_chunks = await fresh_reply(
             ask, llm_system, lambda: arti_mind.read_now(arti_mind.mind_dir(CONFIG)),
             prepare=prepare if discovery else None)

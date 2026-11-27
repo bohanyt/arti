@@ -67,7 +67,9 @@ def _purchase_delta(terms, proof, native_qty):
 
 def execute(runtime, session, arg, initial, intent, goal, revision, decision_until):
     from arti_stardew_generic_ui import controls, stable_identity, ui_readback
+    from scripts.live7.menu_deadline import enabled
 
+    visit_bound = enabled(runtime._config)
     control, amount = intent
     row = stock_row(initial, control)
     expected = stock_terms(initial.shop, row)
@@ -103,7 +105,8 @@ def execute(runtime, session, arg, initial, intent, goal, revision, decision_unt
 
     try:
         fresh()
-        runtime._live7_menu_admitted(session, initial)
+        if not visit_bound:
+            runtime._live7_menu_admitted(session, initial)
         for _ in range(MAX_PRESSES):
             view = fresh()
             actions = controls(view)
@@ -154,6 +157,8 @@ def execute(runtime, session, arg, initial, intent, goal, revision, decision_unt
             currency_delta += payment
             money_delta += proof["after"]["money"] - proof["before"]["money"]
             requests.append(proof["request_id"])
+            if visit_bound:
+                runtime._live7_menu_press_verified(session, view, key)
             runtime._live7_ui_progress_seq = getattr(runtime, "_live7_ui_progress_seq", 0) + 1
             runtime._journal(dict(ev="generic_ui_readback", **proof))
             if qty and units < qty:

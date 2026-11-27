@@ -124,6 +124,7 @@ NAMES = frozenset(n for names in TASKS.values() for n in names)
 NAMES |= frozenset({"aksi", "pakai", "pegang_slot", "hadap", "inventori", "cek_jurnal", "langkah"})
 VERIFIED, CLEAN_FAIL, UNCERTAIN = "VERIFIED", "CLEAN_FAIL", "UNCERTAIN"
 NOT_READY, PRECONDITION, SAFETY_STOP = "NOT_READY", "PRECONDITION", "SAFETY_STOP"
+NO_EFFECT = "NO_EFFECT"  # a released step whose native receipt proves no displacement or turn
 INTERRUPTED = "INTERRUPTED"  # existing outcome vocabulary (status_facts); people-page pause is this, not CLEAN_FAIL
 # ADR 167: return is a safety net relative to native 02:00, not a midnight schedule.
 # A configured earlier target remains an explicit preference. Travel is measured;
@@ -1262,6 +1263,7 @@ class DayPolicy:
     item_names: dict = field(default_factory=dict)  # FIX71C, FIX72D: qid -> native name, every bag and shop row she has read
     catch_totals: dict = field(default_factory=dict)  # FIX71C: place -> landed catches by kind, across all days
     catch_kinds: dict = field(default_factory=dict)  # FIX73D: item -> landed catches of that kind, across all days
+    press_results: dict = field(default_factory=dict)  # spot -> repeated press answer, across days of this run
     failures: Counter = field(default_factory=Counter)
     quarantine: set = field(default_factory=set)  # (skill, arg, location); day-scoped
     # ADR 239: (skill, arg, location) -> a failed trip out of a place, bound to its place, tile and clock.
@@ -1522,7 +1524,7 @@ class DayPolicy:
                 self.read_today["mail_quest"] = mail_quest_text(q)[:READ_TODAY_CHARS]
 
     def record(self, call, outcome_class, reason, *, target=None, location=None, items=(),
-               start_location=None, productive=None, time_of_day=None, tile=None):
+               start_location=None, productive=None, time_of_day=None, tile=None, route_refused=False):
         if outcome_class == CLEAN_FAIL and reason == UNDER_ATTACK_REASON:
             # A monster ended this row at a clean boundary: not the target's or the skill's failure. No quarantine,
             # failure count or retired target; the next offer carries the attack facts (danger, attacks_today).
@@ -1569,9 +1571,12 @@ class DayPolicy:
                                  **({"n": call.n} if call.n is not None else {})))
         del self.history[:-8]
         if productive is None:
-            productive = (outcome_class == VERIFIED and (bool(items) or
-                call.name not in ("pergi_ke", "jalan_ke", "tidur", "cek_pagi")
-                and not any(token in reason for token in ("_no_", "no_effect", "already_"))))
+            if call.name == "langkah":
+                productive = outcome_class == VERIFIED and reason == "observed_movement"
+            else:
+                productive = (outcome_class == VERIFIED and (bool(items) or
+                    call.name not in ("pergi_ke", "jalan_ke", "tidur", "cek_pagi")
+                    and not any(token in reason for token in ("_no_", "no_effect", "already_"))))
         self.history[-1]["productive"] = bool(productive)
         travel_loop = False
         if productive:
@@ -1593,6 +1598,9 @@ class DayPolicy:
             home_shuttle = ("Farm" in edge and any(str(loc).startswith(("Cabin", "FarmHouse")) for loc in edge))
             travel_loop = cycles >= (1 if seeded_shuttle or home_shuttle else 3) and not self.travel_loop
             self.travel_loop |= travel_loop
+        if route_refused:
+            self.last_failed = None  # the walk already withheld this ref, not the whole skill or its waypoint.
+            return False
         # The loop signature is structural; free-text reasons/targets vary per attempt.
         signature = (call.name, call.arg, location, outcome_class)
         if outcome_class in (CLEAN_FAIL, UNCERTAIN, NOT_READY):
@@ -1637,7 +1645,7 @@ class DayPolicy:
                           and not (call.name == "aksi" and navigation_exit(call.arg))
                           and (target is not None or call.name == "bersihkan" and call.arg is not None))
         if refused_target:
-            if target:
+            if target and not navigation_exit(target):
                 self.refs.add(target)
             if call.arg is not None:  # a target argument, never a whole arg-less skill
                 self.quarantine.add((*key(call), location))
@@ -1706,23 +1714,8 @@ def visible_forage(snapshot, context, excluded=()):
             for e in forage_entries({ref: f}, here, InteractObjective("forage_pickup"), blocked, keep_ref=ref)]
 
 
-def forage_paths(snapshot, context, excluded=()):
-    """Approach a real scene sighting, using a frontier when it is outside the rolling grid."""
-    from arti_stardew_goal_routes import open_path
-    parents = forage_look_paths(snapshot, context)
-    here = S._wave1_xy(S._g(S._g(snapshot, "motor"), "tile"))
-    paths = []
-    for entry in visible_forage(snapshot, context, excluded):
-        tile = tuple(entry["tile"])
-        distance = lambda t: abs(t[0] - tile[0]) + abs(t[1] - tile[1])
-        stands = [tuple(t) for t in entry["reach_tiles"] if tuple(t) in parents]
-        if not stands and parents:
-            # Every next cell must still be observed open; re-read after movement.
-            frontier = min(parents, key=lambda t: (distance(t), t))
-            if distance(frontier) < distance(here):
-                stands = [frontier]
-        paths += [path for stand in stands if (path := open_path(parents, stand)) and len(path) > 1]
-    return paths
+def seen_walk_offers(policy, location, here, route_refs=()):
+    return policy.seen_objects.offers(location, here, refused=policy.refs.union(route_refs))
 
 
 def refill_targets(snapshot, context):
@@ -2070,7 +2063,8 @@ def _day_plan(date, weekday, weather, facts, context, *, policy=None, snapshot=N
     from arti_runtime.travel_time import observe
     observe(policy, facts.location, context)
     context = dict(context, quest_refused_items=policy.quest_refused_items,
-                   shop_refused_items=policy.shop_refused.get(facts.location, set()))
+                   shop_refused_items=policy.shop_refused.get(facts.location, set()),
+                   excluded_scene_pickups=policy.refs)
     # Dependent work cannot consume an uncertain transaction's item deltas.
     # This view narrows the existing facts; it does not create a world store.
     if policy.uncertain_items:
@@ -2332,6 +2326,7 @@ def _day_plan(date, weekday, weather, facts, context, *, policy=None, snapshot=N
         add("siram")
     # Remembered tiles only propose travel. Each short leg uses the current native grid;
     # no remembered crop is inserted into targets or used to authorize a watering input.
+    here = S._wave1_xy(S._g(S._g(snapshot, "motor"), "tile"))
     policy.crop_walk_targets = {}
     trips = []
     if weather not in BAD_WEATHER and not policy.blocked(S.SkillCall("siram"), facts.location):
@@ -2343,7 +2338,6 @@ def _day_plan(date, weekday, weather, facts, context, *, policy=None, snapshot=N
               if not (ref in targets and isinstance(targets[ref].get("crop"), Mapping)
                       and targets[ref]["crop"].get("ready_for_harvest") is True)]
     if trips and snapshot is not None:
-        here = S._wave1_xy(S._g(S._g(snapshot, "motor"), "tile"))
         if here is not None:
             for ref, crop in trips:
                 if crop["location"] != facts.location or ref in policy.refs:
@@ -2356,7 +2350,6 @@ def _day_plan(date, weekday, weather, facts, context, *, policy=None, snapshot=N
     if refill_targets(snapshot, context):
         add("isi_gembor")
     elif snapshot is not None and facts.can_water is not None and facts.can_water[0] == 0:
-        here = S._wave1_xy(S._g(S._g(snapshot, "motor"), "tile"))
         seen = policy.water_seen.get(facts.location)
         if here is not None and seen is not None:
             # Same rolling-window planner as remembered crops; the sighting authorizes no cell or refill input.
@@ -2369,7 +2362,6 @@ def _day_plan(date, weekday, weather, facts, context, *, policy=None, snapshot=N
     if snapshot is not None and (left := policy.ground_items.here(facts.location)):
         # fix59A (ADR 86): an item she left on the ground here is an ordinary walk target (stepping beside it lets the
         # game pull it into a free slot). Same open-path planner as every other jalan_ke; never a steer.
-        here = S._wave1_xy(S._g(S._g(snapshot, "motor"), "tile"))
         if here is not None:
             from arti_stardew_goal_routes import open_paths, open_path
             parents = open_paths(context.get("nav_grid") or {}, here)
@@ -2382,7 +2374,7 @@ def _day_plan(date, weekday, weather, facts, context, *, policy=None, snapshot=N
                     add("jalan_ke", "%d,%d" % tile, tile=tile)
     if snapshot is not None:
         # FIX77C (ADR 136): something she has seen on this map, at any distance. The arg is the object's own tile, read from a dated sighting.
-        for row in policy.seen_objects.offers(facts.location, S._wave1_xy(S._g(S._g(snapshot, "motor"), "tile")), refused=policy.refs):
+        for row in seen_walk_offers(policy, facts.location, here, context.get("route_refusals", ())):
             add("jalan_ke", "%d,%d" % tuple(row["tile"]), tile=tuple(row["tile"]))
     add("tebang")
     add("pecah_batu")
@@ -2414,7 +2406,7 @@ def _day_plan(date, weekday, weather, facts, context, *, policy=None, snapshot=N
         add("elus", "peliharaan")
     if kinds & {"animal_pet", "animal_milk", "animal_shear", "hay_hopper", "hay_place"}:
         add("rawat_hewan")
-    forage_excluded = policy.refs | pickup_blocked
+    forage_excluded = policy.refs.union(pickup_blocked, context.get("route_refusals", ()))
     from arti_runtime.collection_facts import pickup_accepted
     accepted = pickup_accepted(context)
 
@@ -2426,7 +2418,7 @@ def _day_plan(date, weekday, weather, facts, context, *, policy=None, snapshot=N
             or any(e.get("kind") in ("forage", "forage_pickup") and forage_row(e) for e in entries) or any(
                 e.get("kind") == "forage" and forage_row(e)
                 for e in S._g(snapshot, "approach_targets", ()) or ())
-            or forage_paths(snapshot, context, forage_excluded)):
+            or visible_forage(snapshot, context, forage_excluded)):
         add("forage")
     from arti_runtime.social_facts import ANY_TALK, talk_args, talk_open, talk_route_open
     # FIX79C (ADR 141, a58: talk on 3 of 607 pages): the npc_gift rows ride `extras_targets`, published within 24 tiles and
@@ -2834,7 +2826,8 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
                                max_hp=vitals[1] if vitals else None,
                                player_id=snapshot.binding.player_id,
                                game=dict(date=self._date_tuple(motor), time=S._g(motor, "time_of_day"),
-                                         location=S._g(motor, "location")),
+                                         location=S._g(motor, "location"),
+                                         location_id=S._g(native, "location_id")),
                                active_menu=S._g(motor, "active_menu")))
         ui = context.get("mines_ui") or {}
         route = ui.get("goal_route") or {}
@@ -2886,6 +2879,10 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
                            stored_seeds=stored_seed_rows(c.live.chest_memory.counts(), self._live7_known_names(context)))
         if c is not None and getattr(c, "part", None) == "live" and date == c.date:
             from arti_runtime.social_facts import greeted_names, with_greeted
+            from arti_runtime.offer_withhold import route_refs
+            context["excluded_scene_pickups"] = c.live.refs
+            context["route_refusals"] = route_refs(self, self._skill_session, S._g(motor, "location"),
+                                                   S._wave1_xy(S._g(motor, "tile")), context.get("nav_grid"))
             # ADR 161: her verified talks today count as greeted while the native flag lags
             if names := greeted_names(getattr(c.live, "greeted", None), date):
                 context = dict(context, targets=with_greeted(context.get("targets", {}), names))
@@ -3024,6 +3021,14 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
         offer["day"] = day_context(c.date, weekday, weather, facts, planning,
                                    sleep_only=c.live.sleep_only, memory=c.live.shop_memory,
                                    offered_calls=[call for call in calls if not sighting_walk(call, c.live, facts.location)])
+        if (getattr(self, "_config", None) or {}).get("stardew_live7_local_walks") is True:
+            _lw_keys = getattr(self, "_live7_local_walk_keys", None)
+            if _lw_keys and (offer["day"].get("crops") or {}).get("next_step") == "jalan_ke":
+                offer["day"] = day_context(
+                    c.date, weekday, weather, facts, planning,
+                    sleep_only=c.live.sleep_only, memory=c.live.shop_memory,
+                    offered_calls=[call for call in calls
+                                   if not sighting_walk(call, c.live, facts.location) and key(call) not in _lw_keys])
         if trace: trace.mark("day_context")
         if harvest := getattr(c.live, "harvest_fact", None):
             if harvest["own_ripe"] or harvest["scene_ripe"]:
@@ -3134,7 +3139,19 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
                 offer.setdefault("facts", {})["map_affordances"] = page["counts"]
             elif choices := event_choices(snapshot):
                 offer["_event_choices"] = {arg: row["label"] for arg, row in choices.items() if row["label"]}
-        if leave := leave_line(facts.location, calls, S._g(snapshot, "event_movement")):
+        from arti_stardew_event_control import festival_seated
+        seated = festival_seated(S._g(snapshot, "event_actions"))
+        if seated and self._config.get("live7_fact_line_enabled") is True:
+            from arti_runtime.festival_facts import STAND_LABEL, event_choices
+            # The one control while she sits is named for what it does.
+            stand = {arg: STAND_LABEL for arg, row in event_choices(snapshot).items() if row["kind"] == "festival_stand"
+                     and any(call.name == "aksi" and call.arg == arg for call in calls)}
+            if stand:
+                offer["_map_action_labels"] = dict(offer.get("_map_action_labels") or {}, **stand)
+        from arti_runtime.human_host import is_owner_hosted_config
+        offered = self._live7_festival_leave_offered(snapshot)
+        if leave := leave_line(facts.location, calls, S._g(snapshot, "event_movement"), seated=seated, offered=offered,
+                               owner_hosted=offered and is_owner_hosted_config(self._config)):
             offer["day"]["festival_leave"] = leave
         if inside := inside_line(facts.location, S._g(snapshot, "event_movement"), S._g(snapshot, "event_actions"),
                                  getattr(self, "_live7_calendar", ()), mind_label(c.date),
@@ -3258,7 +3275,7 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
                      "Kegagalan berulang tidak mengharuskan pulang atau tidur.")
         offer["task_finishes_without_choice"] = c.live.finish_streak
         offer["forage_here"] = [dict(ref=e["ref"], name=e.get("name", "forage"))
-                                for e in forage_offers(snapshot, context, c.live.refs)[:4]]
+                                for e in forage_offers(snapshot, context, c.live.refs.union(context.get("route_refusals", ())))[:4]]
         if type(facts.time_of_day) is int:
             # Keep the established current-open-place/full-bag surface, without the old all-day return countdown.
             from arti_runtime.home_night import home_line, bed_line, observed_line
@@ -3307,8 +3324,22 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
                 offer["day"]["bag"] = line
         if counter := counter_page(context):
             offer.setdefault("facts", {})["konter"] = counter
-        if repeated := loop_facts.repeat_fact(c.live.no_effect):
+        if repeated := loop_facts.repeat_fact(c.live.no_effect, context):
             offer["facts"]["tanpa_efek"] = repeated  # fix55B (a40: inventori 165x, 156 unchanged): a count, never a filter
+        if (getattr(self, "_config", None) or {}).get("stardew_live7_press_results"):
+            from arti_runtime import press_results  # what a spot has answered every time she pressed it
+            try:
+                press_line, named_spots = press_results.page_fact(
+                    c.live.press_results, facts=facts, context=context, snapshot=snapshot, calls=calls)
+            except Exception as e:  # a fact never stops a page
+                press_line, named_spots = None, set()
+                self._journal(dict(ev="live7_press_results_error", at="page", error=type(e).__name__))
+            if press_line:
+                offer["facts"]["hasil_berulang"] = press_line
+                if repeated := loop_facts.repeat_fact(c.live.no_effect, context, exclude_spots=named_spots):
+                    offer["facts"]["tanpa_efek"] = repeated
+                else:
+                    offer["facts"].pop("tanpa_efek", None)
         fishing_offered = any(call.name == "tangkap_ikan" for call in calls)
         if fishing := loop_facts.fishing_fact(context.get("inventory"), offered=fishing_offered,
                                               free_slots=facts.free_slots,
@@ -3449,6 +3480,10 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
                     # a store row's args are IDs, so their names ride with them when the row sheds its detail.
                     entry["nama"] = {r["qualified_item_id"]: r["name"] for r in goods
                                      if r.get("qualified_item_id") in entry["args"] and isinstance(r.get("name"), str)}
+                    from arti_runtime.chest_memory import store_chest_ref
+                    if (chest_ref := store_chest_ref(context, blocked=c.live.refs)) and (
+                            full := c.live.chest_memory.full_note(chest_ref, location=facts.location)):
+                        entry["peti"] = full
                     if self._config.get("live7_fact_line_enabled") is True:
                         entry["_item_names"] = {arg: {} for arg in entry["args"]}
                 for row in goods:
@@ -3497,7 +3532,7 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
                                  "Jalan menuju tanaman yang kutanam VERIFIED; baca native lagi sebelum siram. Perjalanan belum berarti tanaman disiram.")
                 if planning["planting_walk_pending"]:
                     entry["does"] = "Dekati tanah kebun lewat jalan terbuka; amati lagi agar cangkul/tanam bisa ditawarkan."
-                self._live7_seen_page(c, snapshot, facts, entry)
+                self._live7_seen_page(c, snapshot, facts, entry, context.get("route_refusals", ()))
             if entry["name"] == "kirim":
                 entry["does"] += " Kiriman dibayar besok."
             if entry["name"] == "tidur" and c.live.bedtime_return and bedtime_default(facts, c.live, calls):
@@ -3518,24 +3553,58 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
                 from arti_runtime.travel_facts import compact_arrivals
                 if arrivals := compact_arrivals(after):
                     entry["arrival_facts"] = arrivals
+        if (getattr(self, "_config", None) or {}).get("stardew_live7_local_walks") is True:
+            _lw_eyes, _lw_fact = getattr(self, "_live7_local_walks_meta", (None, None))
+            if _lw_fact:
+                offer.setdefault("facts", {})["lantai"] = _lw_fact
+            if _lw_eyes:
+                for _lw_entry in offer["skills"]:
+                    if _lw_entry.get("name") == "jalan_ke":
+                        _lw_shown = {a: dict(_lw_eyes[a]) for a in (_lw_entry.get("args") or ()) if a in _lw_eyes}
+                        if _lw_shown:
+                            _lw_entry["lantai"] = _lw_shown
+                            _lw_entry["does"] = "Berjalan ke petak lantai terbuka lewat jalur teramati."
         order = {call.name: i for i, call in reversed(list(enumerate(calls)))}
         offer["skills"].sort(key=lambda entry: order.get(entry["name"], len(calls)))
         self._live7_crop_read(session.campaign, facts, context)
-        self._live7_mind_offer(session, facts, calls, offer)
-        from arti_runtime.place_page import arrival_line, visit_days, remember_visit
+        from arti_runtime.place_page import arrival_line, visit_days
         scope = (context.get("world_knowledge") or {}).get("scope")
-        if getattr(self, "_live7_visit_scope", None) != scope:
+        if scope and getattr(self, "_live7_visit_scope", None) != scope:
             self._live7_visit_scope, self._live7_visits = scope, visit_days(self._live7_mind_base(),scope)
         if not hasattr(self, "_live7_visits"):
             self._live7_visits = {}
-        next_visits=dict(self._live7_visits)
-        if arrived := arrival_line(offer.get("mind"), facts.location, mind_label(c.date),
+        next_visits=dict(self._live7_visits) if scope else {}
+        sample = None
+        visit_place = facts.location
+        if self._config.get("live7_fact_line_enabled") is True and scope:
+            from arti_runtime.place_visit_result import capture, observe
+            pin = S._g(snapshot, "water_context") or S._g(snapshot, "movement_context")
+            motor = self._state.latest(snapshot.binding.player_id)
+            candidate = capture(self, pin, c, motor)
+            visit_place = context.get("location_id") if not S._g(motor, "location_id") else None
+            if (candidate is not None and candidate["place"] == context.get("location_id")
+                    and candidate["clock"] == facts.time_of_day
+                    and candidate["witness"]["motor"] == S._g(snapshot.motor, "revisi")):
+                sample = candidate
+                visit_place = sample["place"]
+                observe(self, sample, context=context, scope=scope)
+            next_visits = dict(self._live7_visits)
+        self._live7_place_records(session, context)
+        if (getattr(self, '_config', None) or {}).get('stardew_live7_plan_on_page', False) is True:
+            from arti_runtime.goal_ladder_runtime import page_plan
+            if saved := page_plan(self, session, snapshot, offer):
+                offer['_live7_day_plan'] = saved
+        self._live7_mind_offer(session, facts, calls, offer)
+        if arrived := arrival_line(offer.get("mind"), visit_place, mind_label(c.date),
                                    offer.get("day", {}).get("bisa_di_sini"),
                                    getattr(self, "_live7_native_place_names", None),
-                                   visits=next_visits, clock=facts.time_of_day):
+                                   visits=next_visits, clock=facts.time_of_day, display_name=facts.location):
             offer.setdefault("day", {})["kunjungan"] = arrived
-            self._live7_visit_pending=dict(scope=scope,location=facts.location,date=mind_label(c.date),
+            self._live7_visit_pending=dict(scope=scope,location=visit_place,date=mind_label(c.date),
                                           clock=facts.time_of_day,line=arrived,visits=next_visits)
+            if sample is not None:
+                from arti_runtime.place_visit_result import findings
+                self._live7_visit_pending.update(sample=sample, findings=findings(self, sample, context))
         from arti_runtime.experience_facts import travel_page
         travel_page(offer, getattr(self, "_live7_raw_knowledge", None) or context.get("world_knowledge"))
         if (getattr(self, "_config", None) or {}).get("stardew_live7_ship_on_the_way"):
@@ -3638,8 +3707,12 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
                 day = mind_day(getattr(getattr(getattr(self, "_skill_session", None), "campaign", None), "date", None))
                 if day is not None:
                     try:
-                        arti_mind.record_discoveries(base, MIND_GAME, scope=scope, discoveries=[event],
-                                                   day=day, day_label=str(catalog.get("date")))
+                        if (getattr(self, "_config", None) or {}).get("live7_mind_scope", False) is True:
+                            arti_mind.record_discoveries(base, MIND_GAME, scope=scope, discoveries=[event],
+                                                       day=day, day_label=str(catalog.get("date")), scoped=True)
+                        else:
+                            arti_mind.record_discoveries(base, MIND_GAME, scope=scope, discoveries=[event],
+                                                       day=day, day_label=str(catalog.get("date")))
                     except (OSError, ValueError) as exc:
                         self._journal(dict(ev="discovery_memory_error", error=type(exc).__name__))
         current = list(catalog.get("discoveries") or ())
@@ -3665,8 +3738,12 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
             day = mind_day(getattr(getattr(getattr(self, "_skill_session", None), "campaign", None), "date", None))
             if day is not None:
                 try:
-                    arti_mind.record_discoveries(base, MIND_GAME, scope=scope, discoveries=visits,
-                                               day=day, day_label=str(catalog.get("date")))
+                    if (getattr(self, "_config", None) or {}).get("live7_mind_scope", False) is True:
+                        arti_mind.record_discoveries(base, MIND_GAME, scope=scope, discoveries=visits,
+                                                   day=day, day_label=str(catalog.get("date")), scoped=True)
+                    else:
+                        arti_mind.record_discoveries(base, MIND_GAME, scope=scope, discoveries=visits,
+                                                   day=day, day_label=str(catalog.get("date")))
                 except (OSError, ValueError) as exc:
                     self._journal(dict(ev="discovery_memory_error", error=type(exc).__name__))
         from arti_runtime.experience_facts import place_sources
@@ -3682,6 +3759,44 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
         from arti_runtime.fact_line import runtime_catalog
         return runtime_catalog(self, catalog)
 
+    def _live7_flush_visit(self, campaign):
+        if not (getattr(self, "_live7_visit_open", None) or getattr(self, "_live7_visit_closing", None)):
+            return
+        from arti_runtime.place_visit_result import capture, flush, note_crossing
+        from arti_stardew_world import read_catalog
+        pin = self._ui_key_context(campaign.epoch[3])
+        with self._lock:
+            note_crossing(self, campaign, pin)
+        if getattr(self, "_live7_visit_closing", None):
+            if capture(self, pin, campaign) is None:
+                flush(self, reason="place_read_unjoined")
+            else:
+                catalog, reason = read_catalog(self, pin)
+                # Recheck the publications after reading the catalog.
+                if capture(self, pin, campaign) is None:
+                    catalog, reason = None, "place_read_unjoined"
+                flush(self, scope=(catalog or {}).get("scope"), reason=reason)
+
+    def _live7_place_records(self, session, context):
+        if (getattr(self, "_config", None) or {}).get("live7_fact_line_enabled") is not True:
+            return
+        from arti_runtime.place_page import mark_clock_rewind, mark_reload, visit_records, with_game_words
+        from arti_runtime.save_reload import reloads
+        base = self._live7_mind_base()
+        scope = (context.get("world_knowledge") or {}).get("scope")
+        if "_live7_visit_records" not in vars(self) or getattr(self, "_live7_visit_records_scope", None) != scope:
+            self._live7_visit_records_scope = scope
+            self._live7_visit_records = visit_records(base, scope)
+        if scope and getattr(self, "_live7_visit_rewinds_scope", None) != scope:
+            self._live7_visit_rewinds_scope = scope
+            self._live7_visit_rewinds = {}
+        records = mark_reload(with_game_words(base, scope, self._live7_visit_records),
+                              [row["facts"] for row in reloads(base, scope)])
+        rewinds = vars(self).setdefault("_live7_visit_rewinds", {})
+        session.campaign.live.place_visits = (mark_clock_rewind(
+            records, mind_label(session.campaign.date), context.get("clock"), session.campaign.epoch[2], rewinds)
+            if scope else records)
+
     def _live7_fact_line_offer(self, session, snapshot, offer):
         """ADR 220: shared presentation policy, including generic UI boundaries."""
         from arti_runtime.fact_line import enabled, present, runtime_catalog
@@ -3695,18 +3810,11 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
         catalog = runtime_catalog(self, catalog, game_day=mind_day(session.campaign.date),
                                   clock=S._g(snapshot.motor, "time_of_day"))
         counts = {}
-        if (getattr(self, '_config', None) or {}).get('live7_fact_line_enabled'):
-            # ADR 232 part C: her own dated record of each place rides its trip (fact_line._travel), from the
-            # place_visit rows, with the game's words shown to her there.
-            from arti_runtime.place_page import visit_records, with_game_words
-            scope = (context.get("world_knowledge") or {}).get("scope")
-            if "_live7_visit_records" not in vars(self) or getattr(self, "_live7_visit_records_scope", None) != scope:
-                self._live7_visit_records_scope = scope
-                self._live7_visit_records = visit_records(self._live7_mind_base(), scope) if scope else {}
-            from arti_runtime.place_page import mark_reload
-            from arti_runtime.save_reload import latest as latest_reload
-            session.campaign.live.place_visits = mark_reload(with_game_words(
-                self._live7_mind_base(), scope, self._live7_visit_records), latest_reload(self._live7_mind_base(), scope))
+        self._live7_place_records(session, context)
+        if hasattr(self, "_live7_quest_records"):
+            # Which quests the native journal still holds open; a frame without its log keeps the last one.
+            context = dict(context, open_quests=frozenset(
+                str(q.get("id")) for q in self._live7_quest_records if q.get("status") in (None, "active")))
         projected = present(offer, catalog, config=self._config, policy=session.campaign.live, context=context, counts=counts)
         self._live7_fact_counts = counts
         # The same fact sources feed speech and the later bedtime call.
@@ -3720,11 +3828,9 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
             for key in ("weather_tomorrow", "kalender"):
                 if key in (projected.get("day") or {}):
                     self._live7_day_facts[key] = projected["day"][key]
-        from arti_runtime.fact_line import Witnesses
-        witnessed = Witnesses(catalog)
-        read_quests = witnessed.matching("quest_entry_read")
-        self._live7_quest_status = (dict(value=[witnessed.line(r) for r in read_quests], source="native_quest_entry_read")
-                                  if read_quests else None)
+        from arti_runtime.fact_line import Witnesses, quest_lines
+        read_quests = quest_lines(Witnesses(catalog), context.get("open_quests"), mind_day(session.campaign.date))
+        self._live7_quest_status = dict(value=read_quests, source="native_quest_entry_read") if read_quests else None
         if isinstance(getattr(self, "_live7_progress_lines", None), dict):
             self._live7_progress_lines = dict(self._live7_progress_lines,
                 value={k: v for k, v in (projected.get("progress") or {}).items()
@@ -3838,7 +3944,10 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
         base, day = self._live7_mind_base(), mind_day(session.campaign.date)
         from arti_runtime.native_story import recent as story_recent
         story_scope = scope or getattr(self, "_live7_native_story_scope", None) or getattr(self, "_live7_discovery_scope", None)
-        story = story_recent(base, story_scope, day, calendar=self._live7_calendar)
+        if (getattr(self, "_config", None) or {}).get("live7_mind_scope", False) is True:
+            story = story_recent(base, story_scope, day, calendar=self._live7_calendar, mind_scoped=True)
+        else:
+            story = story_recent(base, story_scope, day, calendar=self._live7_calendar)
         if story:
             offer["world"]["native_story"] = story
         if base is None or day is None:
@@ -3857,13 +3966,20 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
                 offer["world"].setdefault("world_details", {})["discoveries"] = events
             return
         try:
-            fresh = arti_mind.record_discoveries(base, MIND_GAME, scope=scope,
-                discoveries=[discovery_references(e, wiki_cache=getattr(self, "_wiki_cache", None))
-                             for e in (catalog or {}).get("discoveries", ())],
-                day=day, day_label=mind_label(session.campaign.date))
+            if (getattr(self, "_config", None) or {}).get("live7_mind_scope", False) is True:
+                fresh = arti_mind.record_discoveries(base, MIND_GAME, scope=scope,
+                    discoveries=[discovery_references(e, wiki_cache=getattr(self, "_wiki_cache", None))
+                                 for e in (catalog or {}).get("discoveries", ())],
+                    day=day, day_label=mind_label(session.campaign.date), scoped=True)
+            else:
+                fresh = arti_mind.record_discoveries(base, MIND_GAME, scope=scope,
+                    discoveries=[discovery_references(e, wiki_cache=getattr(self, "_wiki_cache", None))
+                                 for e in (catalog or {}).get("discoveries", ())],
+                    day=day, day_label=mind_label(session.campaign.date))
             if (getattr(self, "_config", None) or {}).get("stardew_live7_goal_ladder", False) is True and fresh:
                 from arti_runtime.goal_ladder import remember
-                remember(base, scope, [dict(e, newly_recorded=True) for e in fresh], day)
+                remember(base, scope, [dict(e, newly_recorded=True) for e in fresh], day,
+                         mind_scoped=(getattr(self, "_config", None) or {}).get("live7_mind_scope", False) is True)
             for event in fresh:
                 self._journal(dict(ev="discovery", game=MIND_GAME, **event))
                 self._live7_discovery_event(session, event)
@@ -3954,7 +4070,21 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
         seen = c.live.seen_objects
         if facts.location and context.get("location_id", facts.location) == facts.location:
             self._live7_seen_note(c, facts.location, context.get("targets"), here, grid=context.get("nav_grid"))
-        walks = {r["ref"] for r in seen.offers(facts.location, here, refused=c.live.refs)}
+        refused = context.get("route_refusals", set()) - c.live.refs
+        walks = {r["ref"] for r in seen_walk_offers(c.live, facts.location, here, refused)}
+        if refused:
+            if context.get("describe_affordances"):
+                from arti_runtime.fact_line import visible_targets
+                targets = visible_targets(context)
+            else:
+                targets = context.get("targets", {})
+            names = [(targets[ref].get("display_name") or targets[ref].get("name")) for ref in sorted(refused & targets.keys())
+                     if isinstance(targets[ref], Mapping)]
+            names = list(dict.fromkeys(n for n in names if isinstance(n, str) and 0 < len(n) <= 40))
+            target = " ke " + ", ".join(names[:4]) if names else ""
+            line = f"Saat berjalan tadi, aku tidak menemukan jalan terbuka{target}."
+            prior = offer["facts"].get("jalan_terhalang")
+            offer["facts"]["jalan_terhalang"] = f"{prior} {line}" if prior else line
         if line := seen.read_line(facts.location, c.date, place=place, here=here, offered=walks):
             offer["day"]["benda_terlihat"] = line  # ADR 136: one read away; the walks on the page are at most three of these
         if line := seen.take_gone(c.date):
@@ -3997,11 +4127,11 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
         if c.live.seen_objects.observe(location, targets, here=here, date=c.date, grid=grid):
             self._journal(dict(ev="live7_seen_objects", at=time.time(), game=dict(date=list(c.date)), memory=c.live.seen_objects.dump()))
 
-    def _live7_seen_page(self, c, snapshot, facts, entry):
+    def _live7_seen_page(self, c, snapshot, facts, entry, route_refs=()):
         """ADR 136: what each walk's arg is, beside the arg. A fact about her own sighting; the choice is unchanged."""
         here = S._wave1_xy(S._g(S._g(snapshot, "motor"), "tile"))
         args = entry.get("args") or ()
-        rows = [r for r in c.live.seen_objects.offers(facts.location, here, refused=c.live.refs) if "%d,%d" % tuple(r["tile"]) in args]
+        rows = [r for r in seen_walk_offers(c.live, facts.location, here, route_refs) if "%d,%d" % tuple(r["tile"]) in args]
         if rows:
             entry["nama"] = c.live.seen_objects.names(rows, here, c.date)
             seen = "Yang ada di nama: benda yang pernah kulihat di sana dan kapan; amati lagi setibanya, bisa sudah tidak ada."
@@ -4196,12 +4326,24 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
         tags = [c.name for c in calls] + [str(c.arg) for c in calls if c.arg is not None] + [str(facts.location or "")]
         tags += arti_mind.moment_tags(facts.time_of_day)  # FIX90B: the part of her day, for trait relevance only
         try:
-            goals = arti_mind.load_goals(base, MIND_GAME)
+            if (getattr(self, "_config", None) or {}).get("live7_mind_scope", False) is True:
+                _mind_scope = getattr(self, "_live7_discovery_scope", None)
+                goals = arti_mind.load_goals(base, MIND_GAME, scope=_mind_scope, scoped=True) if _mind_scope else []
+                _unscoped = arti_mind.unscoped_counts(base, MIND_GAME)
+                if any(_unscoped.values()):
+                    _ukey = (_mind_scope, tuple(sorted(_unscoped.items())))
+                    if getattr(self, "_live7_unscoped_logged", None) != _ukey:
+                        self._live7_unscoped_logged = _ukey
+                        self._journal(dict(ev="mind_unscoped_rows", game=MIND_GAME, day=day, counts=_unscoped))
+            else:
+                goals = arti_mind.load_goals(base, MIND_GAME)
             from arti_runtime.fact_line import enabled, plan_views
             if enabled(self._config):
                 goals = plan_views(goals, getattr(self, "_live7_calendar", ()))
             from arti_runtime.route_pause import carried_goal_line
-            if isinstance(offer.get("day"), dict) and (carried := carried_goal_line(goals, day=day, game=MIND_GAME)):
+            if ('_live7_day_plan' not in offer and isinstance(offer.get("day"), dict)
+                    and (carried := carried_goal_line(goals, day=day, game=MIND_GAME))):
+                # The world ladder shows one dated today want. Keep the legacy summary on other pages.
                 offer["day"]["tujuan_dibawa"] = carried  # ADR 155: a carried today goal's age, a fact; staged first
                 tags.append(arti_mind.CARRIED_TAG)
             from arti_runtime.goal_facts import measurements
@@ -4237,17 +4379,31 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
             self._live7_goal_targets = targets
             self._live7_goal_targets_stamp = stamp
             scale = (getattr(session, "page_budget", None) or PageBudget.from_config(getattr(self, "_config", None) or {})).scale
-            if (getattr(self, "_config", None) or {}).get("stardew_live7_goal_ladder", False) is True:
-                from arti_runtime.goal_ladder_runtime import page
-                block = page(self, session, facts, calls, offer, arti_mind.load_prefs(base), goals)
+            if (getattr(self, "_config", None) or {}).get("live7_mind_scope", False) is True:
+                if (getattr(self, "_config", None) or {}).get("stardew_live7_goal_ladder", False) is True:
+                    from arti_runtime.goal_ladder_runtime import page
+                    block = page(self, session, facts, calls, offer, arti_mind.load_prefs(base), goals)
+                else:
+                    _mind_scope = getattr(self, "_live7_discovery_scope", None)
+                    block = arti_mind.render_block(arti_mind.load_prefs(base), goals,
+                                               game=MIND_GAME, day=day, tags=tags,
+                                               max_bytes=arti_mind.BLOCK_MAX_BYTES * scale,
+                                               projection_scale=scale,
+                                               yesterday=arti_mind.yesterday_line(base, MIND_GAME, day, scope=_mind_scope, scoped=True) if _mind_scope else None,
+                                               yesterday_dates=arti_mind.yesterday_dates(base, MIND_GAME, day, scope=_mind_scope, scoped=True) if _mind_scope else (),
+                                               calendar=getattr(self, "_live7_calendar", ()), native_targets=targets)
             else:
-                block = arti_mind.render_block(arti_mind.load_prefs(base), goals,
-                                           game=MIND_GAME, day=day, tags=tags,
-                                           max_bytes=arti_mind.BLOCK_MAX_BYTES * scale,
-                                           projection_scale=scale,
-                                           yesterday=arti_mind.yesterday_line(base, MIND_GAME, day),
-                                           yesterday_dates=arti_mind.yesterday_dates(base, MIND_GAME, day),
-                                           calendar=getattr(self, "_live7_calendar", ()), native_targets=targets)
+                if (getattr(self, "_config", None) or {}).get("stardew_live7_goal_ladder", False) is True:
+                    from arti_runtime.goal_ladder_runtime import page
+                    block = page(self, session, facts, calls, offer, arti_mind.load_prefs(base), goals)
+                else:
+                    block = arti_mind.render_block(arti_mind.load_prefs(base), goals,
+                                               game=MIND_GAME, day=day, tags=tags,
+                                               max_bytes=arti_mind.BLOCK_MAX_BYTES * scale,
+                                               projection_scale=scale,
+                                               yesterday=arti_mind.yesterday_line(base, MIND_GAME, day),
+                                               yesterday_dates=arti_mind.yesterday_dates(base, MIND_GAME, day),
+                                               calendar=getattr(self, "_live7_calendar", ()), native_targets=targets)
         except Exception as exc:  # noqa: BLE001 - the mind never blocks a boundary
             self._journal(dict(ev="mind_block_error", error=type(exc).__name__))
             return
@@ -4266,7 +4422,7 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
             from arti_runtime.place_page import consume_visit
             consume_visit(self, request, choice)
         pending=getattr(self,"_live7_visit_pending",None)
-        if (pending and pending["scope"]==getattr(self,"_live7_visit_scope",None)
+        if (pending and not pending.get("sample") and pending["scope"]==getattr(self,"_live7_visit_scope",None)
                 and ((request.skill_offer or {}).get("day") or {}).get("kunjungan")==pending["line"]):
             # Enrichment/preflight/telemetry may rebuild a page. Consume its visit
             # only after the model has received it and returned a decision.
@@ -4283,6 +4439,16 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
         mind = (request.skill_offer or {}).get("mind") or {}
         today = (mind.get("tujuan") or {}).get("today") or []
         known = {g["id"] for rows in (mind.get("tujuan") or {}).values() for g in rows}
+        if (saved := getattr(request, 'live7_day_plan', None)) is not None and goal_ref == f'rencana:{saved.target_day}':
+            # Only the id on the actual provider page is eligible.
+            try:
+                render = getattr(self._provider, '_render_messages', None)
+                messages = render(request) if callable(render) else S.render_skill_messages(request)
+                shown = (json.loads(messages[1]['content']).get('mind') or {}).get('rencana_hari_ini')
+                if shown and shown['id'] == goal_ref:
+                    known.add(goal_ref)
+            except (AttributeError, IndexError, KeyError, TypeError, ValueError):
+                pass
         fields = dict(why=why, goal_ref=goal_ref, why_src="model")
         if self._config.get("live7_reactive_play_enabled") or self._config.get("stardew_initiative_game_first"):
             from arti_runtime.reactive_play import capture_page, page_values
@@ -4313,27 +4479,51 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
             from scripts.live7.native_facts import pose_readback
             game_time, observed_ts, fresh = pose_readback(self, session)
             try:
-                goals = arti_mind.load_goals(base, MIND_GAME)
-                from arti_runtime.fact_line import enabled, plan_views
-                if enabled(self._config):
-                    goals = plan_views(goals, getattr(self, "_live7_calendar", ()))
-                authored = {g["id"]: g["text"] for g in goals}
-                arti_mind.write_now(base, game=MIND_GAME, why=why, goal_ref=goal_ref,
-                                    # The request can outlive its source file. Recover only
-                                    # our rendering suffix; authored goal text forbids '['.
-                                    goal_today=[authored.get(g["id"], g["text"].split(" [", 1)[0]) for g in today],
-                                    goal_dates=[arti_mind.dated_goal(g, MIND_GAME, getattr(self, "_live7_calendar", ()))
-                                                for g in goals if g["id"] in known],
-                                    game_time=game_time, observed_ts=observed_ts,
-                                    intent_date=mind_label(session.campaign.date),
-                                    calendar=getattr(self, "_live7_calendar", ()),
-                                    native_facts=dict(self._live7_native_facts(session,
-                                        self._skill_current_facts() if fresh else None, fresh=fresh),
-                                        action=dict(status="pending", skill=getattr(choice, "name", None))))
-                if (getattr(self, '_config', None) or {}).get('live7_fact_line_enabled'):
-                    # ADR 232 part I: what she chose, and where a chosen trip goes, beside where her body is.
-                    arti_mind.note_doing(base, game=MIND_GAME, chosen_at=game_time,
-                                         doing=dict(skill=getattr(choice, "name", None), arg=getattr(choice, "arg", None)))
+                if (getattr(self, "_config", None) or {}).get("live7_mind_scope", False) is True:
+                    _mind_scope = getattr(self, "_live7_discovery_scope", None)
+                    if isinstance(_mind_scope, str) and _mind_scope.strip():
+                        goals = arti_mind.load_goals(base, MIND_GAME, scope=_mind_scope, scoped=True)
+                        from arti_runtime.fact_line import enabled, plan_views
+                        if enabled(self._config):
+                            goals = plan_views(goals, getattr(self, "_live7_calendar", ()))
+                        authored = {g["id"]: g["text"] for g in goals}
+                        arti_mind.write_now(base, game=MIND_GAME, why=why, goal_ref=goal_ref,
+                                            goal_today=[authored.get(g["id"], g["text"].split(" [", 1)[0]) for g in today],
+                                            goal_dates=[arti_mind.dated_goal(g, MIND_GAME, getattr(self, "_live7_calendar", ()))
+                                                        for g in goals if g["id"] in known],
+                                            game_time=game_time, observed_ts=observed_ts,
+                                            intent_date=mind_label(session.campaign.date),
+                                            calendar=getattr(self, "_live7_calendar", ()),
+                                            native_facts=dict(self._live7_native_facts(session,
+                                                self._skill_current_facts() if fresh else None, fresh=fresh),
+                                                action=dict(status="pending", skill=getattr(choice, "name", None))),
+                                            scope=_mind_scope, scoped=True)
+                        if (getattr(self, '_config', None) or {}).get('live7_fact_line_enabled'):
+                            arti_mind.note_doing(base, game=MIND_GAME, chosen_at=game_time,
+                                                 doing=dict(skill=getattr(choice, "name", None), arg=getattr(choice, "arg", None)),
+                                                 scope=_mind_scope, scoped=True)
+                else:
+                    goals = arti_mind.load_goals(base, MIND_GAME)
+                    from arti_runtime.fact_line import enabled, plan_views
+                    if enabled(self._config):
+                        goals = plan_views(goals, getattr(self, "_live7_calendar", ()))
+                    authored = {g["id"]: g["text"] for g in goals}
+                    arti_mind.write_now(base, game=MIND_GAME, why=why, goal_ref=goal_ref,
+                                        # The request can outlive its source file. Recover only
+                                        # our rendering suffix; authored goal text forbids '['.
+                                        goal_today=[authored.get(g["id"], g["text"].split(" [", 1)[0]) for g in today],
+                                        goal_dates=[arti_mind.dated_goal(g, MIND_GAME, getattr(self, "_live7_calendar", ()))
+                                                    for g in goals if g["id"] in known],
+                                        game_time=game_time, observed_ts=observed_ts,
+                                        intent_date=mind_label(session.campaign.date),
+                                        calendar=getattr(self, "_live7_calendar", ()),
+                                        native_facts=dict(self._live7_native_facts(session,
+                                            self._skill_current_facts() if fresh else None, fresh=fresh),
+                                            action=dict(status="pending", skill=getattr(choice, "name", None))))
+                    if (getattr(self, '_config', None) or {}).get('live7_fact_line_enabled'):
+                        # What she chose, and where a chosen trip goes, beside where her body is.
+                        arti_mind.note_doing(base, game=MIND_GAME, chosen_at=game_time,
+                                             doing=dict(skill=getattr(choice, "name", None), arg=getattr(choice, "arg", None)))
             except OSError as exc:
                 fields["now_write_error"] = type(exc).__name__
             if (getattr(self, "_config", None) or {}).get("voice_game_memory_enabled"):
@@ -4380,9 +4570,14 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
         if calendar:
             result["calendar"] = calendar
         from arti_runtime.native_story import recent as story_recent
-        result["native_story"] = story_recent(self._live7_mind_base(),
-            getattr(self, "_live7_native_story_scope", None) or getattr(self, "_live7_discovery_scope", None), mind_day(session.campaign.date),
-            calendar=getattr(self, "_live7_calendar", ()))
+        if (getattr(self, "_config", None) or {}).get("live7_mind_scope", False) is True:
+            result["native_story"] = story_recent(self._live7_mind_base(),
+                getattr(self, "_live7_native_story_scope", None) or getattr(self, "_live7_discovery_scope", None), mind_day(session.campaign.date),
+                calendar=getattr(self, "_live7_calendar", ()), mind_scoped=True)
+        else:
+            result["native_story"] = story_recent(self._live7_mind_base(),
+                getattr(self, "_live7_native_story_scope", None) or getattr(self, "_live7_discovery_scope", None), mind_day(session.campaign.date),
+                calendar=getattr(self, "_live7_calendar", ()))
         from arti_runtime.fact_line import enabled, Witnesses
         if enabled(getattr(self, "_config", None)):
             witnessed = Witnesses(getattr(self, "_live7_fact_line_catalog", None))
@@ -4442,11 +4637,20 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
         native = self._live7_native_facts(session, facts, fresh=fresh)
         from arti_runtime.time_grounding import fact_values
         key = (json.dumps([game_time, fact_values(native)], sort_keys=True, default=str), blocked is None, (blocked or {}).get("menu_open"))
+        if (getattr(self, "_config", None) or {}).get("live7_mind_scope", False) is True:
+            _mind_scope = getattr(self, "_live7_discovery_scope", None)
+            if not (isinstance(_mind_scope, str) and _mind_scope.strip()):
+                return
+            key = (_mind_scope, key)
         last = getattr(self, "_live7_mind_beat", None)
         if last is not None and last[0] == key and wall - last[1] < MIND_HEARTBEAT_SEC:
             return
         try:
-            arti_mind.mark_state(base, game=MIND_GAME, game_time=game_time, blocked=blocked, observed_ts=observed_ts, native_facts=native)
+            if (getattr(self, "_config", None) or {}).get("live7_mind_scope", False) is True:
+                arti_mind.mark_state(base, game=MIND_GAME, game_time=game_time, blocked=blocked, observed_ts=observed_ts,
+                                     native_facts=native, scope=_mind_scope, scoped=True)
+            else:
+                arti_mind.mark_state(base, game=MIND_GAME, game_time=game_time, blocked=blocked, observed_ts=observed_ts, native_facts=native)
             self._live7_mind_beat = (key, wall)
         except Exception as exc:  # noqa: BLE001 - the mind never blocks the watchdog
             self._journal(dict(ev="mind_heartbeat_error", error=type(exc).__name__))
@@ -4489,8 +4693,12 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
         for discovery in discoveries:
             verified.append(dict(ref=discovery["id"], text=discovery["text"]))
         from arti_runtime.native_story import reflection_facts as story_reflection
-        verified.extend(story_reflection(base, getattr(self, "_live7_native_story_scope", None) or known_scope,
-                                        day, calendar=getattr(self, "_live7_calendar", ())))
+        if (getattr(self, "_config", None) or {}).get("live7_mind_scope", False) is True:
+            verified.extend(story_reflection(base, getattr(self, "_live7_native_story_scope", None) or known_scope,
+                                            day, calendar=getattr(self, "_live7_calendar", ()), mind_scoped=True))
+        else:
+            verified.extend(story_reflection(base, getattr(self, "_live7_native_story_scope", None) or known_scope,
+                                            day, calendar=getattr(self, "_live7_calendar", ())))
         effects = dict(Counter(r.get("skill") for r in rows if r.get("verified") is True))
         places = list(dict.fromkeys(h.get("location") for h in c.live.history if h.get("location")))
         wallet = c.live.last_wallet or {}
@@ -4560,6 +4768,8 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
                       calendar=list(getattr(self, "_live7_calendar", ()) or ()),
                       records=dict(letters=[r["id"] for r in letters][-8:],
                                    quests=[[r["id"], r.get("status")] for r in quests][-12:]))
+        if (getattr(self, "_config", None) or {}).get("live7_mind_scope", False) is True:
+            inputs["scope"] = known_scope
         from arti_runtime.fact_line import enabled, reflection, witnessed_catalog
         if enabled(self._config):
             catalog = getattr(self, "_live7_fact_line_catalog", None)
@@ -4592,7 +4802,18 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
                        code="no_reflection_lane", alert=True, **extra)
             self._journal(row)
             return row
-        row = dict(arti_mind_reflect.reflect(complete, base, **inputs), **extra)
+        if (getattr(self, "_config", None) or {}).get("live7_mind_scope", False) is True:
+            _mind_scope = inputs.get("scope") or (
+                None if extra.get("deferred") else getattr(self, "_live7_discovery_scope", None))
+            if not (isinstance(_mind_scope, str) and _mind_scope.strip()):
+                row = dict(ev="mind_reflection_failed", game=inputs["game"], day=inputs["day"], date=inputs["day_label"],
+                           code="scope_unavailable", alert=True, **extra)
+                self._journal(row)
+                return row
+            _scoped_inputs = {k: v for k, v in inputs.items() if k != "scope"}
+            row = dict(arti_mind_reflect.reflect(complete, base, scope=_mind_scope, scoped=True, **_scoped_inputs), **extra)
+        else:
+            row = dict(arti_mind_reflect.reflect(complete, base, **inputs), **extra)
         self._journal(row)
         if (getattr(self, "_config", None) or {}).get("voice_game_memory_enabled"):
             from arti_runtime import experience_digest  # ADR 228: the day's end, after her own summary
@@ -4604,6 +4825,11 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
         from arti_runtime import ipc
         folder = arti_mind.game_dir(base, inputs["game"]) / REFLECTION_PENDING_DIR
         name = "day-%06d.json" % inputs["day"]
+        if (getattr(self, "_config", None) or {}).get("live7_mind_scope", False) is True:
+            _mind_scope = inputs.get("scope") or getattr(self, "_live7_discovery_scope", None)
+            if isinstance(_mind_scope, str) and _mind_scope.strip():
+                from arti_runtime import mind_scope
+                name = "day-%06d-%s.json" % (inputs["day"], mind_scope.scope_hash(_mind_scope)[:12])
         try:
             folder.mkdir(parents=True, exist_ok=True)
             ipc.write_json(folder / name, dict(v=1, deferred_at=time.time(), inputs=inputs), critical=True, fsync=True)
@@ -4686,6 +4912,17 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
 
     def _live7_already_reflected(self, base, inputs) -> bool:
         import arti_mind
+        if (getattr(self, "_config", None) or {}).get("live7_mind_scope", False) is True:
+            _mind_scope = inputs.get("scope")
+            if not (isinstance(_mind_scope, str) and _mind_scope.strip()):
+                return False
+            try:
+                rows = arti_mind.load_journey(base, inputs.get("game") or MIND_GAME, scope=_mind_scope, scoped=True)
+            except Exception:  # noqa: BLE001 - unknown means reflect
+                return False
+            return any((r.get("day") == inputs.get("day") or r.get("date") == str(inputs.get("day_label"))
+                        or r.get("id") == str(inputs.get("day_label"))) and isinstance(r.get("reflection"), dict)
+                       for r in rows)
         try:
             rows = arti_mind.load_journey(base, inputs.get("game") or MIND_GAME)
         except Exception:  # noqa: BLE001 - unknown means reflect
@@ -4737,9 +4974,12 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
                 or run.state.get("wave1_driver") or run.state.get("route_clear") or not self._run_owns_goal(run, goal)):
             return None  # S21's own leg and a clear leg keep their own targets
         from arti_stardew_interact import FORAGE_REACH
+        from arti_runtime.offer_withhold import route_refs
         look = run.state.setdefault("live7_forage_look", dict(location=pin.location, inputs=0))
         here = tuple(motor.tile)
-        seen = {e["ref"]: e for e in visible_forage(SimpleNamespace(motor=motor), dict(targets=facts), session.campaign.live.refs)}
+        grid = self._nav_grid(pin)
+        excluded = session.campaign.live.refs | route_refs(self, session, pin.location, here, grid)
+        seen = {e["ref"]: e for e in visible_forage(SimpleNamespace(motor=motor), dict(targets=facts), excluded)}
         pinned = look.get("target")
         if pinned is not None and pinned["ref"] in seen:
             pinned = look["target"] = seen[pinned["ref"]]
@@ -4750,17 +4990,18 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
             near = lambda e: (abs(e["tile"][0] - here[0]) + abs(e["tile"][1] - here[1]), e["ref"])
             pinned = look["target"] = min(seen.values(), key=near)
         goal.home_route_state["route_reaches"] = list(pinned["reach_tiles"])
-        return self._hop_entries(goal, pin, here, facts, self._nav_grid(pin), [pinned], (pin.location, pinned["ref"]))
+        return self._hop_entries(goal, pin, here, facts, grid, [pinned], (pin.location, pinned["ref"]))
 
-    def _live7_seen_target(self, run, location):
+    def _live7_seen_target(self, run, location, here=None, grid=None):
         """ADR 136: the sighting a chosen `jalan_ke` walks to, pinned at its first read, or None for a walk to a plain tile."""
         session = self._skill_session
         if run.call.name != "jalan_ke" or not run.state.get("live7") or session is None or session.campaign is None:
             return None
         pinned = run.state.get("route_seen_walk")
         if pinned is None:
+            from arti_runtime.offer_withhold import route_refs
             row = session.campaign.live.seen_objects.at(location, run.call.tile)
-            if row is None:
+            if row is None or row["ref"] in route_refs(self, session, location, here, grid):
                 return None
             pinned = run.state["route_seen_walk"] = dict(ref=row["ref"], tile=list(row["tile"]), location=location, inputs=0, reads=0)
         return pinned
@@ -4769,10 +5010,15 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
         """ADR 136: a walk to a sighting takes the trip's hop (ADR 125, as FIX73F's forage): same plan, legs, reads and caps."""
         goal, session = self._active, self._skill_session
         run = session.current if session is not None else None
-        if (run is None or goal is None or not self._live7_active() or session.campaign is None or run.state.get("route_clear")
+        if (run is None or run.call.name != "jalan_ke" or goal is None or not self._live7_active()
+                or session.campaign is None or run.state.get("route_clear")
                 or not self._run_owns_goal(run, goal)):
             return None
-        pinned = self._live7_seen_target(run, pin.location)
+        here = S._wave1_xy(S._g(motor, "tile"))
+        if here is None:
+            return None
+        grid = self._nav_grid(pin)
+        pinned = self._live7_seen_target(run, pin.location, here, grid)
         if pinned is None:
             return None
         if pinned["location"] != pin.location:
@@ -4783,12 +5029,14 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
         goal.home_route_state["route_reaches"] = reaches
         entry = dict(ref="seen:%s:%d,%d" % (pin.location, *pinned["tile"]), tile=list(pinned["tile"]), kind=SEEN_WALK_KIND,
                      reach_tiles=reaches, revision=pinned["ref"])
-        return self._hop_entries(goal, pin, tuple(motor.tile), facts, self._nav_grid(pin), [entry], (pin.location, pinned["ref"]))
+        return self._hop_entries(goal, pin, here, facts, grid, [entry], (pin.location, pinned["ref"]))
 
     def _live7_seen_step(self, run, snap):
         """The walk's step, or None when this `jalan_ke` is not to a sighting. Beside the object is arrival: what is there is the next read's to say."""
         motor = snap.motor
-        pinned = self._live7_seen_target(run, motor.location)
+        pin = S._g(snap, "water_context") or S._g(snap, "movement_context")
+        grid = self._nav_grid(pin) if pin is not None else None
+        pinned = self._live7_seen_target(run, motor.location, S._wave1_xy(S._g(motor, "tile")), grid)
         if pinned is None:
             return None
         last = S._g(S._g(snap, "working_memory"), "last_action")
@@ -4805,8 +5053,7 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
         # A newly observed open stand invalidates that old refusal.
         route = getattr(self._active, "home_route_state", {}).get("route_memory", {})
         closed = {tuple(t) for t in route.get("closed", ())}
-        pin = S._g(snap, "water_context") or S._g(snap, "movement_context")
-        observed = {**route.get("seen", {}), **((self._nav_grid(pin) or {}) if pin is not None else {})}
+        observed = {**route.get("seen", {}), **(grid or {})}
         if all(tuple(t) in closed and observed.get(tuple(t)) in ("#", "s", "b")
                for t in seen_stands(pinned["tile"])):
             return S.Step("fail", reason="seen_walk_no_open_path")
@@ -4963,6 +5210,9 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
             from arti_runtime.loop_facts import load_totals, load_kinds
             c.live.catch_totals = load_totals(resume.get("catch_totals"))
             c.live.catch_kinds = load_kinds(resume.get("catch_kinds"))  # FIX73D: per-kind count across days
+            if (getattr(self, "_config", None) or {}).get("stardew_live7_press_results"):
+                from arti_runtime.press_results import load as load_press_results
+                c.live.press_results = load_press_results(resume.get("press_results"))
             from arti_runtime.travel_time import restore
             restore(c.live, resume.get("travel_trips"))
             c.live.shop_memory = ShopMemory.load(resume.get("shop_memory"))
@@ -5099,6 +5349,9 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
         return None
 
     def _live7_calls(self, session, snapshot, facts):
+        if (getattr(self, "_config", None) or {}).get("stardew_live7_local_walks") is True:
+            self._live7_local_walks_meta = ({}, None)
+            self._live7_local_walk_keys = set()
         def noted(calls, harvest):
             session.campaign.live.harvest_fact = harvest
             session._persona_harvest = dict(value=harvest, observed_ts=time.time(), date=list(session.campaign.date))
@@ -5131,18 +5384,44 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
                 context["stardew_live7_ship_on_the_way"] = True
         calls = day_plan(session.campaign.date, weekday, weather, facts, context,
                          policy=session.campaign.live, snapshot=snapshot, item_policy=ItemPolicy.from_config(self._config))
+        if (getattr(self, "_config", None) or {}).get("stardew_live7_local_walks") is True:
+            from arti_runtime import local_walks as _local_walks
+            _lw_calls, _lw_eyes, _lw_fact = _local_walks.plan(
+                snapshot, facts, context, session.campaign.live, calls,
+                native_event=self._live7_native_event())
+            self._live7_local_walks_meta = (_lw_eyes, _lw_fact)
+            self._live7_local_walk_keys = {key(c) for c in _lw_calls}
+            if _lw_calls:
+                calls = list(calls) + _lw_calls
         from arti_runtime import raw_hands
         if raw_hands.enabled(self._config):
             # ADR 243: her raw hands on every page she can move on, after every branch of the day plan.
             raw, self._live7_raw_use_why = raw_hands.world_block(snapshot, facts, context)
             calls = raw_hands.merge(calls, raw)
-        if (S._g(snapshot, "event_movement") or {}).get("is_festival") is True:
+        from arti_stardew_event_control import festival_dead_calls, festival_seated
+        # The fresh native seated state, not only a published stand (a held object withholds it). Read only on a
+        # festival map (the game's "Temp"), so every other page reads nothing new.
+        seated = festival_seated(S._g(snapshot, "event_actions")) or (
+            getattr(facts, "location", None) == "Temp" and self._live7_festival_leave_offered(snapshot, seated=True))
+        if (S._g(snapshot, "event_movement") or {}).get("is_festival") is True or seated:
             from arti_stardew_event_control import festival_walk_calls
-            here = S._wave1_xy(S._g(S._g(snapshot, "motor"), "tile"))
-            size = self._festival_map_size(S._g(snapshot, "movement_context"))
-            calls = festival_walk_calls(calls, here, size)
+            if not seated:
+                here = S._wave1_xy(S._g(S._g(snapshot, "motor"), "tile"))
+                size = self._festival_map_size(S._g(snapshot, "movement_context"))
+                calls = festival_walk_calls(calls, here, size)
+            # No offer the event motor always refuses on a festival map.
+            calls = festival_dead_calls(calls, seated=seated,
+                                        fishing=S._g(S._g(snapshot, "festival_reflex"), "state") in ("ready", "live"))
         self._live7_last_world_calls = [c for c in calls if c.name not in ("cek_jurnal", "inventori", "ui_action")]
         return noted(calls, session.campaign.live.harvest_fact)
+
+    def _live7_festival_leave_offered(self, snapshot, *, seated=False):
+        """The game's own festival leave question can be asked now (the ui.context pad Select cell).
+        ``seated``: that cell refuses it because she sits on a festival seat."""
+        from arti_stardew_event_control import festival_leave_offered, festival_pad_seated
+        pid = getattr(getattr(snapshot, "binding", None), "player_id", None)
+        rec = self._ui_key_record(pid)[0] if pid is not None and hasattr(self, "_ui_key_record") else None
+        return rec is not None and (festival_pad_seated if seated else festival_leave_offered)(getattr(rec, "facts", None))
 
     def _live7_chest_observe(self, session, snapshot, facts):
         """FIX72D: a chest native must list here and does not (she or the HOST took it up) leaves the memory."""
@@ -5620,6 +5899,17 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
             if ref:
                 run.state.update(live7_crop_ref=ref,
                                  live7_crop_length=p.crop_routes[ref].get("planned_length"))
+            if selected.name == "langkah" and pick and pick[0] == selected:
+                from arti_runtime.raw_hands import step_target
+                run.state["step_target"] = step_target((getattr(self, "_live7_mind_last", None) or {}).get("why"), context)
+            if (getattr(self, "_config", None) or {}).get("stardew_live7_local_walks") is True:
+                if selected.name == "jalan_ke" and key(selected) in getattr(self, "_live7_local_walk_keys", ()):
+                    _lw_here = S._wave1_xy(getattr(motor, "tile", None))
+                    run.state["local_walk"] = dict(
+                        location=getattr(motor, "location", None),
+                        tile=list(selected.tile) if selected.tile is not None else None,
+                        start_tile=list(_lw_here) if _lw_here is not None else None,
+                    )
             self._live7_start_baseline(run, facts, motor, context)
         threshold = self._config.get("stardew_live7_cost_alarm_calls", 24)  # notification only, once per day
         provider = getattr(self, "_provider", None)
@@ -5872,6 +6162,11 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
         p = c.live
         location = facts.location
         date = tuple(c.date)
+        if (getattr(self, "_config", None) or {}).get("stardew_live7_mail_on_the_way"):
+            from arti_runtime import mail_pause  # the flagged mailbox beside her door, once a day
+            mail = mail_pause.due(self, session, call, facts, previous, reserve=reserve)
+            if mail is not None:
+                return mail
         if (not location or location == previous or (date, location) in p.route_pauses
                 or destination_map(call.arg) == location or self._live7_route_pause_fence(p, facts) is not None):
             return None
@@ -5895,7 +6190,7 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
 
     def _live7_route_pause_start(self, session, pause):
         p = session.campaign.live
-        p.route_pauses.add((tuple(pause["date"]), pause["map"]))
+        p.route_pauses.add((tuple(pause["date"]), pause.get("once") or pause["map"]))
         p.route_pause = dict(pause)
         self._journal(dict(ev="live7_route_pause", session_id=session.session_id, **pause))
         if (getattr(self, "_config", None) or {}).get("voice_game_memory_enabled") is True:
@@ -5955,8 +6250,8 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
                                    villagers=[], villager_refs=[]))
             return None
         self._live7_route_pause_start(session, pause)
-        from arti_runtime.route_pause import ROUTE_PAUSE_PEOPLE
-        return "fail", ROUTE_PAUSE_PEOPLE
+        from arti_runtime.route_pause import ROUTE_PAUSE_MAIL, ROUTE_PAUSE_PEOPLE
+        return "fail", ROUTE_PAUSE_MAIL if pause.get("mail") else ROUTE_PAUSE_PEOPLE
 
     def _live7_reserve_pause(self, session, facts):
         """ADR 155: the clock reserve's home route runs hop by hop, each hop its own plan row. After a hop into a new map
@@ -5993,6 +6288,7 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
             weather = "rain"  # same fallback as _live7_context
         from arti_runtime.fact_names import source_names
         return dict(inventory=dict(facts.inventory), names=source_names(context), money=context.get("money"), location=facts.location,
+                    location_id=context.get("location_id"),
                     energy=facts.energy,
                     time_of_day=getattr(motor, "time_of_day", None),
                     tile=getattr(motor, "tile", None), pixel=getattr(motor, "pixel", None),
@@ -6004,6 +6300,9 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
         """The bag before this skill, journaled once it is chosen. FIX77B: with the native name of the target she chose, for its row."""
         from arti_runtime.fact_names import target_name
         base = run.state.setdefault("live7_baseline", self._live7_baseline(facts, motor, context))
+        if stay := getattr(self, "_live7_visit_open", None):
+            run.state.update(visit_start=stay["at"],
+                             visit_prior_request=S._g(S._g(self._active, "last_action"), "request_id"))
         if run.call.name == "pergi_ke":
             run.state.setdefault("travel_observed_route", [facts.location])
             if (getattr(self, "_config", None) or {}).get("voice_game_memory_enabled") is True:
@@ -6014,7 +6313,50 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
             base["names"] = {**(base.get("names") or {}), run.call.arg: name}
         self._journal(dict(ev="live7_baseline", skill=run.call.name, arg=run.call.arg, before=base))
 
-    def _live7_leg(self, session, run, outcome, cleanup):
+    def _live7_recovery_finish(self, session, run, action, cleanup, facts, motor, context):
+        """Retain a finish only on a fresh released boundary of the same run."""
+        from arti_stardew_ui_effects import same_date
+
+        identity = tuple(context.get("identity") or ())[:5]
+        if (len(identity) != 5 or identity != session.campaign.epoch
+                or not same_date(session.campaign.date, self._date_tuple(motor))
+                or S._g(self._active, "goal_id") != run.goal_id or not self._live7_recovery_open(session)):
+            return None
+        pending = run.pending
+        observed = None
+        # A mail finish adds its independently verified letter receipts.
+        mail = (pending == ("done", "observed_morning_plan_input")
+                and run.call.name == "cek_pagi" and run.call.arg in (None, "mail"))
+        if mail:
+            plan = run.state.get("plan_input") or {}
+            letters = len(plan.get("mail_receipts") or ())
+            if (not letters or letters != plan.get("letters_read") or plan.get("complete") is not True
+                    or identity != run.state.get("morning_identity")
+                    or not same_date(run.state.get("morning_date"), self._date_tuple(motor))):
+                return None
+        elif (getattr(self, "_config", None) or {}).get("stardew_live7_success_stays") is not True or action is None:
+            return None
+        if action is not None and (S._g(action, "cleanup_confirmed") is not True
+                or S._g(action, "lifecycle") not in CLEAN_LIFECYCLES
+                or S._g(action, "world_effect_status") == "unreconciled"):
+            return None
+        if pending is None:
+            from arti_stardew_fishing import released_catch
+            before = (run.state.get("live7_baseline") or {}).get("inventory")
+            catch = released_catch(self._active, action, before, facts.inventory)
+            if catch is not None:
+                why, observed = catch
+                pending = ("done", why)
+        status = "READY" if self._status == "PAUSED_RECOVERY" else self._status
+        if (pending is None or pending[0] != "done" or classify(pending, cleanup, action, status=status,
+                mutation_unresolved=self._gather_mutation_unresolved) != VERIFIED):
+            return None
+        if mail:
+            run.state["recovered_mail_letters"] = letters
+        return pending, observed
+
+    def _live7_leg(self, session, run, outcome, cleanup, *, recover_finish=None):
+        # Recovery passes True to consider a finish or False if an explicit failure owns the boundary.
         c = session.campaign
         p = c.live
         halt_interrupted = S._g(cleanup, "halt_interrupted") is True or (
@@ -6032,7 +6374,13 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
         stopped = self._worker_stop.is_set() or getattr(self, "_owner_play_stopped", False)
         identity_ok = held not in ("identity_mismatch", "crash_or_identity_unavailable")
         fence = bool(getattr(self, "_gather_mutation_unresolved", False))
-        category = classify(outcome, cleanup, action, status=self._status, stopped=stopped,
+        recovered = (self._live7_recovery_finish(session, run, action, cleanup, facts, motor, context)
+                     if recover_finish and outcome[0] == "fail" and not held and not refusal else None)
+        if recovered:
+            outcome, recovered_observation = recovered
+            run.state.pop("ui_pause", None)  # the UI hold ended on this fresh read
+        status = "READY" if self._status == "PAUSED_RECOVERY" and recovered else self._status
+        category = classify(outcome, cleanup, action, status=status, stopped=stopped,
                             identity_ok=identity_ok, mutation_unresolved=fence)
         from scripts.live7.ready_checks import sleep_cancelled
         readiness = run.state.get("generic_ui_readback") or {}
@@ -6048,7 +6396,7 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
         arrived = run.state.get("arrived_native") if outcome[0] == "done" and isinstance(cleanup, Mapping) else None
         if arrived and cleanup.get("location") == arrived["location"]:
             # ADR 105: the event froze her after the trip's own verdict. Only the free/menu terms, which are the event's, are lifted.
-            category = classify(outcome, dict(cleanup, menu=None, free=True), action, status=self._status,
+            category = classify(outcome, dict(cleanup, menu=None, free=True), action, status=status,
                                 stopped=stopped, identity_ok=identity_ok, mutation_unresolved=fence)
         if (category in (SAFETY_STOP, UNCERTAIN) and isinstance(cleanup, Mapping) and cleanup.get("menu") is not None
                 and cleanup.get("input_released") is True
@@ -6100,6 +6448,8 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
             run.state["halt_interrupted"] = True
         observed = S._g(getattr(self._active, "last_finish", None), "observed", {}) or {}
         last = getattr(self._active, "last_finish", None)
+        if recovered and recovered_observation is not None:
+            observed = recovered_observation
         if arrived and not observed:
             observed = dict(objective="enter_location", transitions=arrived["transitions"])
         cleanup_clean = (isinstance(cleanup, Mapping) and cleanup.get("input_released") is True
@@ -6171,9 +6521,10 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
             # fix54H (a39 Sp13 D0009:J959-J1319): her Yes opened no ReadyCheck. Retiring the reached bed side
             # left both sides quarantined -> bed_not_offered x8 -> pass-out. A failed sleep, not a failed approach.
             target = None
-        if category == CLEAN_FAIL and not held and not fence and outcome[1] == "goods_menu_changed":
+        if category == CLEAN_FAIL and not held and not fence and outcome[1] in ("goods_menu_changed", "chest_full"):
             # FIX73B (a54 d3 J1623-J1648, J1668, J1852): the host's gift question replaced the menu after she reached the
             # chest. Nothing was wrong with the chest; retiring it for the day ended in chest_not_offered once she stepped away.
+            # Same for chest_full: an item with an existing stack still fits, and she may still open the chest herself.
             target = None
         if run.call.name == "siram":
             target = run.state.get("water_crop_ref")  # only this run's crop can receive the failure
@@ -6237,10 +6588,27 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
             store_check = dict(chest=target, reason=outcome[1], last_action=S._g(action, "reason", None),
                                refs=set(p.refs), blocked=set(session.blocked_refs),
                                quarantine=set(p.quarantine), items=set(p.uncertain_items))
+        from arti_runtime import loop_facts, raw_hands
+        movement = run.state.get("step_movement") if run.call.name == "langkah" else None
+        if category == VERIFIED and movement and movement["kind"] == raw_hands.STILL:
+            category = NO_EFFECT
+        if recovered and category != VERIFIED:
+            run.state.pop("recovered_mail_letters", None)
+            outcome = ("fail", outcome[1])
+        if (recover_finish is not None and outcome[0] == "fail" and not unknown
+                and category not in (SAFETY_STOP, INTERRUPTED, "PARTIAL")):
+            from arti_runtime.action_outcomes import success_observation
+            if success_observation(outcome[1]):
+                run.state["recovery_observed_reason"] = outcome[1]
+                outcome = ("fail", "recovery_unverified")
+        if recovered or run.state.get("recovery_observed_reason"):
+            run.state["recovery_terminal"] = outcome
         productive = (category == VERIFIED and (bool(items) or
             after is not None and before.get("money") != after.get("money")
             or run.call.name not in ("pergi_ke", "jalan_ke", "tidur", "cek_pagi")
             and not any(token in outcome[1] for token in ("_no_", "no_effect", "already_"))))
+        if run.call.name == "langkah":
+            productive = category == VERIFIED and movement is not None and movement["kind"] == raw_hands.MOVED
         if run.call.name == "cek_pagi":
             p.note_read(run.state.get("plan_input"))
         if halt_interrupted:
@@ -6251,18 +6619,51 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
                                   reason="unplanned_ui_pause", location=location, productive=False))
             del p.history[:-8]
         else:
+            route_refused = False
+            if category == CLEAN_FAIL and not held:
+                from arti_runtime import offer_withhold
+                here = S._wave1_xy(S._g(motor, "tile"))
+                if here is not None and (ref := offer_withhold.failed_route_ref(run, outcome[1], location)):
+                    now = game_now(self)
+                    clock = self._live7_effect_clock(session, now)
+                    evidence = self._live7_effect_evidence(facts, motor, context, clock.evidence or {})
+                    self._live7_effect_watch(session, now, evidence, getattr(motor, "active_menu", None), self._date_tuple(motor))
+                    offer_withhold.bind_route(run, ref, clock, location, here, context.get("nav_grid"))
+                    route_refused = True
             if category in (CLEAN_FAIL, UNCERTAIN, NOT_READY, PRECONDITION):
                 from arti_runtime.mines_exit import note_failed
                 note_failed(p, run, location, outcome[1], context)
             loop = p.record(run.call, category, outcome[1], target=target, location=location, items=items,
                             start_location=before.get("location"), productive=productive, time_of_day=facts.time_of_day,
-                            tile=(context or {}).get("actor_tile"))
+                            tile=(context or {}).get("actor_tile"), route_refused=route_refused)
+            if (getattr(self, "_config", None) or {}).get("stardew_live7_local_walks") is True:
+                if (run.state.get("local_walk") and category == CLEAN_FAIL
+                        and outcome[1] in ("walk_blocked", "local_walk_no_open_path", "local_walk_warp_blocked")
+                        and run.call.arg and location):
+                    p.refs.add(f"local_walk:{location}:{run.call.arg}")
             if observed.get('bag_sitting') and p.history:
                 p.history[-1]['bag_sitting'] = observed['bag_sitting']
-            if category in (VERIFIED, CLEAN_FAIL):
-                from arti_runtime import loop_facts
+            if run.call.name == "langkah":
+                if category in (VERIFIED, NO_EFFECT) or (category == UNCERTAIN and movement
+                        and movement.get("transition") == "incidental"):
+                    loop_facts.note_step(p.no_effect, run.call.arg, movement,
+                                         target=run.state.get("step_target"), clock=facts.time_of_day,
+                                         keep_presses=bool((getattr(self, "_config", None) or {}).get("stardew_live7_press_results")))
+            elif category in (VERIFIED, CLEAN_FAIL):
                 loop_facts.note(p.no_effect, run.call.name, run.call.arg, reason=outcome[1], clock=facts.time_of_day,
                                 effect=loop_facts.native_effect(before, after, location, items))
+            if (getattr(self, "_config", None) or {}).get("stardew_live7_press_results"):
+                from arti_runtime import press_results
+                try:
+                    spot = press_results.note(p.press_results, run, category=category, before=before, after=after,
+                                              location=location, items=items, date=c.date, clock=facts.time_of_day,
+                                              context=context)
+                except Exception as e:  # a count never stops a settled skill
+                    spot = None
+                    self._journal(dict(ev="live7_press_results_error", at="settle", error=type(e).__name__))
+                if spot is not None:
+                    press_results.tag_no_effect(p.no_effect, run.call, spot)
+                    self._journal(dict(ev="live7_press_results", spots=press_results.export(p.press_results)))
         if fence and category == VERIFIED:
             # A native verifier settled this row's effect: the fence is resolved now.
             with self._lock:
@@ -6312,6 +6713,12 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
             p.history[-1]["note"] = "Batch tempur berakhir tanpa kill; batch berikutnya tidak berjalan; keterampilan berakhir."
         row = dict(task=c.task, skill=run.call.name, arg=run.call.arg, outcome_class=category,
                    verified=category == VERIFIED, reason=outcome[1], evidence=dict(cleanup=cleanup, observed=observed))
+        if observed_reason := run.state.get("recovery_observed_reason"):
+            row["observed_reason"] = observed_reason
+        if category == VERIFIED and (letters := run.state.get("recovered_mail_letters")):
+            row["evidence"]["observed"] = dict(observed, letters_read=letters)
+        if movement:
+            row["evidence"]["movement"] = movement
         if run.call.name == "lawan_mine":
             row["evidence"]["mines_progress"] = dict(run.state.get("mines_progress") or {})
         if unknown:
@@ -6323,6 +6730,11 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
         from arti_runtime.fact_names import source_names
         from arti_runtime.place_names import source_place
         row["evidence"]["names"] = dict(before.get("names") or {}, **source_names(context))
+        if movement is not None and movement["kind"] == raw_hands.MOVED:
+            start_tile = S._wave1_xy(movement["before"].get("tile"))
+            end_tile = S._wave1_xy((S._g(action, "after") or {}).get("tile"))
+            if start_tile is not None and end_tile is not None and start_tile != end_tile:
+                row["step_tile_changed"] = True
         from arti_runtime.fact_names import inventory_gains
         from scripts.live7.transfers import chest_moves
         if moves := chest_moves(run.state.get("chosen_transfers")):
@@ -6415,12 +6827,21 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
             p.pending_sleep = dict(row=row, observed=dict(observed),
                                    reason=S._g(last, "reason") or "observed_day_change")
         self._journal(dict(ev="part_live_row", session_id=session.session_id, day=len(c.days), **row))
+        if ((getattr(self, "_live7_visit_open", None) or getattr(self, "_live7_visit_closing", None))
+                and not held and not halt_interrupted and not stopped
+                and S._g(cleanup, "input_released") is True):
+            from arti_runtime.place_visit_result import capture, settle
+            pin = self._ui_key_context(motor.player_id)
+            with self._lock:
+                settle(self, capture(self, pin, c, motor), context, run, action, outcome, category, before, after, items)
+            self._live7_flush_visit(c)
+        result_location = arrived["location"] if recovered and arrived and row["verified"] else location
         if row["verified"] and (getattr(self, "_config", None) or {}).get("voice_game_memory_enabled") is True:
             from arti_runtime import day_record
             if (run.state.get("starting_native_event") and before.get("location") != location
                     and not (self._live7_native_event() or {}).get("event_up")):
                 row["evidence"]["left_native_event"] = True
-            day_record.skill(self, row, c.date, getattr(motor, "time_of_day", None), location,
+            day_record.skill(self, row, c.date, getattr(motor, "time_of_day", None), result_location,
                              catalog=(context or {}).get("world_knowledge"))
         if unknown:
             self._journal(dict(ev="part_live_outcome_unknown", session_id=session.session_id,
@@ -6429,14 +6850,15 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
         from arti_runtime.travel_facts import remember_trip
         if run.call.name == "pergi_ke" and category == VERIFIED:
             path = run.state.setdefault("travel_observed_route", [before.get("location")])
-            if location and path[-1] != location:
-                path.append(location)
+            if result_location and path[-1] != result_location:
+                path.append(result_location)
         if not halt_interrupted and (trip := remember_trip(
                                  p, run, ('done' if category == VERIFIED else 'fail', outcome[1]), c.date, game_now(self),
-                                 game_time=facts.time_of_day, observed_location=location,
+                                 game_time=facts.time_of_day if result_location == location else None,
+                                 observed_location=result_location,
                                  arrival_verified=not held and facts is not None and S._g(cleanup,"input_released") is True)):
             self._journal(dict(ev='travel_elapsed', origin=before.get('location'), destination=run.call.arg,
-                               observed_location=location, **trip))
+                               observed_location=result_location, **trip))
             from arti_runtime.travel_time import export
             self._journal(dict(ev='live7_travel_memory', trips=export(p)))
         if run.call.name == "lawan":
@@ -7223,6 +7645,11 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
             date=list(session.campaign.date), event_id=event.get("event_id"), credit=False)
         self._journal(dict(ev="live7_travel_interrupted", **p.interrupted_travel))
 
+    def _live7_recovery_open(self, session):
+        return not (self._action_cancel.is_set() or self._worker_stop.is_set()
+                    or getattr(self, "_owner_play_stopped", False)
+                    or self.__dict__.get("_live7_ladder_halted") == session.session_id)
+
     def _live7_recover(self, session, reason=None):
         """One bounded, nonblocking readback poll. Owner STOP can acquire the lock immediately."""
         if getattr(self, "_pause_boundary", lambda: False)():
@@ -7424,7 +7851,9 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
                 # ADR 257: her press opened the menu (its own receipt); a later input in it stayed unconfirmed and has its
                 # own FAULT. The opener closes with its proved result, never as a failure.
                 outcome = (tuple(run.pending) if reason is None and run.pending is not None and run.pending[0] == "done"
-                           and run.state.get("menu_input_unconfirmed") else ("fail", why))
+                           and run.state.get("menu_input_unconfirmed") and self._live7_recovery_open(session)
+                           else ("fail", why))
+                recover_finish = reason is None
                 if outcome[0] == "fail" and (getattr(self, "_config", None) or {}).get("live7_fact_line_enabled") is True:
                     from arti_runtime import walk_refusal  # ADR 231 part B1: an outcome she saw, not a FAULT
                     if walk_refusal.refused(self, session, run, action, state):
@@ -7433,13 +7862,19 @@ class Live7CampaignMixin(Live7RecoveryMixin, GenericUiMixin, Live7HelpMixin, Liv
                         why, reason = walk_refusal.EVENT_REASON, None
                         self.__dict__.setdefault("_live7_ui_paused", set()).add(session.session_id)
                 outcome = outcome if outcome[0] == "done" else ("fail", why)
-                self._live7_leg(session, run, outcome, state)
+                self._live7_leg(session, run, outcome, state, recover_finish=recover_finish)
                 if run.state.get("live7_outcome") == SAFETY_STOP:
                     with self._lock:
                         self._skill_end_locked(session, "held", SAFETY_STOP, "live7:" + why)
                     return 1
                 with self._lock:
-                    self._skill_close_run_locked(session, run, outcome)
+                    if session.status != "active" or session.current is not run:
+                        return 1
+                    terminal = run.state.pop("recovery_terminal", outcome)
+                    if terminal[0] == "done" and not self._live7_recovery_open(session):
+                        run.state["recovery_observed_reason"] = terminal[1]
+                        terminal = ("fail", "recovery_unverified")
+                    self._skill_close_run_locked(session, run, terminal)
             self._live7_reconcile(session, facts, motor, context)
             fence = bool(getattr(self, "_gather_mutation_unresolved", False))
             if fence and not p.fence_settled:

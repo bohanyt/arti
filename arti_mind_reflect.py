@@ -321,26 +321,36 @@ def _parse_per_field(raw, **kwargs):
 
 
 def apply(goals: Iterable[Mapping], result: Mapping, *, day: int, game: str = "", calendar=(),
-          effective_day: int | None = None, horizons=M.HORIZONS, caps=None) -> tuple[list[dict], list[dict]]:
+          effective_day: int | None = None, horizons=M.HORIZONS, caps=None,
+          scope_hash: str | None = None, legacy_map=None, reserved_ids: Iterable[str] = ()) -> tuple[list[dict], list[dict]]:
     """(rows, dropped): goal rows after the reflection on game day ``day``. New today goals are for ``day + 1``.
 
     fix13c: an open today goal she neither finished nor dropped carries into tomorrow (``carried_days`` + 1) with its
     cited evidence. FIX75C (ADR 133): no carry cap and no TTL on any horizon; a goal ends by her ``done`` with a ref,
     her ``drop``, or the logged safety cap. Caps 3/3/3 open per horizon: a new goal over its cap is refused and
     reported (``kind: new, reason: cap``, with her text, shown to her the next night), never an older one silently."""
-    rows = [M.dated_goal(g, game) for g in goals]
-    by_id = {g["id"]: g for g in rows}
+    from arti_runtime import mind_scope
+
+    is_mine = lambda r: mind_scope.row_matches_goal_scope(r, scope_hash, legacy_map)  # noqa: E731
+    rows = [M.dated_goal(g, game) if is_mine(g) else dict(g) for g in goals]
+    by_id = {g["id"]: g for g in rows if is_mine(g)}
+    taken_ids = {g["id"] for g in rows} | set(reserved_ids)
     dropped = []
     for item in result["goals"]["done"]:
-        by_id[item["id"]].update(status="done", done_ref=item["ref"], revised_on_day=day,
-                                 **({"done_evidence": item["evidence"]} if item.get("evidence") else {}))
+        if item["id"] in by_id:
+            by_id[item["id"]].update(status="done", done_ref=item["ref"], revised_on_day=day,
+                                     **({"done_evidence": item["evidence"]} if item.get("evidence") else {}))
     for goal_id in result["goals"]["drop"]:
-        by_id[goal_id].update(status="dropped", revised_on_day=day)
+        if goal_id in by_id:
+            by_id[goal_id].update(status="dropped", revised_on_day=day)
     for item in result["goals"].get("progress", ()):
-        row = by_id[item["id"]]
-        row["evidence"] = (list(row.get("evidence") or []) + [[day, item["ref"], item.get("evidence", "")]])[-EVIDENCE_KEEP:]
+        if item["id"] in by_id:
+            row = by_id[item["id"]]
+            row["evidence"] = (list(row.get("evidence") or []) + [[day, item["ref"], item.get("evidence", "")]])[-EVIDENCE_KEEP:]
     kept = set(result["goals"]["keep"])
     for row in rows:
+        if not is_mine(row):
+            continue
         if (row.get("horizon") == "today" and row.get("status") == "open"
                 and type(row.get("for_day")) is int and row["for_day"] <= day):  # a missed night still carries
             carry_to = day + 1 if effective_day is None else effective_day
@@ -351,11 +361,11 @@ def apply(goals: Iterable[Mapping], result: Mapping, *, day: int, game: str = ""
             row.pop("stale", None)
     tomorrow = day + 1 if effective_day is None else effective_day
     caps = M.GOAL_CAPS if caps is None else caps
-    counts = {h: sum(1 for g in rows if M.goal_alive(g, tomorrow) and g["horizon"] == h) for h in horizons}
+    counts = {h: sum(1 for g in rows if is_mine(g) and M.goal_alive(g, tomorrow) and g["horizon"] == h) for h in horizons}
     n = 0
     for item in result["goals"]["new"]:
         horizon = item["horizon"]
-        same = next((g for g in rows if M.goal_alive(g, tomorrow) and g["horizon"] == horizon
+        same = next((g for g in rows if is_mine(g) and M.goal_alive(g, tomorrow) and g["horizon"] == horizon
                      and g["text"].casefold() == item["text"].casefold()), None)
         if same is not None:  # her carried goal restated: one goal, not a duplicate row
             same["revised_on_day"] = day
@@ -366,21 +376,23 @@ def apply(goals: Iterable[Mapping], result: Mapping, *, day: int, game: str = ""
             continue
         n += 1
         goal_id = "%s%d-%d" % (horizon[0], tomorrow, n)
-        while goal_id in by_id:
+        while goal_id in taken_ids:
             n += 1
             goal_id = "%s%d-%d" % (horizon[0], tomorrow, n)
         row = dict(v=M.MIND_VERSION, id=goal_id, horizon=horizon, text=item["text"], status="open",
                    set_on_day=tomorrow, for_day=tomorrow if horizon == "today" else None, why_set="reflection",
-                   **({"done_when": item["done_when"]} if item.get("done_when") else {}))
+                   **({"done_when": item["done_when"]} if item.get("done_when") else {}),
+                   **({"scope_hash": scope_hash} if scope_hash is not None else {}))
         row = M.plan_dates.ground(row, game=game, authored_day=day, calendar=calendar)
         row["new_index"] = result["goals"]["new"].index(item)
         rows.append(row)
         by_id[goal_id] = row
+        taken_ids.add(goal_id)
         counts[horizon] += 1
     events = {e["id"]: e for e in calendar if isinstance(e, dict) and e.get("id")}
     for link in result.get("calendar_links", ()):
-        target = next((g for g in rows if g["id"] == link.get("id") or
-                       "new:" + str(g.get("new_index", "")) == link.get("id")), None)
+        target = next((g for g in rows if is_mine(g) and (g["id"] == link.get("id") or
+                       "new:" + str(g.get("new_index", "")) == link.get("id"))), None)
         event = events.get(link.get("ref"))
         if target is not None and event is not None:
             named = M.plan_dates.event_references(target["text"], game=game, authored_day=day,
@@ -393,17 +405,21 @@ def apply(goals: Iterable[Mapping], result: Mapping, *, day: int, game: str = ""
             target["calendar_refs"] = sorted(set(list(target.get("calendar_refs", ())) + [event["id"]]))
     for g in rows:
         g.pop("new_index", None)
-    rows, capped = M.cap_overflow(rows, tomorrow)
+    rows, capped = M.cap_overflow(rows, tomorrow, scope_hash=scope_hash, legacy_map=legacy_map)
     dropped.extend(dict(kind="goal", reason="safety_cap", id=g["id"], horizon=g["horizon"]) for g in capped)
     return rows, dropped
 
 
-def carry_stale(goals: Iterable[Mapping], *, day: int) -> list[dict]:
+def carry_stale(goals: Iterable[Mapping], *, day: int, scope_hash: str | None = None,
+                legacy_map=None) -> list[dict]:
     """Failure path: today's open goals carry to ``day + 1`` with ``stale: true``; nothing new is invented."""
+    from arti_runtime import mind_scope
+
     rows = []
     for g in goals:
         g = dict(g)
-        if (g.get("status") == "open" and g.get("horizon") == "today"
+        if (mind_scope.row_matches_goal_scope(g, scope_hash, legacy_map)
+                and g.get("status") == "open" and g.get("horizon") == "today"
                 and type(g.get("for_day")) is int and g["for_day"] <= day):
             g.update(for_day=day + 1, stale=True)
         rows.append(g)
@@ -413,20 +429,25 @@ def carry_stale(goals: Iterable[Mapping], *, day: int) -> list[dict]:
 def reflect(complete: Callable[[list, dict], str], base: Path, *, game: str, day: int, day_label: str,
             verified: list[Mapping], whys: list[str], progress: list[Any] = (), places: list[str] = (),
             effects: Mapping | None = None, now: datetime | None = None, snapshot: Mapping | None = None,
-            records: Mapping | None = None, calendar=(), native_targets=(), seen_calendar=False) -> dict:
+            records: Mapping | None = None, calendar=(), native_targets=(), seen_calendar=False,
+            scope: str | None = None, scoped: bool = False) -> dict:
     """Run one reflection and write its effects. Returns the journal row (``mind_reflection`` or
     ``mind_reflection_failed``); never raises and never writes soul or prompt text into the row."""
+    from arti_runtime import mind_scope
+
     base = Path(base)
-    goals = [M.dated_goal(g, game, calendar) for g in M.load_goals(base, game)]
+    target_hash = mind_scope.scope_hash(scope or "") if scoped else None
+    legacy_map = mind_scope.load_legacy_scopes(base, game) if scoped else None
+    goals = [M.dated_goal(g, game, calendar) for g in M.load_goals(base, game, scope=scope, scoped=scoped)]
     live = M.open_goals(goals, day)
     open_rows = [g for h in M.HORIZONS for g in live[h]]
     traits, _ = M.pick_prefs(M.load_prefs(base), game=game, tags=M.REFLECTION_TAGS)
     expired = [g for g in goals if g.get('horizon') in M.HORIZONS and g.get("status") in ("open", "expired")
                and not M.goal_alive(g, day) and g["set_on_day"] <= day and M.expired_recent(g, day)][-M.GOAL_CAPS["today"]:]
-    last_night = next((r for r in reversed(M.load_journey(base, game)) if r.get("day") == day - 1), {})
+    last_night = next((r for r in reversed(M.load_journey(base, game, scope=scope, scoped=scoped)) if r.get("day") == day - 1), {})
     payload = build_input(day_label=day_label, verified=verified, whys=whys, goals_open=open_rows,
                           prefs=traits, progress=progress, game=game, day=day, goals_expired=expired, calendar=calendar,
-                          native_targets=native_targets, likes=M.likes_lines(base, game, before_day=day),
+                          native_targets=native_targets, likes=M.likes_lines(base, game, before_day=day, scope=scope, scoped=scoped),
                           not_kept=(last_night.get("reflection") or {}).get("not_kept") or (), seen_calendar=seen_calendar)
     refs = [v["ref"] for v in payload["verified"]]
     fact_text = {v["ref"]: v["text"] for v in payload["verified"] + payload["progress"]}
@@ -436,7 +457,8 @@ def reflect(complete: Callable[[list, dict], str], base: Path, *, game: str, day
     except Exception as exc:  # noqa: BLE001 - provider or parse failure: carry, alert, invent nothing
         code = str(exc)[:60] if isinstance(exc, ReflectionError) else type(exc).__name__
         try:
-            M.save_goals(base, game, carry_stale(goals, day=day))
+            M.save_goals(base, game, carry_stale(goals, day=day, scope_hash=target_hash, legacy_map=legacy_map),
+                         scope=scope, scoped=scoped)
         except (OSError, ValueError):
             code += "|goals_unwritten"
         return dict(ev="mind_reflection_failed", game=game, day=day, date=day_label, code=code,
@@ -467,7 +489,9 @@ def reflect(complete: Callable[[list, dict], str], base: Path, *, game: str, day
             link = dict(link, id="new:" + str(match))
         safe_links.append(link)
     result["calendar_links"] = safe_links
-    rows, cap_dropped = apply(goals, result, day=day, game=game, calendar=calendar)
+    reserved = M.all_goal_ids(base, game) if scoped else ()
+    rows, cap_dropped = apply(goals, result, day=day, game=game, calendar=calendar,
+                              scope_hash=target_hash, legacy_map=legacy_map, reserved_ids=reserved)
     dropped += cap_dropped
     not_kept = [dict(horizon=d["horizon"], text=d["text"]) for d in cap_dropped if d.get("reason") == "cap" and d.get("text")]
     stamp = (now or datetime.now().astimezone()).isoformat(timespec="seconds")
@@ -485,11 +509,11 @@ def reflect(complete: Callable[[list, dict], str], base: Path, *, game: str, day
                                    tomorrow=result["tomorrow"],
                                    tomorrow_dates=sorted(set(M.plan_dates.references(result["tomorrow"], game=game, authored_day=day, calendar=calendar)
                                        + M.plan_dates.linked_days(result["calendar_links"], "tomorrow", game=game, calendar=calendar)))))
-    history_trimmed = M.save_goals(base, game, rows)
-    M.save_journey_row(base, game, journey)
+    history_trimmed = M.save_goals(base, game, rows, scope=scope, scoped=scoped)
+    M.save_journey_row(base, game, journey, scope=scope, scoped=scoped)
     try:  # FIX75C: her fun / not_fun claims become dated memory; the goals and journey never wait on this file
         likes = M.save_likes(base, game, day=day, day_label=day_label, fun=result["fun"], not_fun=result["not_fun"],
-                             evidence=fact_text)
+                             evidence=fact_text, scope=scope, scoped=scoped)
     except (OSError, ValueError) as exc:
         likes = dict(saved=0, trimmed=0, error=type(exc).__name__)
     new_ids = [g["id"] for g in rows if g.get("set_on_day") == day + 1 and g.get("why_set") == "reflection"]
@@ -500,6 +524,7 @@ def reflect(complete: Callable[[list, dict], str], base: Path, *, game: str, day
                     **({"evidence": g["evidence"][-1][2]} if g.get("evidence") else {}))
                for g in alive if M.goal_age_days(g, tomorrow) >= 1]
     closed = [d["id"] for d in result["goals"]["done"] if str(d.get("evidence") or "").strip()]
+    unscoped = M.unscoped_counts(base, game) if scoped else None
     return dict(ev="mind_reflection", game=game, day=day, date=day_label, input_bytes=_size(payload),
                 verified_refs=len(refs), progress_refs=len(payload["progress"]), carried=carried,
                 progressed=result["goals"]["progress"], kept_fun=len(result["fun"]), kept_not_fun=len(result["not_fun"]),
@@ -511,4 +536,5 @@ def reflect(complete: Callable[[list, dict], str], base: Path, *, game: str, day
                 oldest_age_days=max((M.goal_age_days(g, tomorrow) for g in alive), default=None),
                 dropped_by_her=len(result["goals"]["drop"]), closed_with_evidence=closed,
                 capped=[d["id"] for d in cap_dropped if d.get("reason") == "safety_cap"],
-                history_trimmed=history_trimmed, likes=likes)
+                history_trimmed=history_trimmed, likes=likes,
+                **({"unscoped_rows": unscoped} if unscoped and any(unscoped.values()) else {}))

@@ -6,10 +6,15 @@ No launcher path is invented: her VTS is the second instance on port 8002.
 from __future__ import annotations
 
 from collections import namedtuple
+import csv
+import json
+import math
 from pathlib import Path
 import os
+import re
 import shutil
 import subprocess
+import time
 
 Check = namedtuple("Check", "status name detail")
 
@@ -23,7 +28,25 @@ LAUNCH_BUDGET_GB = dict(farmhand=3.0, host=1.5, voice=3.5, solo=8.0)
 HEADROOM_RESERVE_GB = 3.0
 PHYSICAL_MIN_GB = 6.0
 HARD_HEADROOM_GB = 1.5  # stay-hard: stop launching anything, including our own tools
-_HEADROOM_OMIT = object()
+_OMIT = object()
+_HEADROOM_OMIT = _OMIT
+PROBE_TIMEOUT_S = 3.0
+DISK_PROBE_TIMEOUT_S = 10.0  # a cold first probe can outlast 3 s and read UNKNOWN
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+GAME_EXES = ("StardewModdingAPI.exe", "Stardew Valley.exe")
+GPU_PREFS_KEY = r"Software\Microsoft\DirectX\UserGpuPreferences"
+DISPLAY_CLASS_KEY = r"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}"
+GPU_FIX_STEPS = (
+    "Windows Settings -> System -> Display -> Graphics -> add StardewModdingAPI.exe and "
+    "Stardew Valley.exe from the game folder -> Options -> High performance"
+)
+DISK_ACTIVE_WARN_PCT = 60.0
+EARS_GPU_LIBS = (
+    ("cublas64_12.dll",),
+    ("cublasLt64_12.dll",),
+    ("cudnn64_9.dll", "cudnn_ops64_9.dll", "cudnn_ops_infer64_8.dll"),
+)
+STARDEW_SEASONS = ("spring", "summer", "fall", "winter")
 VTS_HOW = (
     "start the second VTS instance (Window 2) so its API listens on port {port}; "
     "this repo has no VTS launcher"
@@ -158,6 +181,10 @@ def evaluate_checks(
     runtime_gaps=None,
     vts_window1_ok=None,
     private_state=None,
+    gpu_state=_OMIT,
+    disk_active_pct=_OMIT,
+    ears_state=_OMIT,
+    save_date=_OMIT,
 ):
     """Pure verdicts. `alert_keys` is [(ENV_NAME, length_or_0), ...]. `embed` from probe_embedding_endpoints.
 
@@ -167,6 +194,7 @@ def evaluate_checks(
     skip_memory: a rejoin with both games up skips every memory gate (percent and GB).
     memory_snapshot: injected GB snapshot (tests never read the machine). Omitted: no headroom line
     (old callers). None: WARN UNKNOWN. A dict: the GB rule beside the 85% check.
+    gpu_state / disk_active_pct / ears_state / save_date: omitted for old callers; WARN at worst, never BLOCKER.
     """
     checks = []
     if runtime_gaps is not None:
@@ -316,6 +344,15 @@ def evaluate_checks(
                 "Codex weekly share left %.0f%% (used %.0f%%)" % (
                     float(voice_supply["left_percent"]), float(voice_supply.get("used_percent") or 0)),
             ))
+
+    if gpu_state is not _OMIT:
+        checks.append(gpu_check(gpu_state))
+    if disk_active_pct is not _OMIT:
+        checks.append(disk_active_check(disk_active_pct))
+    if ears_state is not _OMIT:
+        checks.append(ears_check(ears_state))
+    if save_date is not _OMIT:
+        checks.append(save_date_check(save_date))
     return checks
 
 
@@ -384,7 +421,8 @@ def run_preflight(a, *, root, print_fn=print, porcelain_fn=None, ignored_fn=None
                   watcher_fn=None, alert_fn=None, dll_fn=None, env=None,
                   memory_fn=None, disk_fn=None, voice_supply_fn=None,
                   memory_snapshot_fn=None, skip_memory=False, launch=None, runtime_fn=None,
-                  vts_window1_fn=None, private_fn=None):
+                  vts_window1_fn=None, private_fn=None, gpu_fn=None, disk_active_fn=None,
+                  ears_fn=None, save_date_fn=None, skip_disk_active=False):
     """Gather + print + return 1 on BLOCKER. Every gather fn is injectable (tests: fakes only)."""
     env = env if env is not None else os.environ
     root = Path(root)
@@ -414,6 +452,7 @@ def run_preflight(a, *, root, print_fn=print, porcelain_fn=None, ignored_fn=None
     dll_ok, dll_detail = (dll_fn or (lambda: (False, "booking/DLL unread")))()
     api_voice = bool(getattr(a, "api_voice", None))
     skip_memory = bool(skip_memory or getattr(a, "skip_memory", False))
+    skip_disk_active = bool(skip_disk_active or skip_memory or getattr(a, "skip_disk_active", False))
     launch = launch or getattr(a, "launch", None) or "farmhand"
     snapshot = _HEADROOM_OMIT
     memory_pct = None
@@ -456,6 +495,37 @@ def run_preflight(a, *, root, print_fn=print, porcelain_fn=None, ignored_fn=None
         except Exception:
             voice_supply = dict(error="unreadable")
 
+    gpu_state = _OMIT
+    if gpu_fn is not None:
+        try:
+            gpu_state = gpu_fn()
+        except Exception as exc:
+            gpu_state = dict(ok=None, error=type(exc).__name__)
+
+    disk_active_pct = _OMIT
+    if disk_active_fn is not None:
+        if skip_disk_active:
+            disk_active_pct = dict(skipped=True)
+        else:
+            try:
+                disk_active_pct = disk_active_fn()
+            except Exception:
+                disk_active_pct = None
+
+    ears_state = _OMIT
+    if ears_fn is not None:
+        try:
+            ears_state = ears_fn()
+        except Exception as exc:
+            ears_state = dict(ok=None, error=type(exc).__name__)
+
+    save_date = _OMIT
+    if save_date_fn is not None:
+        try:
+            save_date = save_date_fn()
+        except Exception as exc:
+            save_date = dict(error=type(exc).__name__)
+
     checks = evaluate_checks(
         dirty_names=dirty, scratch_outside=scratch_outside, scratch_path=scratch_path,
         tmp_ignored=tmp_ignored, vts_ok=vts_ok, vts_port=vts_port, no_vts=no_vts,
@@ -467,6 +537,10 @@ def run_preflight(a, *, root, print_fn=print, porcelain_fn=None, ignored_fn=None
         runtime_gaps=None if runtime_fn is None else list(runtime_fn()),
         vts_window1_ok=None if (vts_window1_fn is None or no_vts or vts_ok) else bool(vts_window1_fn()),
         private_state=None if private_fn is None else list(private_fn()),
+        gpu_state=gpu_state,
+        disk_active_pct=disk_active_pct,
+        ears_state=ears_state,
+        save_date=save_date,
     )
     for check in checks:
         print_fn(format_check(check))
@@ -563,3 +637,340 @@ def _default_disk_free():
 def default_voice_supply():
     from scripts.livepath.codex_usage import read_codex_weekly
     return read_codex_weekly()
+
+
+def _norm_win_path(path):
+    return re.sub(r"\\+", r"\\", str(path).replace("/", "\\").strip()).rstrip("\\").lower()
+
+
+# ------------------------------------------------------------------ GPU graphics preference & adapters
+
+def parse_gpu_preference(raw):
+    """Parse a Windows UserGpuPreferences value (e.g. 'GpuPreference=2;') into an int or None."""
+    if not isinstance(raw, str):
+        return None
+    for part in raw.split(";"):
+        if "=" not in part:
+            continue
+        key, val = part.split("=", 1)
+        if key.strip().lower() == "gpupreference":
+            val = val.strip()
+            return int(val) if val.isdigit() else None
+    return None
+
+
+def _gpu_pref_label(pref):
+    if pref == 2:
+        return "high performance"
+    if pref == 1:
+        return "power saving"
+    if pref == 0:
+        return "system default"
+    if pref is None:
+        return "unset"
+    return "pref=%s" % pref
+
+
+def parse_gpu_state(prefs_map, adapters, game_dir):
+    """Pure: evaluate Windows per-application GPU preferences and adapter names for the two game executables."""
+    if not isinstance(prefs_map, dict) or not isinstance(adapters, (list, tuple)):
+        return dict(ok=None, error="unreadable")
+    adapter_names = list(dict.fromkeys(str(a).strip() for a in adapters if str(a or "").strip()))
+    if not adapter_names:
+        return dict(ok=None, error="no display adapters")
+    if not game_dir or not str(game_dir).strip():
+        return dict(ok=None, error="no game folder")
+    norm_prefs = {_norm_win_path(k): v for k, v in prefs_map.items() if k is not None}
+    base = str(game_dir).rstrip("\\/")
+    exes = {}
+    for exe in GAME_EXES:
+        key = _norm_win_path(base + "\\" + exe)
+        exes[exe] = parse_gpu_preference(norm_prefs.get(key))
+    single = len(adapter_names) == 1
+    all_high = all(exes[exe] == 2 for exe in GAME_EXES)
+    return dict(ok=(single or all_high), single_adapter=single, adapters=adapter_names, exes=exes)
+
+
+def _read_user_gpu_preferences(timeout=PROBE_TIMEOUT_S):
+    """Read HKCU UserGpuPreferences via winreg. Missing key -> empty dict."""
+    import winreg
+    deadline = time.monotonic() + min(float(timeout), PROBE_TIMEOUT_S)
+    prefs = {}
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, GPU_PREFS_KEY) as key:
+            idx = 0
+            while True:
+                if time.monotonic() > deadline:
+                    raise TimeoutError("gpu_prefs_timeout")
+                try:
+                    name, val, _ = winreg.EnumValue(key, idx)
+                except OSError:
+                    break
+                prefs[str(name)] = val
+                idx += 1
+    except FileNotFoundError:
+        return {}
+    return prefs
+
+
+def _read_display_adapters(timeout=PROBE_TIMEOUT_S):
+    """Read display adapter names (DriverDesc only) from the Windows display class registry key."""
+    import winreg
+    deadline = time.monotonic() + min(float(timeout), PROBE_TIMEOUT_S)
+    adapters = []
+    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, DISPLAY_CLASS_KEY) as key:
+        idx = 0
+        while True:
+            if time.monotonic() > deadline:
+                raise TimeoutError("gpu_adapters_timeout")
+            try:
+                sub = winreg.EnumKey(key, idx)
+            except OSError:
+                break
+            idx += 1
+            if not sub.isdigit():
+                continue
+            try:
+                with winreg.OpenKey(key, sub) as subkey:
+                    desc, _ = winreg.QueryValueEx(subkey, "DriverDesc")
+                    if isinstance(desc, str) and desc.strip():
+                        adapters.append(desc.strip())
+            except OSError:
+                continue
+    return adapters
+
+
+def probe_gpu(game_dir, *, prefs_fn=None, adapters_fn=None, timeout=PROBE_TIMEOUT_S):
+    """Read per-app Windows graphics preferences and adapter names. Bounded (3 s); never raises."""
+    try:
+        bound = min(float(timeout), PROBE_TIMEOUT_S)
+        prefs = (prefs_fn or (lambda: _read_user_gpu_preferences(bound)))()
+        adapters = (adapters_fn or (lambda: _read_display_adapters(bound)))()
+        return parse_gpu_state(prefs, adapters, game_dir)
+    except Exception as exc:
+        return dict(ok=None, error=type(exc).__name__)
+
+
+def gpu_check(gpu_state):
+    """Pure verdict for GPU graphics preference and display adapters. WARN at worst, never BLOCKER."""
+    if not isinstance(gpu_state, dict) or gpu_state.get("error") or gpu_state.get("ok") is None:
+        why = (gpu_state or {}).get("error") if isinstance(gpu_state, dict) else "unreadable"
+        return Check("WARN", "gpu", "UNKNOWN graphics preference (%s)" % (why or "unreadable"))
+    adapters = [str(a).strip() for a in (gpu_state.get("adapters") or ()) if str(a or "").strip()]
+    adapters_str = ", ".join(adapters) if adapters else "none"
+    if gpu_state.get("single_adapter"):
+        return Check("OK", "gpu", "1 adapter (%s)" % adapters_str)
+    if gpu_state.get("ok"):
+        return Check(
+            "OK", "gpu",
+            "high performance set for %s and %s; adapters: %s" % (GAME_EXES[0], GAME_EXES[1], adapters_str),
+        )
+    exes = gpu_state.get("exes") or {}
+    states = ", ".join("%s=%s" % (exe, _gpu_pref_label(exes.get(exe))) for exe in GAME_EXES)
+    return Check("WARN", "gpu", "%s; adapters: %s; fix: %s" % (states, adapters_str, GPU_FIX_STEPS))
+
+
+# ------------------------------------------------------------------ system disk active time
+
+def parse_disk_active_csv(text):
+    """Parse typeperf PDH-CSV counter output into system disk active percent (0..100) or None."""
+    if not isinstance(text, str) or not text.strip():
+        return None
+    is_idle = None
+    samples = []
+    for row in csv.reader(text.splitlines()):
+        if len(row) < 2:
+            continue
+        c0, c1 = row[0].strip(), row[1].strip()
+        if is_idle is None:
+            if "pdh-csv" in c0.lower() or "%" in c1:
+                is_idle = "idle" in c1.lower()
+            continue
+        try:
+            val = float(c1)
+        except ValueError:
+            continue
+        if not math.isfinite(val) or val < 0.0:
+            continue
+        active = (100.0 - val) if is_idle else val
+        samples.append(max(0.0, min(100.0, active)))
+    if not samples:
+        return None
+    return sum(samples) / len(samples)
+
+
+def probe_disk_active(*, drive=None, timeout=DISK_PROBE_TIMEOUT_S, run_fn=None):
+    """Sample system disk active time without a console window. Bounded (10 s); never raises."""
+    try:
+        sys_drive = (drive or os.environ.get("SystemDrive") or "C:").strip().rstrip("\\")
+        if not sys_drive.endswith(":"):
+            sys_drive += ":"
+        counter = r"\LogicalDisk(%s)\%% Idle Time" % sys_drive
+        runner = run_fn or subprocess.run
+        result = runner(
+            ["typeperf", counter, "-sc", "1"],
+            capture_output=True,
+            text=True,
+            stdin=subprocess.DEVNULL,
+            timeout=min(float(timeout), DISK_PROBE_TIMEOUT_S),
+            creationflags=NO_WINDOW,
+        )
+        if getattr(result, "returncode", 1) != 0:
+            return None
+        return parse_disk_active_csv(getattr(result, "stdout", ""))
+    except Exception:
+        return None
+
+
+def disk_active_check(disk_active_pct):
+    """Pure verdict for system disk active percent. WARN from 60%, UNKNOWN as WARN, never BLOCKER."""
+    if isinstance(disk_active_pct, dict):
+        if disk_active_pct.get("skipped"):
+            return Check("OK", "disk_active", "skipped (game up; no sampling load)")
+        disk_active_pct = disk_active_pct.get("percent")
+    if disk_active_pct is None or isinstance(disk_active_pct, bool):
+        return Check("WARN", "disk_active", "UNKNOWN system disk active time")
+    try:
+        pct = float(disk_active_pct)
+    except (TypeError, ValueError):
+        return Check("WARN", "disk_active", "UNKNOWN system disk active time")
+    if not math.isfinite(pct) or pct < 0.0 or pct > 100.0:
+        return Check("WARN", "disk_active", "UNKNOWN system disk active time")
+    if pct >= DISK_ACTIVE_WARN_PCT:
+        return Check("WARN", "disk_active", "system disk active %.0f%% (warn from %.0f%%)" % (pct, DISK_ACTIVE_WARN_PCT))
+    return Check("OK", "disk_active", "system disk active %.0f%%" % pct)
+
+
+# ------------------------------------------------------------------ voice speech-recognition GPU libraries
+
+def ears_search_dirs(venv_dir, env=None):
+    """DLL search directories the voice runtime uses for GPU speech recognition."""
+    venv = Path(venv_dir)
+    site = venv / "Lib" / "site-packages"
+    dirs = [
+        site / "nvidia" / "cublas" / "bin",
+        site / "nvidia" / "cudnn" / "bin",
+        site / "ctranslate2",
+        venv / "Scripts",
+    ]
+    raw_path = (env if env is not None else os.environ).get("PATH", "")
+    for entry in str(raw_path).split(os.pathsep):
+        cleaned = entry.strip().strip('"')
+        if cleaned:
+            dirs.append(Path(cleaned))
+    return dirs
+
+
+def probe_ears(venv_dir, *, env=None, timeout=PROBE_TIMEOUT_S):
+    """Check whether GPU speech-recognition library files exist on the voice runtime's path.
+
+    Never imports speech-recognition packages, never loads a model, never starts voice. Bounded (3 s); never raises.
+    """
+    try:
+        if not venv_dir:
+            return dict(ok=None, error="no voice venv path")
+        venv = Path(venv_dir)
+        if not (venv / "Scripts" / "python.exe").is_file():
+            return dict(ok=None, error="voice venv missing")
+        if not (venv / "Lib" / "site-packages" / "ctranslate2").is_dir():
+            return dict(ok=None, error="ctranslate2 not found in voice venv")
+        deadline = time.monotonic() + min(float(timeout), PROBE_TIMEOUT_S)
+        present = set()
+        seen_dirs = set()
+        for folder in ears_search_dirs(venv, env=env):
+            if time.monotonic() > deadline:
+                return dict(ok=None, error="timeout")
+            key = _norm_win_path(folder)
+            if key in seen_dirs:
+                continue
+            seen_dirs.add(key)
+            try:
+                if not folder.is_dir():
+                    continue
+                with os.scandir(folder) as entries:
+                    for entry in entries:
+                        if entry.name.lower().endswith(".dll"):
+                            present.add(entry.name.lower())
+            except OSError:
+                continue
+        found, missing = [], []
+        for group in EARS_GPU_LIBS:
+            hit = next((name for name in group if name.lower() in present), None)
+            if hit is not None:
+                found.append(hit)
+            else:
+                missing.append(group[0])
+        return dict(ok=(not missing), found=found, missing=missing)
+    except Exception as exc:
+        return dict(ok=None, error=type(exc).__name__)
+
+
+def ears_check(ears_state):
+    """Pure verdict for voice GPU speech-recognition libraries. WARN at worst, never BLOCKER."""
+    if not isinstance(ears_state, dict) or ears_state.get("error") or ears_state.get("ok") is None:
+        why = (ears_state or {}).get("error") if isinstance(ears_state, dict) else "unreadable"
+        return Check("WARN", "ears", "UNKNOWN speech recognition GPU state (%s)" % (why or "unreadable"))
+    if ears_state.get("ok"):
+        found = ", ".join(str(x) for x in (ears_state.get("found") or ()))
+        detail = "GPU speech recognition libraries found (%s)" % found if found else "GPU speech recognition libraries found"
+        return Check("OK", "ears", detail)
+    missing = ", ".join(str(x) for x in (ears_state.get("missing") or ()))
+    suffix = " (missing %s)" % missing if missing else ""
+    return Check("WARN", "ears", "speech recognition will run on the CPU%s" % suffix)
+
+
+# ------------------------------------------------------------------ continued save recorded date
+
+def _pos_int(val):
+    if isinstance(val, bool):
+        return None
+    if isinstance(val, int):
+        return val if val > 0 else None
+    if isinstance(val, str) and val.strip().isdigit():
+        n = int(val.strip())
+        return n if n > 0 else None
+    return None
+
+
+def parse_continued_save_date(data):
+    """Pure: extract the recorded in-game date from a continued.json dictionary."""
+    if not isinstance(data, dict):
+        return dict(continued=True, error="invalid continued.json")
+    season_raw = data.get("season")
+    season = season_raw.strip().lower() if isinstance(season_raw, str) else ""
+    day = _pos_int(data.get("day"))
+    year = _pos_int(data.get("year"))
+    if season not in STARDEW_SEASONS or day is None or day > 28 or year is None:
+        return dict(continued=True, error="no recorded in-game date")
+    return dict(continued=True, year=year, season=season, day=day)
+
+
+def probe_save_date(run):
+    """Read recorded in-game date from run/continued.json only. Never opens anything in Saves. Never raises."""
+    try:
+        if run is None:
+            return dict(error="no run folder")
+        path = Path(run) / "continued.json"
+        if not path.is_file():
+            return dict(continued=False)
+        data = json.loads(path.read_text(encoding="utf-8-sig"))
+        return parse_continued_save_date(data)
+    except Exception as exc:
+        return dict(continued=True, error=type(exc).__name__)
+
+
+def save_date_check(save_date):
+    """Pure verdict for the prepared continued save's recorded in-game date. WARN at worst, never BLOCKER."""
+    if not isinstance(save_date, dict):
+        return Check("WARN", "save_date", "UNKNOWN (unreadable)")
+    if save_date.get("error"):
+        return Check("WARN", "save_date", "UNKNOWN (%s)" % save_date["error"])
+    if save_date.get("continued") is False:
+        return Check("OK", "save_date", "not a continued run (no continued.json)")
+    parsed = parse_continued_save_date(save_date)
+    if parsed.get("error"):
+        return Check("WARN", "save_date", "UNKNOWN (%s)" % parsed["error"])
+    return Check(
+        "OK", "save_date",
+        "Year %d %s %d (from continued.json)" % (parsed["year"], parsed["season"].capitalize(), parsed["day"]),
+    )

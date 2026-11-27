@@ -43,6 +43,11 @@ public sealed partial class ModEntry
         var graph = new GenericGraph { Root = root, Dispatch = root };
         var childSeen = new HashSet<IClickableMenu>(ReferenceEqualityComparer.Instance);
         while (graph.Dispatch.GetChildMenu() is { } child && childSeen.Add(graph.Dispatch)) graph.Dispatch = child;
+        if (NativeJunimoUi.Unreadable(graph.Dispatch))
+        {
+            graph.Text.Add(NativeJunimoUi.UnreadableText);
+            return graph;
+        }
         IClickableMenu owner = CurrentInteractiveMenu(graph.Dispatch) ?? graph.Dispatch;
         var seen = new HashSet<object>(ReferenceEqualityComparer.Instance);
         var components = new List<(ClickableComponent Component, string Path)>();
@@ -270,6 +275,12 @@ public sealed partial class ModEntry
         // PM-1 fix14d (a21 d1:J245-1174): the same predicate PrepareGenericUiFrame refuses a close with (NeedsChoice),
         // published so the arm never offers a B the motor will refuse. A question's answers / Escape-hotkey decline stay.
         values["ui_required_choice"] = GenericRequiredChoice(graph);
+        if (graph.Dispatch is JunimoNoteMenu { scrambledText: true } unreadable)
+        {
+            values["ui_unreadable"] = true;
+            if (!JunimoNoteMenu.canClick || UiPadReadyToClose(unreadable) != true)
+                values["ui_close_blocked"] = "not_ready_to_close";
+        }
         var readyDialog = graph.Dispatch as ReadyCheckDialog;
         string? checkName = readyDialog?.checkName ?? readyCheckName;
         if (checkName is not null)
@@ -388,7 +399,8 @@ public sealed partial class ModEntry
             && (prose || this.nightEnding || !Game1.globalFade && !Game1.fadeToBlack);
         var facts = new GenericUiSafetyFacts(barrier, choice, graph.Widgets.Any(w => w.TextBox is not null),
             loot, held is not null, !choice && !loot && (prose || singleOk), ready,
-            singleOk ? buttons[0].Id : -1, graph.Widgets.Any(w => w.Kind == "close" && GenericWidgetVisible(w)));
+            singleOk ? buttons[0].Id : -1, graph.Widgets.Any(w => w.Kind == "close" && GenericWidgetVisible(w))
+                || NativeJunimoUi.Unreadable(menu) && JunimoNoteMenu.canClick && UiPadReadyToClose(menu) == true);
         return GenericUiSafety.NightProgression(facts, this.nightEnding && this.nightLedger?.Pending.plan is not null,
             graph.Widgets.Select(w => new UiPadComponent(w.Id, w.Kind, w.Label,
                 Visible: GenericWidgetVisible(w), X: w.Bounds.X, Y: w.Bounds.Y,

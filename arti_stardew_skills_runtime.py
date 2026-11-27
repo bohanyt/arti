@@ -223,6 +223,8 @@ class SkillSession:
     boundary_page: tuple | None = None
     boundary_budget: int = 16128
     boundary_reads: int = 0  # fix56B: read-only pages taken inside the current decision
+    notes_read: set = field(default_factory=set)  # digests of the note rows she has read this session
+    notes_unread: list | None = None  # the unread rows behind the page being asked
     page_budget: _page_budget.PageBudget = _page_budget.DEFAULT
 
     def report(self) -> dict:
@@ -1425,6 +1427,26 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
                        "n": run.decisions, "kind": "act", "operation": "approach_target", "target": target_ref,
                        "chained": True, "at": time.time()})
 
+    def _skill_mail_readback(self, snapshot):
+        """Read the queue from the same closed native context as the current motor."""
+        pid = snapshot.binding.player_id
+        rec, _ = self._ui_key_record(pid)
+        pin = snapshot.water_context or snapshot.movement_context
+        motor = self._capture_motor_basis(snapshot)
+        if (pin is None or motor is None or snapshot.motor.status != "current"
+                or snapshot.event_movement is not None
+                or motor.active_menu is not None or motor.can_player_move is not True
+                or rec is None or rec.session_id != pin.observation_session_id
+                or rec.facts.get("mode") != "gameplay" or rec.player_id != pin.player_id
+                or rec.screen_id != pin.screen_id
+                or any(rec.facts.get(k) != v for k, v in dict(runtime_instance_id=pin.runtime_instance_id,
+                    session_id=pin.command_session_id, location_id=pin.location,
+                    context_generation=pin.context_generation, ui_revision=motor.ui_revision).items())):
+            return {}
+        return dict(mailbox_count=rec.facts.get("mailbox_count"), ui_domain_revision=rec.domain_revision,
+                    context_generation=pin.context_generation, identity=(pin.runtime_instance_id, pin.command_session_id,
+                        pin.observation_session_id, pin.player_id, pin.screen_id, pin.location))
+
     def _skill_effect_watchdog(self, run, goal, motor):
         """R8: rules can turn forever despite Live7's unlimited cost envelope.
 
@@ -1458,10 +1480,12 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
             readiness = getattr(view, "ready_check", None)
             if readiness is not None:
                 bed_waiting = readiness.get("check") == "sleep" and readiness.get("local_ready") is True
-        if bed_waiting:
-            # Current native menu + verified Yes own this decision, not the possibly
+        human_ready_waiting = (session is not None and hasattr(self, "_live7_human_ready_waiting")
+                               and self._live7_human_ready_waiting(session))
+        if bed_waiting or human_ready_waiting:
+            # Current native menu + verified readiness own this decision, not the possibly
             # blank menu cached at follow-done. Suspend only the game-minute guard.
-            # Inputs remain bounded; rollover/cancellation immediately rearms time.
+            # Inputs remain bounded; rollover/cancellation/stale facts immediately rearm time.
             mark["minute"] = minute
         if (getattr(self, "_stage_lock_last", None) and self._stage_lock_holds()
                 and self._stage_lock_last in ("item_to_toolbar", "combat_weapon_stage")):
@@ -1484,6 +1508,17 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
             "observed_extras_effect", "observed_tool_effect", "observed_item_pickup",
             "observed_location_change", "observed_paired_transfer", "observed_monster_killed",
             "observed_eat_effect", "observed_purchase", "observed_craft", "observed_event_effect", "observed_fish_caught"}
+        handoff = run.state.get("mail_handoff")
+        if (handoff is not None and handoff["request_id"] != mark.get("mail_request")
+                and skills._g(motor, "active_menu") is None):
+            from arti_stardew_skills_ui import mail_close_current
+            snapshot = self._build_decision_snapshot(goal)
+            context = self._skill_mail_readback(snapshot)
+            if (mail_close_current(run.state, context, snapshot.motor)
+                    and type(context.get("mailbox_count")) is int
+                    and context["mailbox_count"] == run.state["mail_unread_before"] - 1):
+                mark["mail_request"] = handoff["request_id"]
+                verified = True
         if verified and effect == "observed_location_change":
             verified = travels or run.state.get("wave1_driver") == "exit"
         if run.call.name in skills.MINES_SKILLS:
@@ -1792,6 +1827,11 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
         return skills.Step("fail", reason="mine_recovery_failed:" + blocker) if blocker else skills.Step(
             "decision", dict(skills.INSPECT, question="mine recovery: observe native exit"))
 
+    def _skill_attempt_ui_view(self, player_id):
+        """Project the UI pad onto the attempt planner's modal view."""
+        view = self._ui_pad_view(player_id)
+        return None if view is not None and getattr(view, "hud", False) else view
+
     def _skill_wave1_step(self, run, goal, request):
         """Compose existing planners/rules; admission/cleanup remain authoritative."""
         snap, state = request.snapshot, run.state
@@ -1815,6 +1855,11 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
             from arti_runtime.collection_facts import pickup_refusals, harvest_refusals
             refused = pickup_refusals if run.call.name == "forage" else harvest_refusals
             excluded = self._skill_session.campaign.live.refs | refused(context, context.get("bag_free_slots") == 0)
+            if run.call.name == "forage":
+                from arti_runtime.offer_withhold import route_refs
+                motor = snap.motor
+                excluded |= route_refs(self, self._skill_session, motor.location,
+                                       skills._wave1_xy(motor.tile), context.get("nav_grid"))
             context = dict(context, targets={ref: f for ref, f in context.get("targets", {}).items()
                                             if ref not in excluded},
                            extras=[e for e in context.get("extras", ()) if e.get("ref") not in excluded])
@@ -1851,7 +1896,7 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
             import arti_stardew_skills_attempts as attempts
             context["publications"] = self._physical_action_publications
             if run.call.name == "masak" and not state.get("wave1_driver") and context.get("ui_complete"):
-                context["ui_view"] = self._ui_pad_view(snap.binding.player_id)  # W1 gap B3 S30: the cooking page
+                context["ui_view"] = self._skill_attempt_ui_view(snap.binding.player_id)  # the cooking page the attempt reads
             if state.get("wave1_driver") == "attempt_travel":
                 return attempts.leg_step(state, skills.plan_step(skills.SkillCall("pergi_ke", "farm"), snap, state=state))
             if not state.get("wave1_driver"):
@@ -1861,7 +1906,7 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
                     context["upgrade_policy"] = policy.allow_tool_upgrade
                     context["disposal_refusals"] = {f.get("qualified_item_id"): policy.refuse_gift(
                         "sell", f.get("qualified_item_id"), None) for f in context.get("inventory", ())}
-                    context["ui_view"] = self._ui_pad_view(snap.binding.player_id)
+                    context["ui_view"] = self._skill_attempt_ui_view(snap.binding.player_id)
                 return attempts.plan(run.call, snap, state, context)
         if run.call.name == "cek_pagi" and state.get("wave1_driver") == "morning_farm":
             return skills.plan_step(skills.SkillCall("pergi_ke", "farm"), snap, state=state)
@@ -1872,6 +1917,8 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
             context["disposal_refusals"] = {f.get("qualified_item_id"): policy.refuse_gift("sell", f.get("qualified_item_id"), None)
                 for f in context.get("inventory", ())}
             context["ui_view"] = self._ui_pad_view(snap.binding.player_id)
+            if state.get("mail_handoff_required"):
+                context.update(self._skill_mail_readback(snap))
             # The same receiver's native letter facts (has_quest / has_items): S29 closes only an inert letter.
             key_view = getattr(self, "_ui_key_view", None)
             context["ui_key_view"] = key_view(snap.binding.player_id) if key_view is not None else None
@@ -2093,6 +2140,9 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
                 return skills.Step("fail", reason=("chest" if chest else "sprinkler") + "_unavailable_or_ambiguous")
             if (snap.held_item or {}).get("qualified_item_id") not in qids:
                 return self._skill_item_ready(run, goal, snap, context, qids, "placement_item")
+        from arti_runtime.festival_facts import completed_step as festival_done
+        if (done := festival_done(run.call, snap, state)) is not None:
+            return done
         # Unexpected menus use the established inspect/close path; unknown questions hold.
         if skills.menu_up(snap) and driver not in ("talk",):
             key = snap.ui_key_target or {}
@@ -2251,10 +2301,16 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
             pick = getattr(session, "model_pick", None) if resume is None else None
             model = resume is None and (by == "model" or pick is not None and pick[0] == call)
             if model and (leave := getattr(session, "festival_leave_pick", None)) and leave[0] == call:
-                from arti_stardew_event_control import festival_free_roam
+                from arti_stardew_event_control import festival_free_roam, festival_seated
                 movement = self._event_movement_offer(self._binding_view()[1])
-                if festival_free_roam(movement) and movement.get("festival_id") == leave[1]:
+                # Chosen from a festival seat, the trip stands her up first, then asks the same leave.
+                seat_offer = getattr(self, "_event_actions_offer", None)
+                actions = None if festival_free_roam(movement) or seat_offer is None else seat_offer(self._binding_view()[1])
+                seated = festival_seated(actions) and actions.get("event_id") == leave[1]
+                if festival_free_roam(movement) and movement.get("festival_id") == leave[1] or seated:
                     run.state["festival_leave_chosen"] = leave[1]
+                if seated:
+                    run.state["festival_stand_chosen"] = leave[1]  # only her own seated pick stands her up
             if model:
                 session.model_pick = None
                 session.festival_leave_pick = None
@@ -2418,6 +2474,9 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
                 if run.call.name == "makan":
                     input_cap = max(0, input_cap - 1)  # reserve one select_slot for terminal food cleanup
                     seconds_cap = max(0, seconds_cap - 5)  # leave time for its bounded native readback
+                if run.call.name == "langkah" and (getattr(self, "_config", None) or {}).get("stardew_live7_local_walks") is True:
+                    input_cap = max(input_cap, 4)
+                    decision_cap = max(decision_cap, 12)
                 if run.call == skills.SkillCall("pergi_ke", "farm"):
                     hop = goal.home_route_state
                     if "input_budget" in hop:
@@ -2556,11 +2615,14 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
                             repair if repair is not None else
                             found if found is not None else
                             recovery if recovery is not None else
-                            self._part_a_walk_step(run, snapshot) if run.state.get("campaign_travel") and run.call.name == "jalan_ke" else
+                            self._part_a_walk_step(run, snapshot) if (run.state.get("campaign_travel") or run.state.get("local_walk")) and run.call.name == "jalan_ke" else
                             self._skill_wave1_step(run, goal, request) if spec.family == skills.F_WAVE1 else
                             self._skill_harvest_step(run, goal, snapshot) if run.call.name == "panen" else
                             self._skill_till_step(run, goal, snapshot) if run.call.name == "cangkul" else
                             self._skill_plant_step(run, goal, snapshot) if run.call.name == "tanam" else
+                            __import__("arti_stardew_generic_world").step(
+                                run.call, snapshot, run.state, context=self._skill_wave1_context(snapshot), one_tile=True
+                            ) if run.call.name == "langkah" and (getattr(self, "_config", None) or {}).get("stardew_live7_local_walks") is True else
                             self._live7_fish_step(run, snapshot) or self._live7_refill_step(run, snapshot) or skills.plan_step(
                                 run.call, snapshot, finish_ready=self._skill_finish_ready(goal, request), state=run.state))
                     if spec.family == skills.F_GENERIC:
@@ -2921,6 +2983,9 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
                      or self._live7_route_pause(run, goal, motor))  # ADR 155/195: people page, or None to continue
         if exhausted is not None:
             return exhausted
+        if (run.state.get("store_menu_handoff") and motor is not None and motor.active_menu is None
+                and not self._state.is_stale(motor.player_id)):
+            return "fail", "goods_menu_changed"
         watchdog = self._skill_effect_watchdog(run, goal, motor)
         if watchdog is not None:
             return watchdog
@@ -4160,6 +4225,8 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
                    "started_unix": run.wall_started, "ended_unix": time.time()}  # W1b B5: wall window of her inputs
             if run.state.get("mines_progress"):
                 row["mines_progress"] = run.state["mines_progress"]
+            if letters := run.state.get("recovered_mail_letters"):
+                row["letters_read"] = letters
             self._journal(row)
         elif reason == "knocked_out":
             run.status, run.reason = "interrupted", reason
@@ -4182,8 +4249,11 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
             else:
                 run.status, run.reason = "failed", reason
                 run.state["result_observation"] = self._skill_failure_observation()
-                self._journal({"ev": "skill_failed", "session_id": session.session_id, "skill": run.call.name,
-                               "arg": run.call.arg, "reason": reason, "decisions": run.decisions, "inputs": run.inputs})
+                row = dict(ev="skill_failed", session_id=session.session_id, skill=run.call.name,
+                           arg=run.call.arg, reason=reason, decisions=run.decisions, inputs=run.inputs)
+                if observed_reason := run.state.get("recovery_observed_reason"):
+                    row["observed_reason"] = observed_reason
+                self._journal(row)
         else:
             run.status, run.reason = "failed", reason
             run.state["result_observation"] = self._skill_failure_observation()
@@ -4465,6 +4535,7 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
                         messages = self._provider._render_messages(request)
                         shown = json.loads(messages[1]["content"])
                         navigation = next((e.get("args", ()) for e in shown["skills"] if e["name"] == "read_boundary"), ())
+                        from arti_runtime.page_fact_selection import notes_answered
                         from arti_runtime.choice_contract import navigation_aliases
                         page_aliases = navigation_aliases(shown)
                     from arti_runtime.choice_contract import normalize, echo_normalizable
@@ -4495,6 +4566,7 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
                             and decision.choice.target_ref is None and decision.choice.args.get("name") == "read_boundary"):
                         arg = decision.choice.args.get("arg")
                         if arg in navigation and set(decision.choice.args) == {"name", "arg"}:
+                            notes_answered(session, messages)
                             handle, index = arg.rsplit(":", 1)
                             session.boundary_page = (handle, int(index))
                             session.boundary_reads += 1
@@ -4566,7 +4638,9 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
                             and getattr(self._provider, "policy", None)):
                         from arti_runtime.decision_plan import page_buy
                         page = json.loads(self._provider._render_messages(request)[1]["content"])
-                        shown_buys = (page.get("unknown_ui") or {}).get("buy_actions") or {}
+                        cards = (page.get("unknown_ui") or {}).get("buy_actions") or {}
+                        aliases = getattr(request, "item_choice_aliases", {}).get("ui_action", {})
+                        shown_buys = {aliases.get(arg, arg): card for arg, card in cards.items()}
                         if page_buy(seen, choice.arg, shown_buys) == "shop_offer_unread":
                             choice = None
                             rejection = dict(code="shop_offer_unread", field="args.arg",
@@ -4649,13 +4723,16 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
             if decision is not None and self._config.get("stardew_game_text_delivery_enabled") is True:
                 from arti_runtime.game_text_delivery import accept_answer
                 accept_answer(self, request)
+            if decision is not None and self._config.get("live7_fact_line_enabled") is True:
+                from arti_runtime.recipe_reads import accept_answer as accept_recipe_reads
+                accept_recipe_reads(self, request)
             if (session.mode == 'part_live' and decision is not None
                     and (getattr(self, "_config", None) or {}).get("stardew_live7_goal_ladder", False) is True):
                 # ADR 221: noticing survives even a choice mismatch; it never
                 # changes the choice validator or authorizes an action.
                 try:
                     from arti_runtime.goal_ladder_runtime import received, decision_note
-                    received(self, session, (request.skill_offer or {}).get('mind') or {})
+                    received(self, session, (request.skill_offer or {}).get('mind') or {}, request=request)
                     decision_note(self, session, decision, request)
                 except Exception as exc:  # observation failure cannot invalidate her choice
                     self._journal(dict(ev='goal_note_error', error=type(exc).__name__))
@@ -4688,6 +4765,10 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
             # fix42 (a33 d7:J640-J669): a read selection outlived her decision, so every later boundary reopened the
             # same read page. A read serves the decision it was taken for; the next boundary starts at its page 0.
             # A menu keeps its page across presses (ADR 42).
+            render = getattr(self._provider, "_render_messages", None)
+            if session.boundary_page is not None and decision is not None and callable(render):
+                from arti_runtime.page_fact_selection import notes_answered
+                notes_answered(session, render(request))
             session.boundary_page = None
         if isinstance(choice, skills.SkillCall):
             # Live7 WP4: the exact physical request (archive file number) whose reply produced this choice.
@@ -4695,10 +4776,13 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
             index = lookup(request.generation_id) if callable(lookup) else None
             with self._lock:
                 session.model_pick = (choice, index if type(index) is int else None)
-                from arti_stardew_event_control import festival_free_roam
+                from arti_stardew_event_control import festival_free_roam, festival_seated
                 movement = getattr(request.snapshot, "event_movement", None)
-                if choice.name == "pergi_ke" and festival_free_roam(movement) and movement.get("festival_id"):
-                    session.festival_leave_pick = (choice, movement["festival_id"])
+                actions = getattr(request.snapshot, "event_actions", None)
+                festival = (movement.get("festival_id") if festival_free_roam(movement)
+                            else actions.get("event_id") if festival_seated(actions) else None)
+                if choice.name == "pergi_ke" and festival:
+                    session.festival_leave_pick = (choice, festival)
         return choice
 
     @staticmethod
@@ -4756,10 +4840,16 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
         shown["echo"] = dict(request_nonce=request.request_nonce, goal_id=request.goal_id,
                              goal_revision=request.goal_revision, context_ref=request.context_ref)
         shown["decision_feedback"] = feedback
-        messages[1]["content"] = json.dumps(shown, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+        saved = getattr(previous, 'live7_day_plan', None)
+        if saved is not None and self._config.get('stardew_live7_plan_on_page') is not True:
+            return None
+        plan_shown = saved is not None and 'rencana_hari_ini' in (shown.get('mind') or {})
+        messages[1]["content"] = json.dumps(shown, ensure_ascii=False, separators=(",", ":"), sort_keys=not plan_shown)
         offer = dict(previous.skill_offer, decision_feedback=feedback)
         retry = replace(request, skill_offer=offer, skill_retry_messages=messages,
-                        item_choice_aliases=previous.item_choice_aliases)
+                        item_choice_aliases=previous.item_choice_aliases, ui_inspect_layout=previous.ui_inspect_layout)
+        if saved is not None:
+            retry = replace(retry, live7_day_plan=saved)
         # Keep every admission ceiling. If the note no longer fits, use the ordinary fresh fit path.
         from arti_stardew_runtime import (_encoded_provider_request, _decision_provider_extra_payload,
             _provider_input_token_upper_bound, _skill_prompt_token_estimate, _STARDEW_DECISION_REQUEST_MAX_BYTES,
@@ -4781,6 +4871,8 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
                     not _page_budget.fits_page(messages, budget=_page_budget.for_request(retry))
                     or skills.encoded_render_bytes(messages) > _page_budget.for_request(retry).guard))):
             return None
+        if generic is not None and (layout := generic.get("inspect_layout")) is not None:
+            layout[:] = previous.ui_inspect_layout or ()
         self._logical_request = retry
         self._journal(dict(ev="skill_boundary_page_reused", session_id=session.session_id, trigger=trigger))
         self._journal(dict(ev="skill_offer", session_id=session.session_id, trigger=trigger,
@@ -4794,6 +4886,8 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
     @W.span('offer_build', 17, runtime=True)
     def _skill_boundary_request(self, session: SkillSession, trigger: str):
         """A fresh skills-only boundary request on the session's current goal, or a terminal string."""
+        if session is self._skill_session and session.mode == "part_live" and session.campaign is not None:
+            self._live7_flush_visit(session.campaign)
         with self._lock:
             if session is not self._skill_session or session.status != "active" or self._active is None:
                 return "none"
@@ -4850,7 +4944,8 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
             generic = getattr(self, "_live7_ui_offer", None)
             if generic is not None:
                 from arti_stardew_generic_ui import menu_offer_pin
-                request = replace(request, ui_offer_pin=menu_offer_pin(generic))
+                request = replace(request, ui_offer_pin=menu_offer_pin(generic),
+                                  ui_inspect_layout=generic.get("inspect_layout"))
                 listed = [dict(name="ui_action", does="Choose an observed UI control or wait",
                                args=list(generic["actions"]))]
                 for call in generic.get("world_calls") or ():
@@ -4931,6 +5026,8 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
                 from arti_runtime.game_text_delivery import attach
                 attach(self, offer)
             if session.mode == "part_live":
+                if (saved := offer.pop('_live7_day_plan', None)) is not None:
+                    request = replace(request, live7_day_plan=saved)
                 offer = self._live7_fact_line_offer(session, request.snapshot, offer)
                 from arti_runtime.item_choice import present as present_item_choices, purchase_aliases
                 aliases = present_item_choices(offer)
@@ -4945,9 +5042,11 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
                     offer = prepare(offer, config=self._config, budget=session.page_budget,
                         deferred=(generic.get('page_deferred', {}) if generic is not None
                                   else getattr(self, '_live7_page_deferred', {})), catalog=catalog,
+                        notes_read=getattr(session, "notes_read", ()),
                         # prepare owns/detaches only the fact policy's data dependencies.
                         policy=dict(catalog=catalog, config=self._config,
                                     context=context, policy=session.campaign.live))
+                    session.notes_unread = getattr(offer, "notes", None)
             request = replace(request, skill_offer=offer)
             offer["boundary_page"] = session.boundary_page
             offer["render_budget"] = session.boundary_budget
@@ -4968,6 +5067,8 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
     def _skill_render_size(self, request) -> dict:
         """Actual render estimate and separate byte-conservative admission ceiling. Names/numbers only."""
         started = time.perf_counter()
+        saved = getattr(request, 'live7_day_plan', None)
+        shown_plan = None
         try:
             import arti_stardew_runtime as rt_mod
             if isinstance(self._provider, rt_mod.ProductionDecisionProvider):
@@ -4980,10 +5081,17 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
             omitted = skills.render_omitted(messages)
             # fix62 (ADR 89): a44's report read reads per decision as pages per decision; say the page count itself.
             rendered = json.loads(messages[1]["content"])
+            if saved is not None:
+                shown_plan = (rendered.get('mind') or {}).get('rencana_hari_ini')
             presentation = rendered.get("presentation") or {}
             pages = presentation.get("pages", 1)
             source = request.skill_offer or {}
             if source.get('live7'):
+                session = getattr(self, "_skill_session", None)
+                policy = getattr(getattr(session, "campaign", None), "live", None)
+                if records := getattr(policy, "place_visits", None):
+                    from arti_runtime.place_visit_result import note_rendered
+                    note_rendered(self, rendered, records)
                 from arti_runtime.page_fact_selection import PageOffer
                 metrics = getattr(self._provider, '_skill_render_metrics', {})
                 reads = sum(len(e.get('args') or ()) for e in rendered.get('skills', ())
@@ -5017,6 +5125,12 @@ class SkillRuntimeMixin(DebrisRouteRuntimeMixin, Live7CampaignMixin, PartACampai
                     "hard_limit": rt_mod._STARDEW_DECISION_INPUT_TOKEN_HARD_BOUND * _page_budget.for_request(request).scale}
         except Exception as exc:  # noqa: BLE001 - a diagnostic never fails the boundary
             return {"error": type(exc).__name__, **_page_budget.for_request(request).telemetry()}
+        finally:
+            if saved is not None:
+                import arti_mind
+                self._journal(dict(ev='plan_line', target_day=saved.target_day,
+                    status='rendered' if shown_plan else saved.status,
+                    bytes=arti_mind.block_bytes(shown_plan) if shown_plan else 0))
 
     @W.span('settle_readback', 19, runtime=True)
     def _skill_wait_quiet(self, timeout: float) -> None:

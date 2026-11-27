@@ -160,7 +160,8 @@ def _read_outcome(read, requests):
                     request_index=nxt["index"], missing_signal=nxt["reason"])
     page = nxt["body"].get("presentation") if isinstance(nxt["body"].get("presentation"), dict) else {}
     returned, handle = page.get("page", 0), page.get("handle")
-    served = handle == read["handle"] and returned == read["page"]
+    # A world page's read is her notes on an ordinary page, bound to no snapshot.
+    served = handle == read["handle"] and returned == read["page"] or isinstance(nxt["body"].get("catatan_kubaca"), dict)
     stale = STALE_READ_MARK in str(nxt["body"].get("halaman_baca") or "")
     outcome = ("served" if served else "stale_notice" if stale else
                "page0_other_handle" if returned == 0 and read["page"] not in (0, None) else "other_page")

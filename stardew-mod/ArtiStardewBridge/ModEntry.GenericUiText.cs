@@ -77,7 +77,7 @@ internal static class GenericUiRenderedText
     static readonly Dictionary<string, Frame> Frames = new();
     internal static void Begin(string kind)
     {
-        scope = Enabled() ? kind : null;
+        scope = Enabled() && (kind != "menu" || !NativeJunimoUi.Unreadable(Surface)) ? kind : null;
         pending = scope is null ? null : new List<string>();
         placed = scope is null ? null : new List<PlacedText>();
         hoverDepth = 0;
@@ -91,7 +91,7 @@ internal static class GenericUiRenderedText
     public static void ExitHover() => hoverDepth = Math.Max(0, hoverDepth - 1);
     public static void Record(object[] __args)
     {
-        if (scope is null || pending is null || !Enabled()) return;
+        if (scope is null || pending is null || !Enabled() || scope == "menu" && NativeJunimoUi.Unreadable(Surface)) return;
         int at = Array.FindIndex(__args, arg => arg is string s && !string.IsNullOrWhiteSpace(s)
             || arg is StringBuilder b && b.Length > 0 && !string.IsNullOrWhiteSpace(b.ToString()));
         if (at < 0) return;
@@ -123,6 +123,7 @@ internal static class GenericUiRenderedText
     /// <summary>fix137A (ADR 237 A): the menu's drawn strings with their positions, same freshness as <see cref="Current"/>.</summary>
     internal static PlacedText[] Placed(object? receiver)
     {
+        if (NativeJunimoUi.Unreadable(receiver)) return Array.Empty<PlacedText>();
         int identity = receiver is null ? 0 : RuntimeHelpers.GetHashCode(receiver);
         if (!Frames.TryGetValue("menu", out Frame? frame) || frame.Receiver != identity
                 || (Stopwatch.GetTimestamp() - frame.At) / (double)Stopwatch.Frequency > 2) return Array.Empty<PlacedText>();
@@ -130,6 +131,7 @@ internal static class GenericUiRenderedText
     }
     internal static string[] Current(string kind, object? receiver, bool exact = false)
     {
+        if (kind == "menu" && NativeJunimoUi.Unreadable(receiver)) return Array.Empty<string>();
         int identity = receiver is null ? 0 : RuntimeHelpers.GetHashCode(receiver);
         if (!Frames.TryGetValue(kind, out Frame? frame) || frame.Receiver != identity
                 || (Stopwatch.GetTimestamp() - frame.At) / (double)Stopwatch.Frequency > 2) return Array.Empty<string>();

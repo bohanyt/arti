@@ -6,10 +6,13 @@ run was refused with zero inputs is not offered again unchanged, for every skill
 times with zero inputs, offered again each time). "Unchanged" is the effect clock's world state and her place: the
 choice returns as soon as anything she does changes the game, or she is somewhere else. The rule never empties a
 page: when every choice would be withheld, the page keeps them and still says why. What else she can do comes first.
+A failed walk to a sighting uses the same world and place test, with the final pose and navigation grid.
+That refusal belongs to the object ref, even after inputs, and leaves other targets available.
 """
 from __future__ import annotations
 
 from arti_runtime.effect_clock import EffectClock
+from arti_stardew_animal_routine import actor_cell_open
 
 KEY = "ditahan"  # her page's fact line naming what is withheld and why
 TOLD = "pemulihan_terakhir"  # her page's fact line: what the ladder did, once
@@ -31,6 +34,54 @@ def refusal_words(reason):
         str(reason or "ditolak")[:80])
 
 
+def _unchanged(state, clock, place):
+    if "refused_world" not in state:
+        state["refused_world"], state["refused_place"] = clock.serial, place
+    return state["refused_world"] == clock.serial and state["refused_place"] == place
+
+
+def failed_route_ref(run, reason, place):
+    """Only an exhausted walk to an identified sighting supplies route evidence."""
+    if run.call.name == "forage":
+        look = run.state.get("live7_forage_look") or {}
+        pinned = look.get("target") if look.get("location") == place else None
+        reasons = ("route_no_clearable_way", "no_open_look_path", "forage_not_offered:no_open_look_path")
+    elif run.call.name == "jalan_ke":
+        pinned = run.state.get("route_seen_walk")
+        if pinned and pinned.get("location") != place:
+            pinned = None
+        reasons = ("route_no_clearable_way", "no_open_look_path", "seen_walk_no_open_path")
+    else:
+        return None
+    return pinned.get("ref") if pinned and reason in reasons else None
+
+
+def bind_route(run, ref, clock, place, here, grid):
+    basis = dict(ref=ref, here=here, grid=dict(actor_cell_open(grid, here) or {}))
+    _unchanged(basis, clock, place)
+    run.state["route_refusal"] = basis
+
+
+def route_refs(runtime, session, place, here, grid):
+    """Live route refusals by object ref, regardless of which skill walked to it."""
+    clock = _clock(runtime, session)
+    if clock is None or place is None or here is None:
+        return set()
+    grid = actor_cell_open(grid, here)
+    refs = set()
+    for run in getattr(session, "runs", ()) or ():
+        basis = getattr(run, "state", {}).get("route_refusal")
+        if basis is None or run.status != "failed":
+            continue
+        if (_unchanged(basis, clock, place) and basis["here"] == here
+                and (not grid or basis["grid"] == grid)):
+            refs.add(basis["ref"])
+        else:
+            # A new world releases the refusal even if she later returns.
+            run.state["route_refusal"] = None
+    return refs
+
+
 def refused(runtime, session, facts=None):
     """C1: [(name, arg, reason)] whose latest run was refused with zero inputs, while nothing she did has changed the
     game since and she is at the same place. Each refusal is bound, at the first page after it, to the clock's world
@@ -49,13 +100,13 @@ def refused(runtime, session, facts=None):
         if run.status != "failed" or run.inputs != 0:
             continue
         state = run.state
+        if "route_refusal" in state:
+            continue  # the target is withheld, including when other forage remains
         if state.get("halt_interrupted"):
             if runtime.__dict__.get("_live7_ladder_halted") == session.session_id:
                 out.append((key[0], key[1], refusal_words(run.reason)))
             continue  # a session HALT refusal has no world or target basis
-        if "refused_world" not in state:
-            state["refused_world"], state["refused_place"] = clock.serial, place
-        if state["refused_world"] == clock.serial and state["refused_place"] == place:
+        if _unchanged(state, clock, place):
             out.append((key[0], key[1], refusal_words(run.reason)))
     return out
 

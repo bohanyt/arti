@@ -161,6 +161,11 @@ def cmd_launch(a):
                              stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         rec = {"role": "host", "pid": p.pid, "exe": str(exe), "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     else:
+        if _owner_run_without_word():
+            print(json.dumps({"refused": "owner_join_needs_owner_word", "message": (
+                "The owner hosts this run: run `mabar rejoin --owner-ready` on his word, or start her game by hand, join "
+                "from its window and run `mabar rejoin`.")}))
+            return 2
         # SMAPI reads console commands from stdin and exits on EOF, so a long-lived supervisor must hold the pipe open
         # (the S3 harness did the same: stdin_pipe=True, CREATE_NO_WINDOW). DETACHED_PROCESS + DEVNULL made it exit at once.
         sup = subprocess.Popen([str(PY), "-I", "-B", str(Path(__file__).resolve()), "_supervise", "farmhand"], cwd=str(GAME),
@@ -171,48 +176,107 @@ def cmd_launch(a):
     print(json.dumps(rec))
 
 
-def cmd_supervise(a):
+def _owner_run_without_word():
     from scripts.livepath import halt_authority as HA
+
+    return RUN.name == "runtime" and HA.prepared_owner_run(RUN.parent) and HA.recovery_guard_config() is None
+
+
+def start_owner_launcher(guard, word):
+    """Send the owner's launch authority over the worker's private pipe to the detached launcher."""
+    flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+    launcher = subprocess.Popen([sys.executable, "-I", "-B", str(Path(__file__).resolve()), "_supervise", "owner-word"],
+                                cwd=str(GAME), creationflags=flags, close_fds=True,
+                                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    with launcher.stdin:
+        launcher.stdin.write(json.dumps(dict(guard=guard, word=word)).encode("utf-8"))
+    return launcher
+
+
+def cmd_supervise(a):
+    from contextlib import ExitStack, nullcontext
+    from scripts.livepath import halt_authority as HA, owner_join
     from arti_runtime import ipc
 
+    word = None
+    if getattr(a, "role", None) == "owner-word":
+        envelope = json.load(sys.stdin)
+        guard, word = envelope["guard"], envelope["word"]
+        run = Path(guard["run"])
+        if (guard["act"] != "launch" or run.resolve() / "runtime" != RUN.resolve()
+                or Path(guard["inbox"]).resolve() != COMMAND_DIR.resolve()):
+            owner_join.refuse("owner_join_attempt_mismatch")
+        lock = owner_join.spawn_lock(COMMAND_DIR)
+    else:
+        guard = HA.recovery_guard_config()
+        if _owner_run_without_word():
+            owner_join.refuse("owner_join_needs_owner_word")
+        lock = nullcontext()
+
     exe = GAME / "StardewModdingAPI.exe"
-    launch_id = uuid.uuid4().hex  # one supervised child; retained in memory until THIS child.wait() returns
+    launch_id = uuid.uuid4().hex
     path = RUN / "farmhand-launch.json"
-    predecessor = HA.read_launch_record(path)
-    guard = HA.recovery_guard_config()
-    _, previous = HA.read_record(COMMAND_DIR / "session.json")
-    stamp_id = stamp()
-    stderr = f"farmhand-stderr-{stamp_id}.raw"
-    launch = dict(pid=None, launch_id=launch_id, exe=str(exe), stderr=stderr,
-                  previous_runtime=HA.identity(previous)[1], issued_ms=int(time.time() * 1000),
-                  utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
-    with (RUN / f"farmhand-stdout-{stamp_id}.raw").open("wb") as out, (RUN / stderr).open("wb") as err:
-        ipc.write_json(path, launch, fsync=True)  # persist the pending launch before the process can publish or crash
-        reservation = None
-        try:
-            decision = HA.child_recovery_gate(guard, saved_launch=(launch_id, predecessor))
-            if decision is not None and decision.watchdog:
-                reservation = HA.reserve_watchdog(guard["run"], decision.watchdog)
-                if reservation is None:
-                    raise HA.HandsHeld(HA.Decision("hold", "watchdog_recovery_limit"))
-                launch["watchdog"] = reservation
-                ipc.write_json(path, launch, fsync=True)
-                final = HA.child_recovery_gate(guard, saved_launch=(launch_id, predecessor), reservation=reservation)
-                if final.watchdog != reservation["proof"]:
-                    raise HA.HandsHeld(HA.Decision("hold", "watchdog_recovery_authority_changed"))
-            child = subprocess.Popen([str(exe), "--mods-path", str(GAME / "Mods")], cwd=str(GAME),
-                                     creationflags=subprocess.CREATE_NO_WINDOW, stdin=subprocess.PIPE, stdout=out, stderr=err)
-        except Exception:
-            if reservation is not None:
-                HA.release_watchdog(guard["run"], reservation)
-            if HA.read_record(path)[1] == launch:
-                if isinstance(predecessor[0], bytes):
-                    ipc.atomic_write(path, predecessor[0], fsync=True)
-                elif predecessor[0] is None:
-                    ipc.write_json(path, dict(launch, not_started=True), fsync=True)
-            raise
-        launch["pid"] = child.pid
-        ipc.write_json(path, launch, fsync=True)
+    with ExitStack() as streams:
+        with lock:
+            predecessor = HA.read_launch_record(path)
+            if word is not None:
+                owner_join.require_attempt(word, run, parent="launcher")
+                mode = owner_join.require_mode(word, run)
+                HA.child_recovery_gate(guard, owner_launch=mode)
+                owner_join.reserve_spawn(run, word)
+            _, previous = HA.read_record(COMMAND_DIR / "session.json")
+            stamp_id = stamp() + ("-" + launch_id if word is not None else "")
+            stderr = f"farmhand-stderr-{stamp_id}.raw"
+            launch = dict(pid=None, launch_id=launch_id, exe=str(exe), stderr=stderr,
+                          previous_runtime=HA.identity(previous)[1], issued_ms=int(time.time() * 1000),
+                          utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+            if word is not None:
+                launch.update(owner_attempt=word["id"], owner_host=word["host"],
+                              replaces=owner_join.replaced(predecessor[1]))
+            out = streams.enter_context((RUN / f"farmhand-stdout-{stamp_id}.raw").open("wb"))
+            err = streams.enter_context((RUN / stderr).open("wb"))
+            ipc.write_json(path, launch, fsync=True)  # preserve the pending launch before a process can publish or crash
+            reservation = None
+            try:
+                saved = (launch_id, predecessor)
+                if word is not None:
+                    if (owner_join.wf.image_pids(owner_join.SMAPI) != [word["host"]["pid"]]
+                            or owner_join.wf.trial_running() is not False):
+                        owner_join.refuse("owner_join_spawn_already_in_use")
+                    if not owner_join.wf.lan_host(word["host"]["pid"]):
+                        owner_join.refuse("owner_join_local_host_unconfirmed")
+                    owner_join.require_attempt(word, run, parent="launcher")
+                    if launch["replaces"] is not None:
+                        owner_join.require_gone(launch["replaces"])
+                    decision = HA.child_recovery_gate(guard, saved_launch=saved, owner_launch=mode)
+                else:
+                    decision = HA.child_recovery_gate(guard, saved_launch=saved)
+                if decision is not None and decision.watchdog:
+                    reservation = HA.reserve_watchdog(guard["run"], decision.watchdog)
+                    if reservation is None:
+                        raise HA.HandsHeld(HA.Decision("hold", "watchdog_recovery_limit"))
+                    launch["watchdog"] = reservation
+                    ipc.write_json(path, launch, fsync=True)
+                    final = HA.child_recovery_gate(guard, saved_launch=saved, reservation=reservation)
+                    if final.watchdog != reservation["proof"]:
+                        raise HA.HandsHeld(HA.Decision("hold", "watchdog_recovery_authority_changed"))
+                child = subprocess.Popen([str(exe), "--mods-path", str(GAME / "Mods")], cwd=str(GAME),
+                                         creationflags=subprocess.CREATE_NO_WINDOW, stdin=subprocess.PIPE, stdout=out, stderr=err)
+            except Exception:
+                if reservation is not None:
+                    HA.release_watchdog(guard["run"], reservation)
+                if HA.read_record(path)[1] == launch:
+                    if isinstance(predecessor[0], bytes):
+                        ipc.atomic_write(path, predecessor[0], fsync=True)
+                    elif predecessor[0] is None:
+                        ipc.write_json(path, dict(launch, not_started=True), fsync=True)
+                raise
+            launch["pid"] = child.pid
+            if word is not None:
+                launch["process_start"] = owner_join.wf.process_start(child.pid)
+            elif (started := owner_join.wf.process_start(child.pid)) is not None:
+                launch["process_start"] = started
+            ipc.write_json(path, launch, fsync=True)
         if reservation is not None:
             from scripts.livepath.mabar_supervise import log_line
             log_line(guard["run"], "ALERT restarting her game after its own watchdog stopped it (%d of %d)." %
@@ -220,6 +284,8 @@ def cmd_supervise(a):
         rc = child.wait()
     ipc.write_json(RUN / "farmhand-exit.json", dict(pid=child.pid, launch_id=launch_id, returncode=rc,
                                                    utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())), fsync=True)
+    if word is not None:
+        owner_join.record_ended(run, COMMAND_DIR)
 
 
 def cmd_status(_a):
@@ -516,8 +582,21 @@ def main(argv=None):
     a = ap.parse_args(argv)
     if a.cmd == "approval" and not a.live7 and (not a.owner_text or not a.owner_url):
         ap.error("ordinary approval requires --owner-text and --owner-url")
-    a.f(a)
+    if a.cmd == "_supervise" and a.role == "owner-word":
+        from dataclasses import asdict
+        from scripts.livepath.halt_authority import HandsHeld, RecoveryTimedOut
+        try:
+            a.f(a)
+        except HandsHeld as exc:
+            print(json.dumps({"hold": asdict(exc.decision)}), flush=True)
+            return 2
+        except RecoveryTimedOut as exc:
+            print(json.dumps({"timeout": str(exc)}), flush=True)
+            return 1
+    else:
+        rc = a.f(a)
+        return rc if a.cmd == "launch" else None  # a refused launch says so to its caller
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

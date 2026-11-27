@@ -66,20 +66,26 @@ def _place_sources(catalog):
     candidates = [(p.get('id'), p.get('label')) for p in
                   native_rows((catalog.get('world_graph') or {}).get('places', ()))
                   if isinstance(p, Mapping) and p.get('id') not in sources]
-    patterns = {}
-    def mentioned(name, text):
+    from arti_runtime.fact_line import fold
+    patterns, folds = {}, {}
+    def mentioned(name, text, folded):
         if not isinstance(name, str) or not name:
             return False
+        if name not in folds:
+            folds[name] = fold(name)
+        if folds[name] not in folded:
+            return False  # the case-blind search below cannot match
         if name not in patterns:
             patterns[name] = re.compile(r'(?<!\w)' + re.escape(name) + r'(?!\w)', re.I)
         return patterns[name].search(text) is not None
     for text, ref, evidence in text_evidence(catalog):
         text = str(text)
+        folded = fold(text)
         for identity, label in candidates:
             if identity in sources:
                 continue
             explicit = evidence.get("subject") == identity and evidence.get("kind") in ("place_learned", "door_seen", "sign_read")
-            if identity and (explicit or any(mentioned(name, text) for name in (identity, label))):
+            if identity and (explicit or any(mentioned(name, text, folded) for name in (identity, label))):
                 sources.setdefault(identity, ref)
     return sources
 

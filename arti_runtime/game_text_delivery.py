@@ -16,8 +16,9 @@ from arti_runtime.seen_receipts import SeenReceipts
 SETTING = "stardew_game_text_delivery_enabled"
 BLOCK = "yang baru muncul di game"
 KINDS = {"letter_opened", "event_watched", "calendar_day_read", "door_message",
-         "hud_notice", "mailbox_visible", "dialogue_read",
-         "shipping_summary_seen"}  # ADR 230 N3: the night earnings screen as the game wrote it
+         "hud_notice", "mailbox_visible", "mailbox_empty_visible", "dialogue_read",  # the box seen with no flag
+         "shipping_summary_seen",  # the night earnings screen as the game wrote it
+         "quest_entry_read", "bundle_note_opened"}  # the journal entry or bundle page that was open
 
 
 def _locked(fn):
@@ -240,7 +241,13 @@ def inject(messages, batch):
     result = deepcopy(messages)
     body = json.loads(result[1]["content"])
     body[BLOCK] = batch["block"]
-    result[1]["content"] = json.dumps(body, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+    mind = body.get('mind')
+    ordered_plan = isinstance(mind, Mapping) and 'rencana_hari_ini' in mind
+    if ordered_plan:
+        # Keep the authored plan first inside mind after native text rides.
+        body[BLOCK] = json.loads(json.dumps(body[BLOCK], sort_keys=True))
+        body = dict(sorted(body.items()))
+    result[1]["content"] = json.dumps(body, ensure_ascii=False, separators=(",", ":"), sort_keys=not ordered_plan)
     return result
 
 

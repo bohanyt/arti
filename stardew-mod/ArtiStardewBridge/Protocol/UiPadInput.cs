@@ -1527,6 +1527,8 @@ public static class UiPadSnapshot
         }
         if (wait is not null)
             block["wait_reason"] = wait;
+        if (f.Extras?.JunimoScrambled == true || f.GenericValues?.GetValueOrDefault("ui_unreadable") is true)
+            block["ui_unreadable"] = true;
         if (f.PageType is { } page)
             block["page_type"] = page;
         if (f.Tab >= 0)

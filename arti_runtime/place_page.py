@@ -134,11 +134,11 @@ def visit_events(catalog):
     return out
 
 
-def arrival_line(mind, location, date, actionable, names=None, *, visits=None, clock=None):
+def arrival_line(mind, location, date, actionable, names=None, *, visits=None, clock=None, display_name=None):
     """One page at each verified map arrival; no goal text matching (ADR 207)."""
     if not location:
         return None
-    label = (names or {}).get(location) or location
+    label = (names or {}).get(location) or display_name or location
     visits = visits if visits is not None else {}
     if visits.get("current") == (location, date):
         return None
@@ -166,10 +166,8 @@ def remember_visit(base, scope, location, date, clock):
     if base is None or not scope:
         return
     import arti_mind
-    from arti_runtime.plan_dates import ordinal
-    arti_mind.record_items(base,"stardew",scope=scope,kind="place_visit",
-        items=[dict(id=location,status="observed",facts=dict(date=date,time=clock))],
-        day=ordinal("stardew",date),day_label=date)
+    with arti_mind._LEDGER_LOCK:
+        _write_visits(base, scope, location, date, clock, visit_records(base, scope).get(location, []))
 
 
 # ---------------------------------------------------------------- ADR 232 part C: her own dated record of a place
@@ -184,7 +182,7 @@ def visit_key(line):
     return line.split("). ", 1)[0] + ")." if isinstance(line, str) and "). " in line else line
 
 
-def visit_records(base, scope):
+def visit_records(base, scope, *, strict=False):
     """{location: [{date, time, here, chose}, ...]} from the place_visit rows (oldest first); {} when none."""
     if base is None or not scope:
         return {}
@@ -192,11 +190,13 @@ def visit_records(base, scope):
     try:
         rows = arti_mind.ledger_rows(base, "stardew", scope=scope, kind="place_visit")
     except (OSError, ValueError):
+        if strict:
+            raise
         return {}
     out = {}
     for r in rows:
         facts = r.get("facts") if isinstance(r.get("facts"), Mapping) else {}
-        visits = [dict(v) for v in facts.get("visits") or () if isinstance(v, Mapping) and isinstance(v.get("date"), str)]
+        visits = [dict(v) for v in native_rows(facts.get("visits")) if isinstance(v, Mapping) and isinstance(v.get("date"), str)]
         if isinstance(r.get("item_id"), str) and visits:
             out[r["item_id"]] = visits
     return out
@@ -208,29 +208,61 @@ def record_visit(base, scope, location, date, clock, *, here=None, chose=None):
     if base is None or not scope or not location:
         return None
     import arti_mind
-    from arti_runtime.plan_dates import ordinal
-    old = visit_records(base, scope).get(location, [])
     import time
     visit = dict(date=date, time=clock if type(clock) is int else None,
                  here=str(here)[:HERE_CHARS] if here else None, chose=str(chose)[:CHOSE_CHARS] if chose else None,
-                 at=round(time.time(), 3))  # ADR 232 part H: when it was recorded, to tell a visit before a reload
-    visits = (old + [visit])[-VISITS_KEEP:]
-    arti_mind.record_items(base, "stardew", scope=scope, kind="place_visit",
-        items=[dict(id=location, status="observed", facts=dict(date=date, time=clock, visits=visits))],
-        day=ordinal("stardew", date), day_label=date)
+                 at=time.time())  # when it was recorded, to tell a visit before a reload
+    with arti_mind._LEDGER_LOCK:
+        old = visit_records(base, scope).get(location, [])
+        visits = (old + [visit])[-VISITS_KEEP:]
+        _write_visits(base, scope, location, date, clock, visits)
     return visits
+
+
+def _write_visits(base, scope, location, date, clock, visits):
+    import arti_mind
+    from arti_runtime.plan_dates import ordinal
+    facts = dict(date=date, time=clock, **({"visits": visits} if visits else {}))
+    arti_mind.record_items(base, "stardew", scope=scope, kind="place_visit",
+        items=[dict(id=location, status="observed", facts=facts)],
+        day=ordinal("stardew", date), day_label=date)
+
+
+def close_visit(base, scope, location, at, result):
+    """Only the open visit identified by this writer may receive this departure."""
+    import arti_mind
+    from arti_runtime.plan_dates import ordinal
+    from arti_runtime.save_reload import before_reload, latest
+    with arti_mind._LEDGER_LOCK:
+        visits = visit_records(base, scope, strict=True).get(location, [])
+        visit = next((row for row in reversed(visits) if row.get("at") == at), None)
+        if visit is None:
+            return None
+        if before_reload(latest(base, scope), day=ordinal("stardew", visit["date"]), at=at):
+            return None
+        if "result" in visit:
+            return visits if visit["result"] == result else None
+        visit["result"] = result
+        latest_visit = visits[-1]
+        _write_visits(base, scope, location, latest_visit["date"], latest_visit.get("time"), visits)
+        return visits
 
 
 def consume_visit(runtime, request, choice):
     """The arrival page she answered is her visit (fact line on: the page's line is the trimmed one). Records it
     with what that page offered there and what she chose, and clears the pending visit. False: not this page."""
-    pending = getattr(runtime, "_live7_visit_pending", None)
+    from arti_runtime.place_visit_result import matches_arrival, open_visit
+
     line = (((getattr(request, "skill_offer", None) or {}).get("day") or {}).get("kunjungan"))
-    if (not pending or pending.get("scope") != getattr(runtime, "_live7_visit_scope", None)
-            or not isinstance(line, str) or visit_key(line) != visit_key(pending.get("line"))):
-        return False
-    runtime._live7_visits = pending["visits"]
-    runtime._live7_visit_pending = None
+    with runtime._lock:
+        pending = getattr(runtime, "_live7_visit_pending", None)
+        if (not pending or not pending.get("scope") or pending["scope"] != getattr(runtime, "_live7_visit_scope", None)
+                or not isinstance(line, str) or visit_key(line) != visit_key(pending.get("line"))):
+            return False
+        if (sample := pending.get("sample")) is not None and not matches_arrival(request, sample):
+            return False
+        runtime._live7_visits = pending["visits"]
+        runtime._live7_visit_pending = None
     full = pending.get("line") or ""
     here = full.split("). ", 1)[1] if "). " in full else None
     name, arg = getattr(choice, "name", None), getattr(choice, "arg", None)
@@ -241,9 +273,14 @@ def consume_visit(runtime, request, choice):
     except (OSError, ValueError) as exc:
         runtime._journal(dict(ev="visit_memory_error", error=type(exc).__name__))
         return True
-    records = getattr(runtime, "_live7_visit_records", None)
-    if isinstance(records, dict) and visits is not None:
-        records[pending["location"]] = visits
+    with runtime._lock:
+        if visits is None or pending["scope"] != getattr(runtime, "_live7_visit_scope", None):
+            return True
+        records = getattr(runtime, "_live7_visit_records", None)
+        if isinstance(records, dict) and pending["scope"] == getattr(runtime, "_live7_visit_records_scope", None):
+            records[pending["location"]] = visits
+        if sample is not None and sample["place"] == pending["location"]:
+            open_visit(runtime, pending, visits[-1]["at"])
     return True
 
 
@@ -286,30 +323,104 @@ def with_game_words(base, scope, records):
 def mark_reload(records, reload):
     """ADR 232 part H: visits recorded before a reload and dated on or after the day it went back to are her memory of
     the days before it; they keep their place in her record and say so."""
-    if not records or not reload:
+    if not isinstance(records, Mapping) or not records or not reload:
         return records
     from arti_runtime.plan_dates import ordinal
     from arti_runtime.save_reload import before_reload
-    return {place: [dict(v, before_reload=True) if before_reload(reload, day=ordinal("stardew", v.get("date")),
-                                                                 at=v.get("at")) else v for v in visits]
+    reloads = (reload,) if isinstance(reload, Mapping) else native_rows(reload)
+    reloads = [event for event in reloads if isinstance(event, Mapping) and type(event.get("to_day")) is int
+               and type(event.get("at")) in (int, float)]
+    return {place: [dict(v, before_reload=True) if any(
+        before_reload(event, day=ordinal("stardew", v.get("date")), at=v.get("at")) for event in reloads) else v
+                    for v in native_rows(visits) if isinstance(v, Mapping)]
             for place, visits in records.items()}
+
+
+def mark_clock_rewind(records, today, clock, observation_session, marks):
+    """Keep earlier same-day results visibly historical after a bound clock rollback."""
+    marked = {}
+    out = {}
+    if not isinstance(records, Mapping):
+        return records
+    for place, visits in records.items():
+        rows = []
+        for visit in native_rows(visits):
+            if not isinstance(visit, Mapping):
+                continue
+            result = visit.get("result")
+            if not isinstance(result, Mapping):
+                rows.append(visit)
+                continue
+            at = visit.get("at")
+            key = (place, at) if type(at) in (int, float) else None
+            marker = marks.get(key)
+            end = result.get("time")
+            if result and type(end) is not int:
+                end = visit.get("time")
+            if (not marker and visit.get("date") == today and type(clock) is int and type(end) is int
+                    and end > clock):
+                prior_session = result.get("observation_session")
+                marker = ("before_reload" if prior_session and prior_session != observation_session
+                          else "before_clock_rewind")
+            if marker:
+                if key is not None:
+                    marked[key] = marker
+                visit = dict(visit, **{marker: True})
+            rows.append(visit)
+        out[place] = rows
+    marks.clear()
+    marks.update(marked)
+    return out
 
 
 def visit_label(records, location, today):
     """Her own dated record on a trip label: when she arrived there, what her page there said, what she chose.
     ``today``: the game date label her page uses ("Y1 spring 10"). A fact, never advice; None without a record."""
-    visits = [v for v in (records or {}).get(location) or () if isinstance(v, Mapping) and v.get("date")]
+    stored = records.get(location) if isinstance(records, Mapping) else None
+    visits = [v for v in native_rows(stored) if isinstance(v, Mapping) and isinstance(v.get("date"), str)]
     if not visits:
         return None
     shown = visits[-VISITS_SHOWN:]
     parts = []
     for v in shown:
-        when = ("hari ini" if v["date"] == today and not v.get("before_reload") else v["date"]) + (
-            " %02d:%02d" % divmod(v["time"], 100) if type(v.get("time")) is int else "") + (
-            " sebelum save dimuat ulang" if v.get("before_reload") else "")
-        bits = [b for b in (("halamanmu di sana: " + v["here"]) if v.get("here") else None,
-                            ('"%s" (pesan layar game)' % v["game"]) if v.get("game") else None,
-                            ("kamu pilih " + v["chose"]) if v.get("chose") else None) if b]
+        timeline = (" sebelum save dimuat ulang" if v.get("before_reload") else
+                    " sebelum jam game mundur" if v.get("before_clock_rewind") else "")
+        when = ("hari ini" if v["date"] == today and not timeline else v["date"]) + (
+            " %02d:%02d" % divmod(v["time"], 100) if type(v.get("time")) is int else "") + timeline
+        bits = [pattern % v[key] for key, pattern in (("here", "halamanmu di sana: %s"),
+                ("game", '"%s" (pesan layar game)'), ("chose", "kamu pilih %s"))
+                if isinstance(v.get(key), str) and v[key]]
         parts.append(when + (" (" + "; ".join(bits) + ")" if bits else ""))
     more = len(visits) - len(shown)
     return "kunjunganmu ke sana: " + ", ".join(parts) + (" (+%d sebelumnya)" % more if more > 0 else "")
+
+
+RESULT_FIELD = "hasil_kunjungan"
+
+
+def result_label(records, location):
+    """One dated result from her most recent completed stay, including replayed history."""
+    stored = records.get(location) if isinstance(records, Mapping) else None
+    visit = next((v for v in reversed(native_rows(stored))
+                  if isinstance(v, Mapping) and isinstance(v.get("date"), str)
+                  and isinstance(v.get("result"), Mapping) and v["result"].get("end")), None)
+    if visit is None:
+        return None
+    result = visit["result"]
+    when = visit["date"] + (" %02d:%02d" % divmod(visit["time"], 100) if type(visit.get("time")) is int else "")
+    if visit.get("before_reload"):
+        when += " sebelum save dimuat ulang"
+    elif visit.get("before_clock_rewind"):
+        when += " sebelum jam game mundur"
+    bits = []
+    for key, lead in (("seen", "tercatat "), ("available", "ditawarkan "), ("effect", ""),
+                      ("stalled", ""), ("object", "tercatat "), ("pose", ""), ("menu", "")):
+        row = result.get(key)
+        if isinstance(row, Mapping) and isinstance(row.get("label"), str):
+            bits.append(lead + row["label"])
+        if len(bits) == 3:
+            break
+    left = result.get("left_name") or result.get("left")
+    bits.extend(("cakupan belum diketahui", "keluar ke " + left[:28] if isinstance(left, str) and left
+                 else "keluar, tujuan belum terbaca"))
+    return when + " (" + "; ".join(bits) + ")"

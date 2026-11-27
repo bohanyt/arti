@@ -11,6 +11,7 @@ from collections.abc import Mapping
 import re
 
 MAX_CHESTS = 8
+MAX_SLOTS = 72
 LINE_CHARS = 240       # one rendered line (fix58B fact-line bound)
 ROW_CHARS = 140        # a bedtime row (arti_mind_reflect.progress_facts cuts there)
 USES_CHARS = 200
@@ -24,6 +25,81 @@ def parse_ref(ref):
     """(location, [x, y]) of a placed chest's scene fact id, or None."""
     match = _REF.fullmatch(ref) if isinstance(ref, str) else None
     return (match["location"], [int(match["x"]), int(match["y"])]) if match else None
+
+
+def slot_counts(slots):
+    """(taken, total) from a complete, valid published open-chest slot list, or None."""
+    if not isinstance(slots, (list, tuple)) or not 0 < len(slots) <= MAX_SLOTS:
+        return None
+    seen = set()
+    taken = 0
+    for slot in slots:
+        if not isinstance(slot, Mapping) or "item" not in slot:
+            return None
+        idx = slot.get("slot")
+        if type(idx) is not int or not 0 <= idx < len(slots) or idx in seen:
+            return None
+        seen.add(idx)
+        item = slot["item"]
+        if item is None:
+            continue
+        if (not isinstance(item, Mapping)
+                or not isinstance(item.get("qualified_item_id"), str) or not item["qualified_item_id"]
+                or type(item.get("stack")) is not int or not 0 < item["stack"] <= 999999
+                or type(item.get("quality")) is not int or item["quality"] not in (0, 1, 2, 4)):
+            return None
+        taken += 1
+    if len(seen) != len(slots):
+        return None
+    return taken, len(slots)
+
+
+def is_full_for_item(slots, qid, quality=None):
+    """(taken, total) when every published slot is taken and none holds this item; else None."""
+    counts = slot_counts(slots)
+    if counts is None or counts[0] < counts[1] or not isinstance(qid, str) or not qid:
+        return None
+    match_quality = type(quality) is int
+    for slot in slots:
+        item = slot["item"]
+        if (item is not None and item["qualified_item_id"] == qid
+                and (not match_quality or item["quality"] == quality)):
+            return None
+    return counts
+
+
+def store_chest_ref(context, *, blocked=()):
+    """The placed chest ``simpan_ke_chest`` targets here, matching ``_store_chest_pin_entries``."""
+    if not isinstance(context, Mapping):
+        return None
+    from arti_stardew_economy import STORE_CHEST_SUFFIXES, store_chests
+    blocked = set(blocked or ())
+    seen = sorted(
+        (f["tile"]["x"], f["tile"]["y"], ref)
+        for ref, f in (context.get("targets") or {}).items()
+        if isinstance(f, Mapping) and f.get("kind") == "object"
+        and str(ref).endswith(STORE_CHEST_SUFFIXES) and ref not in blocked
+        and isinstance(f.get("tile"), Mapping)
+        and all(type(f["tile"].get(k)) is int for k in ("x", "y"))
+    )
+    here = context.get("actor_tile")
+    if isinstance(here, (list, tuple)) and len(here) == 2 and all(type(v) is int for v in here) and seen:
+        return min(seen, key=lambda s: (max(abs(s[0] - here[0]), abs(s[1] - here[1])), s[2]))[2]
+    chests = [c for c in (context.get("chests") or store_chests(context.get("mines_ui")))
+              if isinstance(c, Mapping) and isinstance(c.get("ref"), str) and c["ref"] not in blocked]
+    if chests:
+        return chests[0]["ref"]
+    return seen[0][2] if len(seen) == 1 else None
+
+
+def _valid_full(raw):
+    if (not isinstance(raw, Mapping)
+            or type(raw.get("taken")) is not int or type(raw.get("total")) is not int
+            or not 0 < raw["total"] <= MAX_SLOTS or raw["taken"] != raw["total"]
+            or not isinstance(raw.get("date"), (list, tuple)) or len(raw["date"]) != 3):
+        return None
+    return dict(taken=raw["taken"], total=raw["total"], date=list(raw["date"]),
+                time=raw.get("time") if type(raw.get("time")) is int else None)
 
 
 def _seen(row):
@@ -49,17 +125,27 @@ class ChestMemory:
             items = {str(q): c for q, c in row["items"].items() if type(c) is int and c > 0}
             names = {str(q): str(n)[:40] for q, n in (row.get("names") or {}).items() if isinstance(n, str)}
             location = row["location"] if isinstance(row.get("location"), str) and row["location"] else parsed[0]
-            self.rows[ref] = dict(location=location, tile=parsed[1], items=items, names=names, date=list(row["date"]),
-                                  time=row.get("time") if type(row.get("time")) is int else None,
-                                  order=row.get("order") if type(row.get("order")) is int else 0)
+            loaded = dict(location=location, tile=parsed[1], items=items, names=names, date=list(row["date"]),
+                          time=row.get("time") if type(row.get("time")) is int else None,
+                          order=row.get("order") if type(row.get("order")) is int else 0)
+            if (full := _valid_full(row.get("full"))) is not None:
+                loaded["full"] = full
+            self.rows[ref] = loaded
         self._order = max((r["order"] for r in self.rows.values()), default=0)
 
     def dump(self):
-        return dict(chests={ref: dict(row, tile=list(row["tile"]), items=dict(row["items"]), names=dict(row["names"]))
-                            for ref, row in self.rows.items()})
+        out = {}
+        for ref, row in self.rows.items():
+            dumped = dict(row, tile=list(row["tile"]), items=dict(row["items"]), names=dict(row["names"]))
+            if (full := _valid_full(row.get("full"))) is not None:
+                dumped["full"] = full
+            else:
+                dumped.pop("full", None)
+            out[ref] = dumped
+        return dict(chests=out)
 
     def observe(self, ref, slots, *, date, clock=None, names=None, location=None):
-        """One native read of an open chest. True when what she knows changed (contents, or the day of the sighting).
+        """One native read of an open chest. True when what she knows changed (contents, fullness, or sighting day).
 
         ``location`` is where she stands: a scene fact id carries a shortened name for a cabin or a shed."""
         parsed = parse_ref(ref)
@@ -74,16 +160,68 @@ class ChestMemory:
                 if isinstance(item.get("name"), str) and item["name"]:
                     known[qid] = item["name"][:40]
         before = self.rows.get(ref)
+        before_full = _valid_full((before or {}).get("full"))
+        counts = slot_counts(slots)
+        has_free = any(isinstance(slot, Mapping) and "item" in slot and slot["item"] is None for slot in (slots or ()))
+        kept_full = None
+        if (before_full is not None and not has_free and counts is not None
+                and counts == (before_full["total"], before_full["total"])):
+            kept_full = (dict(before_full) if list(before["date"]) == list(date)
+                         else dict(taken=counts[0], total=counts[1], date=list(date),
+                                   time=clock if type(clock) is int else None))
         for qid in items:
             name = (known.get(qid) or (names or {}).get(qid) or ((before or {}).get("names") or {}).get(qid))
             if isinstance(name, str) and name:
                 known[qid] = name[:40]
         self._order += 1
-        self.rows[ref] = dict(location=location or parsed[0], tile=parsed[1], items=items, names=known, date=list(date),
-                              time=clock if type(clock) is int else None, order=self._order)
+        row = dict(location=location or parsed[0], tile=parsed[1], items=items, names=known, date=list(date),
+                   time=clock if type(clock) is int else None, order=self._order)
+        if kept_full is not None:
+            row["full"] = kept_full
+        self.rows[ref] = row
         while len(self.rows) > MAX_CHESTS:
             del self.rows[min(self.rows, key=lambda k: self.rows[k]["order"])]
-        return before is None or before["items"] != items or list(before["date"]) != list(date)
+        return (before is None or before["items"] != items or list(before["date"]) != list(date)
+                or before_full != kept_full)
+
+    def note_full(self, ref, taken, total, *, date, clock=None, location=None, slots=None, names=None):
+        """Record a native open-chest full observation (taken == total) on this chest's memory row."""
+        parsed = parse_ref(ref)
+        if (parsed is None or type(taken) is not int or type(total) is not int
+                or not 0 < total <= MAX_SLOTS or taken != total
+                or not isinstance(date, (list, tuple)) or len(date) != 3):
+            return False
+        if slots is not None:
+            if slot_counts(slots) != (taken, total):
+                return False
+            self.observe(ref, slots, date=date, clock=clock, names=names, location=location)
+        row = self.rows.get(ref)
+        full = dict(taken=taken, total=total, date=list(date), time=clock if type(clock) is int else None)
+        if row is not None and _valid_full(row.get("full")) == full:
+            return False
+        self._order += 1
+        if row is None:
+            row = dict(location=location or parsed[0], tile=parsed[1], items={}, names={}, date=list(date),
+                       time=full["time"], order=self._order)
+            self.rows[ref] = row
+        else:
+            if location:
+                row["location"] = location
+            row.update(date=list(date), time=full["time"], order=self._order)
+        row["full"] = full
+        while len(self.rows) > MAX_CHESTS:
+            del self.rows[min(self.rows, key=lambda k: self.rows[k]["order"])]
+        return True
+
+    def full_note(self, ref, *, location=None):
+        """Dated page line when the newest observation of ``ref`` showed every slot taken; else None."""
+        row = self.rows.get(ref)
+        if row is None or (location is not None and row.get("location") != location):
+            return None
+        full = _valid_full(row.get("full"))
+        if full is None:
+            return None
+        return "peti ini penuh waktu kamu buka, %d/%d (%s)" % (full["taken"], full["total"], _seen(full))
 
     def here(self, location):
         return [dict(ref=ref, tile=list(row["tile"])) for ref, row in self.rows.items() if row["location"] == location]
@@ -103,6 +241,8 @@ class ChestMemory:
             row["names"][qid] = outcome["name"]
         else:
             row["items"].pop(qid, None)
+            if outcome.get("destination") == "inventory":
+                row.pop("full", None)
         self._order += 1
         row.update(date=list(outcome["date"]), time=outcome["clock"], order=self._order)
         return True

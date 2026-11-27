@@ -5,6 +5,12 @@ from collections.abc import Mapping
 LEAVE = ("Peta festival. pergi_ke home artinya meninggalkan festival; pergi_ke tujuan mana pun juga: "
          "game menanyakan semua pemain, festival berakhir untuk semua, jam menjadi malam, kamu ada di depan rumah. "
          "Tetap di sini juga boleh.")
+# With the program's helper as HOST (solo) the HOST never enters, so the festival does not end for all
+# (when she leaves, the clock does not jump and the town is still the festival map).
+LEAVE_SOLO = ("Peta festival. pergi_ke home artinya meninggalkan festival; pergi_ke tujuan mana pun juga: "
+              "game menanyakan semua pemain, lalu kamu keluar dari peta festival. Tetap di sini juga boleh.")
+SEATED = "Kamu sedang duduk di kursi festival; berdiri dulu sebelum berjalan atau pergi."
+STAND_LABEL = "Berdiri dari kursi"
 
 
 def _clock(value):
@@ -82,14 +88,19 @@ def day_line(calendar, today, *, clock=None, names=None, catalog=None, here=None
     return "hari ini festival: " + "; ".join(parts)
 
 
-def leave_line(location, calls, movement=None):
-    """Any trip off a festival map ends it. Staying is allowed. None when she is not on a festival map."""
+def leave_line(location, calls, movement=None, *, offered=False, seated=False, owner_hosted=False):
+    """The leave sentence only while the game's own leave question can be asked (``offered``); seated, one
+    line that she sits; with the helper as HOST no claim that the festival ends for all. None off a festival map."""
     from arti_stardew_event_control import festival_free_roam
-    festival = location == "Temp" or festival_free_roam(movement)
-    if not festival:
+    if not (location == "Temp" or festival_free_roam(movement) or seated):
         return None
+    if seated:
+        return SEATED
+    if not offered:
+        return None
+    text = LEAVE if owner_hosted else LEAVE_SOLO
     going = any(getattr(c, "name", None) == "pergi_ke" for c in calls or ())
-    return LEAVE if going else ("Ini peta festival. " + LEAVE.split(". ", 1)[-1])
+    return text if going else ("Ini peta festival. " + text.split(". ", 1)[-1])
 
 
 def inside_line(location, movement=None, actions=None, calendar=None, today=None, names=None):
@@ -177,10 +188,11 @@ ROUTE_WAIT_S = 30.0
 
 
 def event_page(snapshot):
-    """ADR 240: the people and press cells her page offers, nearer first, with how many are left for a closer look.
+    """The people and press cells her page offers, nearer first, with how many are left for a closer look.
 
     Before the route plan is ready every choice ranks by distance from her tile; once it is ready, routed choices
-    (reachable now) rank first. Things are described by ADR 236 B's rule (where they are, from her tile)."""
+    (reachable now) rank first and people without a handle are not offered as ngobrol_hadiah (they stay seen).
+    Things are described by where they are, from her tile."""
     import arti_stardew_skills as S
     from arti_runtime.map_affordances import WORDS, _relative
     actions = S._g(snapshot, "event_actions") or {}
@@ -192,12 +204,14 @@ def event_page(snapshot):
         far = abs(row["tile"][0] - here[0]) + abs(row["tile"][1] - here[1]) if here and row["tile"] else 9999
         return (ready and row["handle"] is None, far, row["tile"] or (9999, 9999), arg)
     rows = sorted(event_choices(snapshot).items(), key=rank)
-    people = [(arg, row) for arg, row in rows if row["name"] == "ngobrol_hadiah"][:PAGE_LIMIT]
+    people = [(arg, row) for arg, row in rows
+              if row["name"] == "ngobrol_hadiah" and (not ready or row["handle"] is not None)][:PAGE_LIMIT]
     things = [(arg, row) for arg, row in rows if row["name"] == "aksi"][:PAGE_LIMIT]
     labels = {}
     for arg, row in things:
         where = _relative(row["tile"], here, "tempatmu") if here and row["tile"] else "di peta acara ini"
-        labels[arg] = "Bisa " + WORDS["press"] + " " + where
+        # A seat is what the screen shows, a seat; other cells are what answers a press.
+        labels[arg] = ("Kursi " if row["kind"] in ("festival_seat", "festival_seat_route") else "Bisa " + WORDS["press"] + " ") + where
     people_total = max(seen.get("people_total", 0) if type(seen.get("people_total")) is int else 0,
                        sum(row["name"] == "ngobrol_hadiah" for _, row in rows))
     things_total = max(seen.get("things_total", 0) if type(seen.get("things_total")) is int else 0,
@@ -221,7 +235,7 @@ def action_calls(snapshot):
     out, seen = [], set()
     labels = actions.get("route_labels") if isinstance(actions.get("route_labels"), Mapping) else {}
     kinds = {"festival_npc", "festival_npc_route", "festival_shop", "festival_shop_route", "shop",
-             "festival_seat", "festival_seat_route", "festival_host", "festival_host_route"}
+             "festival_seat", "festival_seat_route", "festival_host", "festival_host_route", "festival_stand"}
     for handle, target in _targets(actions):
         if not isinstance(target, Mapping):
             continue
@@ -256,6 +270,8 @@ def labels(snapshot):
         kind = (target or {}).get("kind") if isinstance(target, Mapping) else None
         if not name and kind in ("festival_shop", "festival_shop_route", "shop"):
             name = "toko festival"
+        if not name and kind == "festival_stand":
+            name = STAND_LABEL
         if not name and host and kind in ("festival_npc", "festival_npc_route", "festival_host", "festival_host_route"):
             name = "bicara dengan " + str(host)
         if name:
@@ -263,6 +279,71 @@ def labels(snapshot):
             if source:
                 out[source] = name
     return out
+
+
+FESTIVAL_ACT_SENDS_MAX = 2  # at most two sends per skill after an explicit pre-publication discard
+
+
+def _published_since(last, state):
+    """True when an action was published since this skill's own send: that one is waited for and read back.
+
+    The action before the send is no request of this skill, whatever became of it (a walk into the festival
+    that ended uncertain can still be the last action when she chooses her first talk)."""
+    import arti_stardew_skills as S
+    prev = state.get("festival_act_prev")
+    return prev is not None and tuple(S._g(last, key) for key in ("request_id", "lifecycle", "reason")) != prev
+
+
+def inspect_refused(runtime, request, choice):
+    """Explicit pre-publication discard hook (same contract as arti_stardew_generic_world.inspect_refused)."""
+    run = getattr(getattr(runtime, "_skill_session", None), "current", None)
+    if (run is None or run.goal_id != request.goal_id
+            or getattr(choice, "operation", None) != "event_action"
+            or run.call.name not in ("aksi", "ngobrol_hadiah")
+            or run.state.get("festival_act_sent") != run.call.arg
+            or run.state.get("festival_act_pending_args") != choice.args):
+        return
+    last = getattr(getattr(runtime, "_active", None), "last_action", None)
+    if _published_since(last, run.state):
+        return
+    run.state.pop("festival_act_sent", None)
+    run.state.pop("festival_act_pending_args", None)
+
+
+def completed_step(call, snap, state):
+    """Finish when this skill's own sent event_action completed with observed_event_effect."""
+    import arti_stardew_skills as S
+    if getattr(call, "name", None) not in ("aksi", "ngobrol_hadiah") or not call.arg:
+        return None
+    if state.get("festival_act_sent") != call.arg:
+        return None
+    last = S._g(S._g(snap, "working_memory"), "last_action")
+    last_pin = tuple(S._g(last, key) for key in ("request_id", "lifecycle", "reason"))
+    if (last and S._g(last, "cleanup_confirmed") is True and last_pin != state.get("festival_act_prev")
+            and S._g(last, "lifecycle") == "completed" and S._g(last, "world_effect_status") == "observed_event_effect"):
+        return S.Step("done", reason="observed_event_effect")
+    return None
+
+
+def own_dialogue(run, last, native):
+    """The event takeover is the DialogueBox this run's own completed talk opened (its receipt's receiver).
+
+    Read as ``control_taken:event``, that dialogue would file the verified talk NOT_READY with a FAULT. Any
+    other menu, receiver, request or takeover keeps the old rule."""
+    import arti_stardew_skills as S
+    after = S._g(last, "after") or {}
+    state = getattr(run, "state", None) or {}
+    call = getattr(run, "call", None)
+    return bool(getattr(call, "name", None) in ("aksi", "ngobrol_hadiah") and call.arg
+                and state.get("festival_act_sent") == call.arg
+                and S._g(last, "request_id") and _published_since(last, state)
+                and S._g(last, "lifecycle") == "completed" and S._g(last, "cleanup_confirmed") is True
+                and S._g(last, "world_effect_status") == "observed_event_effect"
+                and S._g(last, "outcome") == "DialogueOpened" and isinstance(after, Mapping)
+                and isinstance(native, Mapping) and native.get("control_taken") == "event"
+                and native.get("active_menu") == "DialogueBox" == after.get("menu_type")
+                and isinstance(after.get("receiver_token"), str) and after["receiver_token"]
+                and native.get("surface_receiver") == after["receiver_token"])
 
 
 def press(call, snap, state):
@@ -307,6 +388,13 @@ def press(call, snap, state):
         handle = next((h for h, t in _targets(actions) if call.arg in (h, t.get("source_fact_id"))), None)
         if handle is None:
             return None
+    if state.get("festival_act_sends") and _published_since(last, state):
+        return S._wait(state, "festival_act", "event_action_unverified", "Amati hasil aksi festival", S.WAIT_S)
+    if state.get("festival_act_sends", 0) >= FESTIVAL_ACT_SENDS_MAX:
+        return S.Step("fail", reason="event_action_unverified")
+    args = {"handle": handle, "btn": "A"}
     state["festival_act_sent"] = call.arg
     state["festival_act_prev"] = last_pin
-    return S._decision(S.act("event_action", {"handle": handle, "btn": "A"}))
+    state["festival_act_pending_args"] = args
+    state["festival_act_sends"] = state.get("festival_act_sends", 0) + 1
+    return S._decision(S.act("event_action", args))

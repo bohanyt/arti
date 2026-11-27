@@ -63,7 +63,8 @@ PRIMITIVE_MOVE_THROUGH = "move_through"
 # captures them only with its flag on, so the v1 kinds / digests are unchanged with the flag off.
 EVENT_ACTION_OUTCOMES = {"event_target": "EventTargetActivated", "festival_npc": "DialogueOpened",
     "festival_shop": "MenuOpened", "festival_seat": "FestivalSeated", "festival_egg": "FestivalEggCollected",
-    "festival_egg_route": "FestivalEggCollected", "event_interact": "EventInteractionObserved"}
+    "festival_egg_route": "FestivalEggCollected", "event_interact": "EventInteractionObserved",
+    "festival_stand": "FestivalStood"}  # the game's own A while she sits on a festival seat
 APPROACH_ROUTE_KINDS = ("event_target_route", "festival_npc_route", "festival_shop_route", "festival_seat_route", "event_interact_route")
 EVENT_ACTION_OUTCOMES.update({kind: EVENT_ACTION_OUTCOMES[kind[:-6]] for kind in APPROACH_ROUTE_KINDS})
 EVENT_ROUTE_KINDS = APPROACH_ROUTE_KINDS + ("festival_egg_route",)
@@ -2161,9 +2162,9 @@ def validate_world_interaction_args(args: dict) -> None:
         if type(args[key]) is not int or not 0<=args[key]<=(3 if key=="facing" else 4096):
             raise KesalahanPerintah("invalid_world_interaction_"+key)
     distance = abs(args["tile_x"]-args["actor_tile_x"])+abs(args["tile_y"]-args["actor_tile_y"])
-    # Native A can harvest a walkable crop at the actual grab tile underfoot.
-    # Capture/re-capture still owns admission; the wire only bounds its reach.
-    if args["kind"] in (*GENERIC_WORLD_KINDS, "harvest_crop"):
+    # Native A can harvest a walkable crop at the actual grab tile underfoot (and stand her up from a seat
+    # whose grab tile is her own). Capture/re-capture still owns admission; the wire only bounds its reach.
+    if args["kind"] in (*GENERIC_WORLD_KINDS, "harvest_crop", "festival_stand"):
         if distance > 1:
             raise KesalahanPerintah("world_interaction_not_adjacent")
     elif args["kind"] != HOUSE_ROUTE_KIND and args["kind"] not in APPROACH_ROUTE_KINDS and (not 0 <= distance <= 9 if args["kind"] == "festival_egg_route" else distance != 1):

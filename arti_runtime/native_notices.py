@@ -119,12 +119,86 @@ def mailbox_sighting(w, today, count):
     return max(seen, key=lambda r: r.get("clock") if type(r.get("clock")) is int else -1)
 
 
-def mailbox_line(receipt, count):
+def mailbox_since(w, sighting):
+    """The day she first saw the flag since she last opened a letter, when that was before this sighting's."""
+    def at(r):
+        return _day(r) or 0, r.get("clock") if type(r.get("clock")) is int else -1
+    # A letter whose words she read; a save flag alone (seen_receipts.backfill_from_save) is no opened letter.
+    opened = max((at(r) for r in w.matching("letter_opened")), default=(0, -1))
+    first = min((r for r in w.matching("mailbox_visible", text=False) if opened < at(r) <= at(sighting)), key=at, default=None)
+    if first is None or _day(first) == _day(sighting):
+        return None
+    return (first.get("game_day") or {}).get("text")
+
+
+def _collection(receipt):
+    return str(receipt.get("source") or "").endswith(":collection")
+
+
+def _at(r):
+    return _day(r) or 0, r.get("clock") if type(r.get("clock")) is int else -1
+
+
+def letter_arrival(w, receipt):
+    """(game day, exact) of a letter, from the box she saw; None when she saw no flag before opening it.
+
+    O is the opening (a collection re-read takes its first opening). E is her latest sighting of her box with no flag
+    (``mailbox_empty_visible``) before O; F her first flag (``mailbox_visible``) after E, or with no E her first flag,
+    at or before O. F is the day it came only when E's day is F's day or the day before; otherwise F is a bound (the box
+    had mail by F). ``w`` is any receipt index with ``rows`` of one farm scope."""
+    key = (id(w.rows), len(w.rows))
+    cache = getattr(w, "_letter_arrival", None)
+    if cache is None or cache[0] != key:
+        rows = [r for r in w.rows if isinstance(r, Mapping)]
+        flags, empties = (sorted((r for r in rows if r.get("kind") == kind), key=_at)
+                          for kind in ("mailbox_visible", "mailbox_empty_visible"))
+        # Words she read: a save flag (seen_receipts.backfill_from_save) carries no text and is no opened letter.
+        reads = [r for r in rows if r.get("kind") == "letter_opened" and r.get("text_ref") and not _collection(r)]
+        cache = w._letter_arrival = (key, flags, empties, reads, {})
+    _, flags, empties, reads, memo = cache
+    if _collection(receipt):
+        receipt = min((r for r in reads if r.get("id") == receipt.get("id")), key=_at, default=None)
+        if receipt is None:
+            return None
+    opened = _at(receipt)
+    if opened not in memo:
+        empty = next((r for r in reversed(empties) if _at(r) < opened), None)
+        first = next((r for r in flags if (empty is None or _at(empty) < _at(r)) and _at(r) <= opened), None)
+        came = first.get("game_day") if first is not None and isinstance(first.get("game_day"), Mapping) else None
+        exact = (came is not None and empty is not None and type(came.get("absolute")) is int
+                 and type(_day(empty)) is int and 0 <= came["absolute"] - _day(empty) <= 1)
+        memo[opened] = (came, exact) if came is not None else None
+    return memo[opened]
+
+
+def letter_stamp(w, receipt):
+    """The day she opened the letter (the provenance every native fact carries), then only what the box
+    she saw tells: the day it came, the day it was there at the latest, or that she cannot know."""
+    came, exact = letter_arrival(w, receipt) or ({}, False)
+    opened = (receipt.get("game_day") or {}).get("text") or "tanggal belum tercatat"
+    return "dilihat di %s, %s; %s" % ("koleksi surat" if _collection(receipt) else "surat", opened,
+                                       "surat ini datang %s" % came["text"] if exact and came.get("text") else
+                                       "surat ini sudah ada di kotak paling lambat %s; kapan datangnya tidak diketahui"
+                                       % came["text"] if came.get("text") else
+                                       "tidak diketahui sejak kapan surat ini menunggu di kotak")
+
+
+def letter_fresh(w, receipt, today):
+    """A letter speaks of its day only when the day it came is known and is ``today`` (else its opening)
+    or the day before. A bound, an unknown arrival or a collection re-read: no."""
+    came, exact = letter_arrival(w, receipt) or ({}, False)
+    ref = today if type(today) is int else _day(receipt)
+    return (not _collection(receipt) and exact and type(came.get("absolute")) is int and type(ref) is int
+            and 0 <= ref - came["absolute"] <= 1)
+
+
+def mailbox_line(receipt, count, since=None):
     where = "%s %s" % (receipt.get("place") or "tempat belum tercatat",
                        str(receipt.get("id") or "").split(":", 1)[-1])
     when = "%s %s" % ((receipt.get("game_day") or {}).get("text") or "tanggal belum tercatat", _clock(receipt.get("clock")))
     if type(count) is int:
-        return "Kotak suratmu (%s) bertanda surat; terlihat %s." % (where, when)
+        return "Kotak suratmu (%s) bertanda surat; terlihat %s%s." % (
+            where, when, ", pertama kali %s, belum kamu buka" % since if since else "")
     return "Tanda surat terlihat di kotak suratmu (%s), %s." % (where, when)
 
 

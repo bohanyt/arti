@@ -262,3 +262,299 @@ def test_codex_weekly_parse_and_unknown(tmp_path):
     assert row["used_percent"] == 25 and row["left_percent"] == 75 and "error" not in row
     (day / "s.jsonl").write_text("not json\n", encoding="utf-8")
     assert read_codex_weekly(tmp_path)["error"] == "no_rate_limits"
+
+
+# ------------------------------------------------------------------ machine preflight: gpu, disk_active, ears, save_date
+
+def test_old_evaluate_checks_callers_get_exact_existing_lines():
+    names = [c.name for c in bringup.evaluate_checks(**_ok_kwargs())]
+    assert names == ["source", "scratch", "vts", "embed", "watcher", "alerts", "dll", "memory", "disk", "voice_supply"]
+
+
+def test_gpu_preference_parser_and_verdicts():
+    assert bringup.parse_gpu_preference("GpuPreference=2;") == 2
+    assert bringup.parse_gpu_preference("AutoHDREnable=0;GpuPreference=1;") == 1
+    assert bringup.parse_gpu_preference("GpuPreference=0") == 0
+    assert bringup.parse_gpu_preference("GpuPreference=bad;") is None
+    assert bringup.parse_gpu_preference("") is None
+    assert bringup.parse_gpu_preference(None) is None
+
+    game = r"C:\Games\Stardew Valley"
+    both_high = {
+        r"c:/games/stardew valley/StardewModdingAPI.exe": "GpuPreference=2;",
+        r"C:\Games\Stardew Valley\Stardew Valley.exe": "SwapEffectUpgradeEnable=1;GpuPreference=2;",
+    }
+    ok_multi = bringup.gpu_check(bringup.parse_gpu_state(both_high, ["Adapter A", "Adapter B"], game))
+    assert ok_multi.status == "OK" and "Adapter A" in ok_multi.detail and "Adapter B" in ok_multi.detail
+
+    ok_single = bringup.gpu_check(bringup.parse_gpu_state({}, ["Adapter A"], game))
+    assert ok_single.status == "OK" and "1 adapter" in ok_single.detail and "Adapter A" in ok_single.detail
+
+    only_one = {r"C:\Games\Stardew Valley\StardewModdingAPI.exe": "GpuPreference=2;"}
+    warn = bringup.gpu_check(bringup.parse_gpu_state(only_one, ["Adapter A", "Adapter B"], game))
+    assert warn.status == "WARN"
+    assert "StardewModdingAPI.exe=high performance" in warn.detail
+    assert "Stardew Valley.exe=unset" in warn.detail
+    assert "Adapter A" in warn.detail and "Adapter B" in warn.detail
+    assert "High performance" in warn.detail and "Windows Settings" in warn.detail
+
+    power_save = {
+        r"C:\Games\Stardew Valley\StardewModdingAPI.exe": "GpuPreference=1;",
+        r"C:\Games\Stardew Valley\Stardew Valley.exe": "GpuPreference=0;",
+    }
+    warn2 = bringup.gpu_check(bringup.parse_gpu_state(power_save, ["Adapter A", "Adapter B"], game))
+    assert warn2.status == "WARN"
+    assert "power saving" in warn2.detail and "system default" in warn2.detail
+
+    for bad in (
+        bringup.parse_gpu_state(None, ["Adapter A"], game),
+        bringup.parse_gpu_state({}, [], game),
+        bringup.parse_gpu_state({}, ["Adapter A"], ""),
+        bringup.probe_gpu(game, prefs_fn=lambda: (_ for _ in ()).throw(OSError("reg denied")),
+                          adapters_fn=lambda: ["Adapter A"]),
+        bringup.probe_gpu(game, prefs_fn=lambda: {},
+                          adapters_fn=lambda: (_ for _ in ()).throw(TimeoutError("slow"))),
+        None,
+    ):
+        chk = bringup.gpu_check(bad)
+        assert chk.status == "WARN" and "UNKNOWN" in chk.detail
+
+
+def test_disk_active_parser_thresholds_and_no_console_window():
+    import subprocess
+    import sys
+
+    idle_csv = (
+        '\n"(PDH-CSV 4.0)","\\\\HOST\\LogicalDisk(C:)\\% Idle Time"\n'
+        '"01/02/2030 03:00:00.000","35.0"\n'
+        'Exiting, please wait...\n'
+    )
+    assert bringup.parse_disk_active_csv(idle_csv) == pytest.approx(65.0)
+
+    disk_csv = (
+        '"(PDH-CSV 4.0)","\\\\HOST\\LogicalDisk(C:)\\% Disk Time"\n'
+        '"01/02/2030 03:00:00.000","18.5"\n'
+        '"01/02/2030 03:00:01.000","21.5"\n'
+    )
+    assert bringup.parse_disk_active_csv(disk_csv) == pytest.approx(20.0)
+
+    over_csv = (
+        '"(PDH-CSV 4.0)","\\\\HOST\\LogicalDisk(C:)\\% Disk Time"\n'
+        '"01/02/2030 03:00:00.000","145.0"\n'
+    )
+    assert bringup.parse_disk_active_csv(over_csv) == pytest.approx(100.0)
+    assert bringup.parse_disk_active_csv('"Error: No valid counters."\n') is None
+    assert bringup.parse_disk_active_csv("") is None
+    assert bringup.parse_disk_active_csv(None) is None
+
+    ok = bringup.disk_active_check(59.4)
+    assert ok.status == "OK" and "59%" in ok.detail
+    warn_edge = bringup.disk_active_check(60.0)
+    assert warn_edge.status == "WARN" and "60%" in warn_edge.detail
+    warn_busy = bringup.disk_active_check(100.0)
+    assert warn_busy.status == "WARN" and "100%" in warn_busy.detail
+    for bad in (None, True, "bad", -1.0, 120.0, float("nan"), float("inf")):
+        unk = bringup.disk_active_check(bad)
+        assert unk.status == "WARN" and "UNKNOWN" in unk.detail
+    skipped = bringup.disk_active_check(dict(skipped=True))
+    assert skipped.status == "OK" and "skipped" in skipped.detail
+
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen["cmd"] = cmd
+        seen["kw"] = kw
+        return SimpleNamespace(returncode=0, stdout=idle_csv)
+
+    got = bringup.probe_disk_active(drive="C:", timeout=60.0, run_fn=fake_run)
+    assert got == pytest.approx(65.0)
+    assert seen["cmd"][0] == "typeperf"
+    assert seen["kw"]["timeout"] == 10.0  # never longer, whatever the caller asks
+    bringup.probe_disk_active(drive="C:", run_fn=fake_run)
+    assert seen["kw"]["timeout"] == 10.0
+    assert seen["kw"]["stdin"] is subprocess.DEVNULL
+    assert seen["kw"]["creationflags"] == getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    if sys.platform == "win32":
+        assert seen["kw"]["creationflags"] & subprocess.CREATE_NO_WINDOW
+
+    assert bringup.probe_disk_active(run_fn=lambda *a, **k: SimpleNamespace(returncode=1, stdout="")) is None
+    assert bringup.probe_disk_active(
+        run_fn=lambda *a, **k: (_ for _ in ()).throw(subprocess.TimeoutExpired("typeperf", 3.0))
+    ) is None
+    assert bringup.probe_disk_active(
+        run_fn=lambda *a, **k: (_ for _ in ()).throw(FileNotFoundError("no typeperf"))
+    ) is None
+
+
+def test_ears_probe_folders_and_verdicts(tmp_path):
+    import sys
+
+    venv = tmp_path / "venv"
+    (venv / "Scripts").mkdir(parents=True)
+    (venv / "Scripts" / "python.exe").write_bytes(b"")
+    ct2 = venv / "Lib" / "site-packages" / "ctranslate2"
+    ct2.mkdir(parents=True)
+    (ct2 / "cudnn64_9.dll").write_bytes(b"")
+
+    had_fw, had_ct2 = "faster_whisper" in sys.modules, "ctranslate2" in sys.modules
+    missing = bringup.probe_ears(venv, env={"PATH": ""})
+    if not had_fw:
+        assert "faster_whisper" not in sys.modules
+    if not had_ct2:
+        assert "ctranslate2" not in sys.modules
+    chk_cpu = bringup.ears_check(missing)
+    assert chk_cpu.status == "WARN"
+    assert "speech recognition will run on the CPU" in chk_cpu.detail
+    assert "cublas64_12.dll" in chk_cpu.detail
+
+    cublas = venv / "Lib" / "site-packages" / "nvidia" / "cublas" / "bin"
+    cublas.mkdir(parents=True)
+    (cublas / "cublas64_12.dll").write_bytes(b"")
+    (cublas / "cublasLt64_12.dll").write_bytes(b"")
+    ok_state = bringup.probe_ears(venv, env={"PATH": ""})
+    chk_ok = bringup.ears_check(ok_state)
+    assert chk_ok.status == "OK" and "cublas64_12.dll" in chk_ok.detail
+
+    # Also found via PATH when not under site-packages/nvidia.
+    venv2 = tmp_path / "venv2"
+    (venv2 / "Scripts").mkdir(parents=True)
+    (venv2 / "Scripts" / "python.exe").write_bytes(b"")
+    (venv2 / "Lib" / "site-packages" / "ctranslate2").mkdir(parents=True)
+    extra = tmp_path / "cuda_bin"
+    extra.mkdir()
+    for dll in ("cublas64_12.dll", "cublasLt64_12.dll", "cudnn_ops_infer64_8.dll"):
+        (extra / dll).write_bytes(b"")
+    chk_path = bringup.ears_check(bringup.probe_ears(venv2, env={"PATH": str(extra)}))
+    assert chk_path.status == "OK"
+
+    for bad in (
+        bringup.probe_ears(tmp_path / "no_venv", env={"PATH": ""}),
+        bringup.probe_ears(None, env={"PATH": ""}),
+        bringup.probe_ears(venv, env={"PATH": ""}, timeout=-1.0),
+        None,
+    ):
+        unk = bringup.ears_check(bad)
+        assert unk.status == "WARN" and "UNKNOWN" in unk.detail
+
+
+def test_save_date_probe_reads_only_continued_json(tmp_path):
+    import json
+
+    run = tmp_path / "run"
+    run.mkdir()
+    chk_new = bringup.save_date_check(bringup.probe_save_date(run))
+    assert chk_new.status == "OK" and "continued.json" in chk_new.detail
+
+    (run / "continued.json").write_text(
+        json.dumps(dict(save="TestFarm_123", season="spring", day=13, year=1)),
+        encoding="utf-8",
+    )
+    chk_date = bringup.save_date_check(bringup.probe_save_date(run))
+    assert chk_date.status == "OK" and "Year 1 Spring 13" in chk_date.detail
+
+    for bad_payload in (
+        json.dumps(dict(save="TestFarm_123", season="?", day=0, year=0)),
+        json.dumps(dict(save="TestFarm_123", season="spring", day=29, year=1)),
+        json.dumps(dict(save="TestFarm_123", season="spring", day=True, year=1)),
+        json.dumps(["not", "a", "dict"]),
+        "{bad json",
+    ):
+        (run / "continued.json").write_text(bad_payload, encoding="utf-8")
+        chk_unk = bringup.save_date_check(bringup.probe_save_date(run))
+        assert chk_unk.status == "WARN" and "UNKNOWN" in chk_unk.detail
+
+    assert bringup.save_date_check(bringup.probe_save_date(None)).status == "WARN"
+    assert bringup.save_date_check(None).status == "WARN"
+
+
+def test_run_preflight_new_probes_warn_on_failure_and_skip_disk_active_when_game_up(tmp_path):
+    lines = []
+    boom = lambda: (_ for _ in ()).throw(RuntimeError("probe crashed"))
+    rc = bringup.run_preflight(
+        _ns(), root=tmp_path / "repo", print_fn=lines.append,
+        porcelain_fn=lambda root: "",
+        ignored_fn=lambda root, rel: True,
+        scratch_fn=lambda root, env: tmp_path / "scratch",
+        vts_fn=lambda: True,
+        launcher_fn=lambda root: None,
+        embed_fn=lambda: dict(ok=True, using="primary", base="http://127.0.0.1:1234/v1",
+                              fallback="http://127.0.0.1:1234/v1"),
+        watcher_fn=lambda: "x",
+        alert_fn=lambda: [("SAWERIA_STREAM_KEY", 8)],
+        dll_fn=lambda: (True, "installed hash matches booking"),
+        memory_fn=lambda: 40.0,
+        disk_fn=lambda: 30.0,
+        voice_supply_fn=lambda: dict(used_percent=20, left_percent=80),
+        gpu_fn=boom,
+        disk_active_fn=boom,
+        ears_fn=boom,
+        save_date_fn=boom,
+        env={"LOCALAPPDATA": str(tmp_path)},
+    )
+    assert rc == 0
+    for name in ("gpu", "disk_active", "ears", "save_date"):
+        assert any(x.startswith("WARN %s:" % name) and "UNKNOWN" in x for x in lines), (name, lines)
+
+    called = []
+    skip_lines = []
+    rc2 = bringup.run_preflight(
+        _ns(), root=tmp_path / "repo", print_fn=skip_lines.append,
+        porcelain_fn=lambda root: "",
+        ignored_fn=lambda root, rel: True,
+        scratch_fn=lambda root, env: tmp_path / "scratch",
+        vts_fn=lambda: True,
+        launcher_fn=lambda root: None,
+        embed_fn=lambda: dict(ok=True, using="primary", base="http://127.0.0.1:1234/v1",
+                              fallback="http://127.0.0.1:1234/v1"),
+        watcher_fn=lambda: "x",
+        alert_fn=lambda: [("SAWERIA_STREAM_KEY", 8)],
+        dll_fn=lambda: (True, "installed hash matches booking"),
+        memory_fn=lambda: 40.0,
+        disk_fn=lambda: 30.0,
+        voice_supply_fn=lambda: dict(used_percent=20, left_percent=80),
+        disk_active_fn=lambda: called.append(1) or 90.0,
+        skip_disk_active=True,
+        env={"LOCALAPPDATA": str(tmp_path)},
+    )
+    assert rc2 == 0 and called == []
+    assert any(x.startswith("OK disk_active:") and "skipped" in x for x in skip_lines)
+
+
+def test_mabar_preflight_wiring_and_rejoin_skips_disk_active_with_games_up(monkeypatch, tmp_path):
+    import json
+
+    run = tmp_path / "run"
+    run.mkdir()
+    (run / "trial-config.json").write_text(json.dumps(dict(game_dir=str(tmp_path / "custom-game"))), encoding="utf-8")
+    assert mabar._preflight_game_dir(_ns(run=run)) == tmp_path / "custom-game"
+    assert mabar._preflight_game_dir(_ns(run=tmp_path / "empty")) == mabar.GAME
+
+    captured = {}
+
+    def fake_run_preflight(a, **kw):
+        captured["a_skip_disk"] = getattr(a, "skip_disk_active", False)
+        captured.update(kw)
+        return 1
+
+    monkeypatch.setattr(bringup, "run_preflight", fake_run_preflight)
+    assert mabar.preflight(_ns(run=run)) == 1
+    for key in ("gpu_fn", "disk_active_fn", "ears_fn", "save_date_fn"):
+        assert callable(captured[key]), key
+
+    captured.clear()
+    a1 = argparse.Namespace(run=run, spec=tmp_path / "s.json", vts_port=8002, no_vts=False, no_alerts=False, name="Arti")
+    assert mabar.rejoin(a1, count_fn=lambda: "1") == 1
+    assert captured["a_skip_disk"] is True and captured["skip_memory"] is False
+    assert not hasattr(a1, "skip_disk_active")
+
+    captured.clear()
+    a2 = argparse.Namespace(run=run, spec=tmp_path / "s.json", vts_port=8002, no_vts=False, no_alerts=False, name="Arti")
+    assert mabar.rejoin(a2, count_fn=lambda: "2") == 1
+    assert captured["a_skip_disk"] is True and captured["skip_memory"] is True
+    assert not hasattr(a2, "skip_disk_active")
+
+    captured.clear()
+    a0 = argparse.Namespace(run=run, spec=tmp_path / "s.json", vts_port=8002, no_vts=False, no_alerts=False, name="Arti")
+    assert mabar.rejoin(a0, count_fn=lambda: "0") == 1
+    assert captured["a_skip_disk"] is False and captured["skip_memory"] is False
+    assert not hasattr(a0, "skip_disk_active")

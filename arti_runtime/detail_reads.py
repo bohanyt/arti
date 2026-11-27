@@ -12,7 +12,8 @@ def detail_read_payload(payload, selected, root_handle, measure, ceiling):
         base['facts'] = dict(recent_failures=protected_failures(payload['facts']['recent_failures']))
     # Choices ride every section. Their full prose/facts remain in the tree.
     choices = [{k: v for k, v in e.items() if k in ('name', 'args')
-                or e.get('name') == 'cek_jurnal' and k in ('jurnal', 'jurnal_baca')}
+                or e.get('name') == 'cek_jurnal' and k in ('jurnal', 'jurnal_baca')
+                or e.get('name') == 'simpan_ke_chest' and k == 'peti'}
                for e in payload['skills'] if e['name'] != 'read_boundary']
     base['skills'] = choices
     root = {k: v for k, v in payload.items()

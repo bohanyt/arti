@@ -102,6 +102,12 @@ def skill(runtime, row, date, clock, place, *, catalog=None, witness=None):
     elif name == "tidur":
         clock = observed.get("bed_time")
         text = "Aku tidur di tempat tidurku dan bangun esok pagi."
+    elif name == "aksi":
+        from arti_stardew_generic_world import unreadable_press
+        if not unreadable_press((evidence.get("objective") or {}).get("item"), evidence.get("native_ui_episode")):
+            return
+        name, text = "menu_opened", "Aku menekan sesuatu. Menu dengan simbol yang tidak bisa kubaca terbuka."
+        witness = evidence["native_ui_episode"]["opened"].get("request_id")
     elif name in ("simpan_ke_chest", "kirim", "jual", "ambil_dari_chest"):
         result = observed.get("bag_sitting")
         if not isinstance(result, Mapping):

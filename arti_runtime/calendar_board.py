@@ -51,7 +51,7 @@ def is_pick(arg):
     return isinstance(arg, str) and re.fullmatch(r"baca:([1-9]|1\d|2[0-8])", arg) is not None
 
 
-def read(base, scope, view, arg, *, year, season, day, clock, place):
+def read(base, scope, view, arg, *, year, season, day, clock, place, mind_scoped=False):
     """Record the one cell she chose as a game text she read; returns the page line, or None when not offered.
 
     ``year``/``season``: the board's own month (the game shows the current season); ``day``: the game day
@@ -76,7 +76,7 @@ def read(base, scope, view, arg, *, year, season, day, clock, place):
     with M._JOURNEY_LOCK:
         M.record_discoveries(base, "stardew", scope=scope, discoveries=[dict(
             id=event_id, kind="text_read", subject="calendar", text=text, source=SOURCE, date=date,
-            event_place=place)], day=day, day_label=date)
+            event_place=place)], day=day, day_label=date, scoped=mind_scoped)
         SeenReceipts(base, scope).note("calendar_day_read", entry, game_day=day, clock=clock, place=place,
                                        source=SOURCE, text_ref=text_ref)
     return "hari %d: %s (papan kalender, dibaca %s)" % (number, " ".join(text.split()), date)

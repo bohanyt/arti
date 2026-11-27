@@ -239,6 +239,7 @@ class Campaign:
             names = getattr(self.live, "item_names", {})
             totals = getattr(self.live, "catch_totals", {})
             kinds = getattr(self.live, "catch_kinds", {})
+            presses = getattr(self.live, "press_results", {})
             trips = getattr(self.live, "last_trips", {})
             mines_encounter = getattr(self.live, "mines_last_encounter", None)
             self.live = DayPolicy()
@@ -248,6 +249,7 @@ class Campaign:
                 self.live.ground_items = ground  # fix59A (ADR 86): an item on the ground outlives the day
             self.live.catch_totals = totals  # FIX71C: what she has landed, by place, outlives it too
             self.live.catch_kinds = kinds  # FIX73D: and by kind, so a run-wide ordinal survives the day
+            self.live.press_results = presses  # repeated press answers outlive the day in this run
             if chests is not None:
                 self.live.chest_memory = chests  # FIX72D: what she put away outlives the day too
             if forage is not None:
@@ -1037,7 +1039,7 @@ class PartACampaignMixin:
         run = session.current if session is not None and session.status == "active" else None
         if (run is None or session.campaign is None or self._active is None
                 or not run.state.get("campaign_travel") or run.call.name != "jalan_ke"
-                or run.state.get('route_clear')
+                or run.state.get('route_clear') or run.state.get("local_walk")
                 or self._active.goal_id != run.goal_id or pin is None
                 or session.campaign.part == "a" and pin.location != "Farm"):
             return None
@@ -1089,6 +1091,19 @@ class PartACampaignMixin:
         seen = self._live7_seen_step(run, snap) if run.state.get("live7") else None  # ADR 136: a walk to a sighting
         if seen is not None:
             return seen
+        if run.state.get("local_walk"):
+            from arti_runtime import hands_halt, local_walks as _local_walks
+            context = self._skill_wave1_context(snap) if hasattr(self, "_skill_wave1_context") else {}
+            policy = getattr(getattr(getattr(self, "_skill_session", None), "campaign", None), "live", None)
+            stopped = bool(getattr(self, "_worker_stop", None) and self._worker_stop.is_set()
+                           or getattr(self, "_action_cancel", None) and self._action_cancel.is_set()
+                           or getattr(self, "_owner_play_stopped", False))
+            halted = hands_halt.read(self) is not None
+            native_event = self._live7_native_event() if hasattr(self, "_live7_native_event") else None
+            return _local_walks.walk_step(
+                run.call, snap, run.state, context,
+                policy=policy, stopped=stopped, halted=halted, native_event=native_event,
+            )
         last = S._g(S._g(snap, "working_memory"), "last_action")
         if last is not None and (S._g(last, "cleanup_confirmed") is False
                                 or S._g(last, "lifecycle") in ("uncertain", "interrupted")):

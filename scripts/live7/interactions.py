@@ -1,6 +1,71 @@
 """Named native interaction facts. Walking/facing use the existing generic primitives."""
 from collections.abc import Mapping
+import threading
+from types import MappingProxyType
 from arti_stardew_world_extras import stand_tiles
+
+_OPEN_REACH_CACHE: dict = {}
+_OPEN_REACH_LOCK = threading.RLock()
+_UNSET = object()
+
+
+def _xy(v):
+    if isinstance(v, (list, tuple)) and len(v) == 2 and all(type(n) is int for n in v):
+        return (v[0], v[1])
+    return (v["x"], v["y"]) if isinstance(v, Mapping) and type(v.get("x")) is int and type(v.get("y")) is int else None
+
+
+def _cardinal_stands(x, y):
+    from arti_stardew_command import TILE_MAX
+    return [(a, b) for a, b in ((x, y + 1), (x - 1, y), (x, y - 1), (x + 1, y)) if 0 <= a <= TILE_MAX and 0 <= b <= TILE_MAX]
+
+
+def open_reach(grid, start):
+    """Bounded content-keyed reuse of open_paths(grid, start) across one page's repeated calls."""
+    start = _xy(start)
+    cell = grid.get(start) if isinstance(grid, Mapping) and 0 < len(grid) <= 4096 and start in grid else None
+    walkable = {**grid, start: "."} if cell in ("#", "x") else grid if cell == "." else None
+    if walkable is None:
+        return {}
+    key = (start, tuple(walkable.items()))
+    with _OPEN_REACH_LOCK:
+        if (hit := _OPEN_REACH_CACHE.get(key)) is not None:
+            return hit
+    from arti_stardew_goal_routes import open_paths
+    parents = MappingProxyType(open_paths(walkable, start))
+    with _OPEN_REACH_LOCK:
+        if len(_OPEN_REACH_CACHE) >= 8:
+            _OPEN_REACH_CACHE.pop(next(iter(_OPEN_REACH_CACHE)))
+        _OPEN_REACH_CACHE[key] = parents
+    return parents
+
+
+def _fresh_reach(context, *, here=None):
+    if not isinstance(context, Mapping) or context.get("ui_complete") is False:
+        return None
+    here = _xy(context.get("actor_tile") if here is None else here)
+    if here is None:
+        return None
+    loc, mines_ui = context.get("location_id"), context.get("mines_ui")
+    raw_meta = mines_ui.get("nav_grid") if isinstance(mines_ui, Mapping) else None
+    if isinstance(raw_meta, Mapping):
+        ml = raw_meta.get("location")
+        if (raw_meta.get("stale") is True or (isinstance(ml, str) and ml and isinstance(loc, str) and loc and ml != loc)
+                or (raw_meta.get("actor_tile") is not None and _xy(raw_meta.get("actor_tile")) != here)):
+            return None
+    grid = context.get("nav_grid")
+    if grid is None and isinstance(raw_meta, Mapping):
+        from arti_stardew_world_extras import nav_grid as parse_nav_grid
+        grid = parse_nav_grid(mines_ui, loc if isinstance(loc, str) and loc else None)
+    parents = open_reach(grid, here) if isinstance(grid, Mapping) and here in grid else {}
+    return (grid, parents) if parents else None
+
+
+def _object_reachable(tile, stands, reach):
+    if reach is None or tile is None:
+        return True
+    grid, parents = reach
+    return any(s in parents for s in stands) or tile not in grid or not all(s in grid for s in _cardinal_stands(*tile))
 
 
 def interrupted_travel_fact(policy, date, calls):
@@ -71,10 +136,28 @@ def faced_named_target(call, target, named):
                for row in named)
 
 
+def _lazy_reach(context, parent=None):
+    if parent is not None:
+        return parent
+    box = [_UNSET]
+    return lambda: box.__setitem__(0, _fresh_reach(context)) or box[0] if box[0] is _UNSET else box[0]
+
+
 def ordinary_targets(context):
     ui = context.get("mines_ui") or {}
-    gifts = [dict(row, label=row["kind"], action="aksi", arg=row["ref"])
-             for row in ui.get("openable_containers", ()) if isinstance(row, Mapping)]
+    get_reach = _lazy_reach(context)
+    gifts = []
+    for row in ui.get("openable_containers", ()):
+        if not isinstance(row, Mapping):
+            continue
+        tile, raw_stands = _xy(row.get("tile")), row.get("stands")
+        stands = ([s for s in (_xy(v) for v in raw_stands) if s is not None] if isinstance(raw_stands, (list, tuple))
+                  else _cardinal_stands(*tile) if tile is not None else None)
+        if isinstance(raw_stands, (list, tuple)) and not stands:
+            continue
+        if tile is not None and stands and not _object_reachable(tile, stands, get_reach()):
+            continue
+        gifts.append(dict(row, label=row["kind"], action="aksi", arg=row["ref"]))
     counters = [dict(ref=row["ref"], tile=[row["x"], row["y"]],
         label={"ladder_down": "Turun satu lantai", "shaft": "Turun lewat lubang (bisa lebih dari satu lantai)",
                "ladder_up": "Tangga naik: keluar Mines",
@@ -91,26 +174,26 @@ def ordinary_targets(context):
     bins = [dict(ref=r["ref"], tile=r["tile"], stands=r["reach_tiles"], kind="shipping_bin", status="openable",
                  label="Buka kotak pengiriman: pilih barang/jumlah; dibayar besok") for r in bin_entries(ui)]
     typed = gifts + counters + bins + chest_targets(ui, context.get("known_chests"))
-    return typed + action_tiles(context, typed)
+    return typed + action_tiles(context, typed, _get_reach=get_reach)
 
 
-def action_tiles(context, typed=()):
+def action_tiles(context, typed=(), *, _get_reach=None):
     """Use scene affordance classes to offer the existing ACTION approach."""
     from arti_runtime.map_affordances import observed
-    from arti_stardew_command import TILE_MAX
-    occupied = {tuple(row["tile"]) for row in typed}
+    occupied = {tuple(row["tile"]) for row in typed if isinstance(row.get("tile"), (list, tuple))}
+    get_reach = _lazy_reach(context, _get_reach)
     out = []
     claims, _ = observed(context)
     for ref, row in claims.items():
         x, y = row["tile"]
         if (x, y) in occupied or not (set(row["classes"]) & {"press", "pick_up"}):
             continue
-        stands = [[a, b] for a, b in ((x, y + 1), (x - 1, y), (x, y - 1), (x + 1, y))
-                  if 0 <= a <= TILE_MAX and 0 <= b <= TILE_MAX]
-        if stands:
-            occupied.add((x, y))
-            kind = "map_action" if row["cell"] else "scene_pick_up"
-            out.append(dict(ref=ref, tile=[x, y], stands=stands, kind=kind, status="available", label=None))
+        stands = _cardinal_stands(x, y)
+        kind = "map_action" if row["cell"] else "scene_pick_up"
+        if not stands or (kind == "scene_pick_up" and not _object_reachable((x, y), stands, get_reach())):
+            continue
+        occupied.add((x, y))
+        out.append(dict(ref=ref, tile=[x, y], stands=[[a, b] for a, b in stands], kind=kind, status="available", label=None))
     return out
 
 

@@ -218,7 +218,8 @@ REGISTRY: dict[str, SkillSpec] = {s.name: s for s in (
           ("observed_menu_open",), ("player_free",), ("menu_open_unverified",), 6, 1, 30),
     _spec("langkah", (), "Move four input ticks in a chosen direction; read back the actual position", F_GENERIC,
           "none", "none", "Langkah pendek {arg}", "generic_pose_readback",
-          ("observed_movement",), ("player_free",), ("movement_unverified",), 6, 1, 30, arg="direction"),
+          ("observed_movement", "observed_turn_only", "observed_no_movement", "observed_step_transition"),
+          ("player_free",), ("movement_unverified",), 6, 1, 30, arg="direction"),
     _spec("rawat_hewan", ("rawat hewan", ANIMAL_GOAL.rstrip(".").casefold()),
           "care for Coop/Barn animals, products and hay; return to Farm; optionally pet dog/cat last", F_ANIMALS,
           "extras:animals", "parse_extras_objective", "take care of all animals in the coop and barn",
@@ -2594,6 +2595,9 @@ def _nav(call, snap, state) -> Step:
     from arti_stardew_auto_act import nav_auto_choice
     mem = _g(snap, "working_memory")
     objective = state.get("nav_objective")
+    step = _festival_stand_step(snap, objective, state)  # seated, the trip stands her up first
+    if step is not None:
+        return _decision(step)
     pin = _g(snap, "water_context") or _g(snap, "movement_context")
     picked = nav_auto_choice(objective, snap, current_location=_g(pin, "location"),
                              approach_progress=_g(mem, "approach_progress")) if objective is not None else None
@@ -2621,6 +2625,28 @@ FESTIVAL_LEAVE_RESENDS_MAX = 2  # fix64: an act refused before publication (no n
 FESTIVAL_EXIT_STEPS_MAX = 160  # ~50 tiles of 4-tick event moves; then the paced exit_not_offered wait
 FESTIVAL_LEAVE_ASKS_MAX = 3  # a first act can be refused before publication; only the next observed menu proves it
 FESTIVAL_EXIT_TILE_REVISITS_MAX = 2  # a45's real map: a window-border waypoint can shuttle between two tiles forever
+
+
+FESTIVAL_STAND_SENDS_MAX = 2  # a trip chosen from a festival seat stands her up first, at most twice
+
+
+def _festival_stand_step(snap, objective, state) -> dict | None:
+    """Seated on a festival seat, a trip she chose starts with the one control there: festival_stand (the
+    game's own A while seated). Then the ordinary leave or walk follows from her standing pose.
+    Only a trip that carries her recorded seated pick (the model's choice on the seated page, same festival)
+    sends it; a trip started by a recovery rung or the home reserve does not."""
+    from arti_stardew_event_control import festival_seated
+    actions = _g(snap, "event_actions")
+    if (objective is None or not getattr(objective, "navigation", False) or getattr(objective, "blocker", None)
+            or not festival_seated(actions) or state.get("festival_stand_sends", 0) >= FESTIVAL_STAND_SENDS_MAX
+            or state.get("festival_stand_chosen") is None
+            or state.get("festival_stand_chosen") != actions.get("event_id")):
+        return None
+    handle = next((h for h, t in (actions.get("targets") or {}).items() if t.get("kind") == "festival_stand"), None)
+    if handle is None:
+        return None
+    state["festival_stand_sends"] = state.get("festival_stand_sends", 0) + 1
+    return act("event_action", {"handle": handle, "btn": "A"})
 
 
 def _festival_leave_step(snap, objective, state) -> dict | None:
@@ -2720,6 +2746,9 @@ def _exit_step(snap, objective, state) -> dict | None:
 
 
 def _walk(call, snap, state) -> Step:
+    if state.get("local_walk"):
+        from arti_runtime.local_walks import walk_step
+        return walk_step(call, snap, state, state.get("local_walk_context"))
     if call.tile is not None:
         here = _g(_g(snap, "motor"), "tile")
         if here and tuple(here) == tuple(call.tile):
@@ -3521,10 +3550,11 @@ def skill_offer(*, goal_text: str, calls, facts: SkillFacts, outcomes, budget: M
 # she no longer carries); the low-priority rows live in a paged `day` detail.
 # ADR 115: today's catch count rides too (<= 240 characters).
 MINIMAL_PAGE_FACTS = ("hud", "location", "time", "time_text", "energy", "equipped", "menu_open", "gembor", "rumah", "pad_terakhir", "map_affordances",
-                      "mancing", "tanpa_efek", "barang_jatuh", "hasil_pancing", "collection", "pindah_barang", "menu_terakhir",
+                      "mancing", "tanpa_efek", "hasil_berulang", "barang_jatuh", "hasil_pancing", "collection", "pindah_barang", "menu_terakhir",
                       "lawan_mine", "lantai_tambang", "kedalaman_tambang", "diserang", "risiko_tambang", "ko_tambang", "recent_failures", "cadangan_pulang", "batas_waktu", "jalan_terhalang",
                       "ruang_tas", "konter", "malam", "waktu_riwayat_jalan", "ngobrol_hadiah",
                       "pengumuman_game", "kotak_surat",  # ADR 227: fact-line-only native announcement / mailbox flag
+                      "surat_hari_ini",  # fact-line-only, the letters she opened today
                       "kiriman_kemarin",  # ADR 230 N3: fact-line-only, the earnings screen she saw this morning
                       "tangan", "tangan_hasil",  # ADR 243: her raw hands and what the game answered to the last one
                       "tangan_ditahan")  # ADR 249: a latched HALT holds her hands, why, and who clears it
@@ -3687,6 +3717,8 @@ def _boundary_offer_page(offer, page_bytes, *, largest_page=False, minimal=False
                 call["jurnal"] = entry["jurnal"]  # ADR 182: the indicator travels with the callable offer.
                 if "jurnal_baca" in entry:
                     call["jurnal_baca"] = entry["jurnal_baca"]
+            if entry["name"] == "simpan_ke_chest" and "peti" in entry:
+                call["peti"] = entry["peti"]
             if (entry["name"] == "pergi_ke" and (entry.get("nama") or {}).get(arg)
                     and (arg == "mine" or str(arg).startswith(("@","jelajah-"))
                          # fix131A: the trip today's game notice names keeps the notice's words on its choice.
@@ -3701,7 +3733,8 @@ def _boundary_offer_page(offer, page_bytes, *, largest_page=False, minimal=False
     blocks = []
     for entry in entries:
         rest = {k: v for k, v in entry.items() if k not in ("name", "args")
-                and not (entry["name"] == "cek_jurnal" and k in ("jurnal", "jurnal_baca"))}
+                and not (entry["name"] == "cek_jurnal" and k in ("jurnal", "jurnal_baca"))
+                and not (entry["name"] == "simpan_ke_chest" and k == "peti")}
         if isinstance(rest.get("arrival_facts"), dict) and isinstance(rest["arrival_facts"].get("rows"), dict):
             rest["arrival_facts"] = {k: v for k, v in rest["arrival_facts"].items() if k != "rows"}  # on the choice
         if rest:
@@ -4016,8 +4049,10 @@ def detach_details(offer, extra=frozenset(), grounding_limit=None, raised=None, 
     bounds = {} if bounds is None else bounds
     rows = []
     truncated = []
+    visit_details = False
 
     def walk(value, path):
+        nonlocal visit_details
         if isinstance(value, dict):
             out = {}
             for k, v in value.items():
@@ -4050,12 +4085,31 @@ def detach_details(offer, extra=frozenset(), grounding_limit=None, raised=None, 
                     for entry in v:
                         entry = dict(entry)
                         if "after_travel" in entry:
+                            from arti_runtime.place_page import RESULT_FIELD
+                            travel = entry["after_travel"]
+                            visit_details |= isinstance(travel, Mapping) and any(RESULT_FIELD in row for row in travel.values()
+                                                 if isinstance(row, dict))
                             rows.append([["skills", entry["name"], "after_travel"], entry.pop("after_travel")])
                         if SKILL_EXTRAS in extra:
                             for key in [key for key in entry if key not in SKILL_KEEP]:
                                 rows.append([["skills", entry["name"], key], entry.pop(key)])
                         entries.append(entry)
                     out[k] = entries
+                elif not path and k == "mind" and "@visit_results" in extra:
+                    from arti_runtime.page_fact_selection import without_visit_results
+                    out[k] = without_visit_results({k: v})[k]
+                    if out[k] is not v:
+                        visit_details = True
+                        rows.append([[k], v])
+                elif not path and k == "peer_sleep" and k not in extra:
+                    from arti_runtime.human_host import bounded_peer_sleep, waiting_for_peer_sleep
+                    if waiting_for_peer_sleep(offer):
+                        compact = bounded_peer_sleep(v)
+                        out[k] = compact
+                        if compact != v:
+                            rows.append([path + [k], v])
+                    else:
+                        out[k] = walk(v, path + [k])
                 elif not path and k in _DETAIL_SKIP:
                     out[k] = v
                 elif not path and k == "recent_actions" and k in extra and isinstance(v, list):
@@ -4079,6 +4133,8 @@ def detach_details(offer, extra=frozenset(), grounding_limit=None, raised=None, 
     if truncated:
         mark(slim, truncated)
     slim["detail_read"] = "read_boundary %s:0 = %d detail mesin UI/recovery; read-only" % (handle, len(rows))
+    if visit_details:
+        slim["detail_read"] += " (termasuk hasil kunjungan)"
     return slim, handle + ":0"
 
 
@@ -4112,7 +4168,7 @@ LATE_DIET_STAGE = frozenset(("donation_facts",))
 # the offer still outgrew the guard, and the pager then split the choices. A decision that does not fit drops detail,
 # never choices: these follow to the same detail read, least decision-constraining first. PAGE_DAY stays on the page.
 SKILL_EXTRAS = "@skill_extras"
-SKILL_KEEP = ("name", "args", "nama", "arrival_facts", "recipes_read", "recipes", "jurnal", "jurnal_baca")
+SKILL_KEEP = ("name", "args", "nama", "arrival_facts", "recipes_read", "recipes", "jurnal", "jurnal_baca", "peti")
 DAY_REST = "@day_rest"
 LAST_DAY_FACTS = ("forage_ingat", "forage_terlihat")
 EARLY_FLOOR_BEFORE = 256
@@ -4171,7 +4227,7 @@ def recipes_read(offer):
     """PM-1 fix13b: buat lists only recipe names on the decision page; what each makes and its have/need is the
     read-only page ``recipes:<h>:0``. That page retains bounded grounding (ADR 39). Choices never change."""
     entry = next((e for e in offer.get("skills") or () if e.get("name") == "buat" and e.get("recipes")), None)
-    if not offer.get("live7") or entry is None:
+    if not offer.get("live7") or offer.get("fact_line") or entry is None:
         return offer
     handle = RECIPES_READ + hashlib.sha256(json.dumps(entry["recipes"], sort_keys=True, ensure_ascii=False,
                                                       separators=(",", ":")).encode()).hexdigest()[:12]
@@ -4250,7 +4306,8 @@ def yield_today_page_facts(offer, messages, fits, render):
     return messages
 
 
-def diet_payload(payload, boundary_page=None, measure=None, grounding_limit=None, ceiling=None, *, _memo=False):
+def diet_payload(payload, boundary_page=None, measure=None, grounding_limit=None, ceiling=None, *, _memo=False,
+                 visit_details=False):
     from arti_runtime.page_search import ACTIVE
     search = ACTIVE.get()
     # In a lean pager no grounding blocks ride. Explicit grounding limits then
@@ -4260,10 +4317,10 @@ def diet_payload(payload, boundary_page=None, measure=None, grounding_limit=None
     if (_memo and search is not None and grounding_limit is not None and "presentation" in payload
             and all(k not in payload and k not in payload.get("facts", {}) for k in BLOCKS)):
         return search.diet(_diet_payload, payload, boundary_page, measure, grounding_limit, ceiling)
-    return _diet_payload(payload, boundary_page, measure, grounding_limit, ceiling)
+    return _diet_payload(payload, boundary_page, measure, grounding_limit, ceiling, visit_details=visit_details)
 
 
-def _diet_payload(payload, boundary_page=None, measure=None, grounding_limit=None, ceiling=None):
+def _diet_payload(payload, boundary_page=None, measure=None, grounding_limit=None, ceiling=None, *, visit_details=False):
     """fix10b render diet (a11 paging 29 vs a9 5), lossless, at serialization only: the trim ladder keeps working on
     the original offer shapes. Large live7 skill turns only (a UI turn keeps its component pager and exact ids; a
     presentation page is already small). Machinery -> on-demand detail read, opaque ids shortened, repeated text
@@ -4280,6 +4337,8 @@ def _diet_payload(payload, boundary_page=None, measure=None, grounding_limit=Non
     # FIX75B (ADR 129): a READ_ONLY_DAY key is detached at the first stage whatever the page size; a page that would otherwise
     # render byte-identical still takes the ladder once so the key leaves and its read arg is listed.
     always = frozenset(path for path in READ_ONLY_DAY if isinstance(payload.get(path[0]), dict) and path[1] in payload[path[0]])
+    if visit_details:
+        always |= {"@visit_results"}
     if ((not payload.get("live7") and grounding_limit is None) or "unknown_ui" in payload
             or ("presentation" in payload and grounding_limit is None)
             or not isinstance(payload.get("skills"), list)
@@ -4287,6 +4346,14 @@ def _diet_payload(payload, boundary_page=None, measure=None, grounding_limit=Non
                 len(json.dumps(payload, ensure_ascii=False, separators=(",", ":"))) <= _page_budget.scaled(DIET_MIN_USER_CHARS)
                 and (measure is None or measure(payload) <= ceiling))):
         return payload
+    from arti_runtime.local_walks import without_eyes as _without_local_walks_eyes
+    if measure is not None and measure(payload) > ceiling:
+        _stripped_eyes = _without_local_walks_eyes(payload)
+        if _stripped_eyes is not payload:
+            payload = _stripped_eyes
+            if (grounding_limit is None and not always and measure(payload) <= ceiling
+                    and len(json.dumps(payload, ensure_ascii=False, separators=(",", ":"))) <= _page_budget.scaled(DIET_MIN_USER_CHARS)):
+                return payload
     extra = always
     bounds = {}
     from scripts.live7.prompt_grounding import limits
@@ -4297,14 +4364,16 @@ def _diet_payload(payload, boundary_page=None, measure=None, grounding_limit=Non
     today = () if paged else today_diet_before_history(payload)
     stages = [(stage, grounding_limit) for stage in
               (frozenset(),) + DIET_STAGES[:-1] + today + DIET_STAGES[-1:]]
+    from arti_runtime.human_host import waiting_for_peer_sleep
+    first_floor = FLOOR_STAGES[0] - {"peer_sleep"} if waiting_for_peer_sleep(payload) else FLOOR_STAGES[0]
     if grounding_limit is None:
         # fix62: short status blocks follow before the low rungs cut the native game facts every decision needs.
-        stages += [(FLOOR_STAGES[0] if limit == _page_budget.scaled(EARLY_FLOOR_BEFORE) and not paged else frozenset(), limit) for limit in LIMITS]
+        stages += [(first_floor if limit == _page_budget.scaled(EARLY_FLOOR_BEFORE) and not paged else frozenset(), limit) for limit in LIMITS]
     stages.append((LATE_DIET_STAGE, grounding_limit or LIMITS[-1]))
     if not paged:
         day = payload.get("day") if isinstance(payload.get("day"), dict) else {}
         day_rest = frozenset(("day", k) for k in day if k not in PAGE_DAY)
-        stages += [(day_rest if DAY_REST in stage else stage, grounding_limit or LIMITS[-1]) for stage in FLOOR_STAGES]
+        stages += [(day_rest if DAY_REST in stage else stage, grounding_limit or LIMITS[-1]) for stage in (first_floor,) + FLOOR_STAGES[1:]]
         # FIX73E: on a page with nothing left to give, these two facts go to the read before the pager would split the choices.
         stages += [(frozenset((("day", k),)), grounding_limit or LIMITS[-1]) for k in LAST_DAY_FACTS if k in day]
     for stage, limit in stages:
@@ -4515,6 +4584,57 @@ def compact_own_crops(crops):
 
 @_page_budget.request_scope
 def render_skill_messages(request, fits=None, *, metrics=None, whole_measure=None) -> list[dict[str, str]]:
+    messages = _render_base_skill_messages(request, fits, metrics=metrics, whole_measure=whole_measure)
+    saved = getattr(request, 'live7_day_plan', None)
+    if saved is not None and saved.entries:
+        return _add_day_plan(request, messages, saved, fits)
+    return messages
+
+
+def _add_day_plan(request, messages, saved, fits):
+    """Keep the selected facts/choices and spend only the room left on the page."""
+    import arti_mind as mind_store
+    from arti_runtime.goal_ladder import GAME, PAGE_TEXT_WIDTHS
+
+    body = json.loads(messages[1]['content'])
+    mind = body.get('mind')
+    if not isinstance(mind, dict) or 'tanggal_rencana' not in mind:
+        return messages
+    mind = dict(mind)
+    budget = _page_budget.ACTIVE.get()
+    guard = min(budget.guard, request.skill_offer.get('render_budget', budget.guard))
+    target = mind_store.plan_dates.label(GAME, saved.target_day)
+    system = dict(messages[0], content=messages[0]['content'] + ' goal_ref juga boleh id dari mind.rencana_hari_ini.')
+
+    lines = []
+    for start, (authored, _) in enumerate(saved.entries):
+        text = ('… ' if start else '') + ' '.join(words for _, words in saved.entries[start:])
+        lines.append(dict(id=f'rencana:{saved.target_day}', tanggal=target, text=text,
+                          ditulis=mind_store.plan_dates.label(GAME, authored)))
+    latest = lines[-1]
+    lines.extend(dict(latest, text=latest['text'][:width - 1] + '…')
+                 for width in PAGE_TEXT_WIDTHS if len(latest['text']) > width)
+
+    for expendable in (None, 'yang_kulihat', 'penasaran', 'sifat', 'dikatakan'):
+        if expendable == 'dikatakan':
+            if len(mind.get('dikatakan', ())) <= 1:
+                continue
+            mind['dikatakan'] = mind['dikatakan'][:1]
+        elif expendable is not None and mind.pop(expendable, None) is None:
+            continue
+        for line in lines:
+            body['mind'] = dict(rencana_hari_ini=line, **mind)
+            if mind_store.block_bytes(body['mind']) > mind_store.BLOCK_MAX_BYTES * budget.scale:
+                continue
+            content = json.dumps(body, ensure_ascii=False, separators=(',', ':'))
+            candidate = [system, dict(messages[1], content=content)]
+            if (_page_budget.fits_page(candidate) and encoded_render_bytes(candidate) <= guard
+                    and (fits is None or fits(candidate))):
+                return candidate
+    return messages
+
+
+def _render_base_skill_messages(request, fits=None, *, metrics=None, whole_measure=None):
     from arti_runtime.page_fact_selection import PageOffer, render_selected
     if isinstance(request.skill_offer, PageOffer):
         return render_selected(request, fits, metrics=metrics)
@@ -4577,6 +4697,8 @@ def read_served(messages, selected):
     page = body.get("presentation")
     if isinstance(page, dict) and page.get("handle") == handle:
         return page.get("page") == index
+    if str(handle).startswith('place_time:') and isinstance(body.get('catatan_kubaca'), dict):
+        return True  # her notes answer a world page's read, bound to no snapshot
     if isinstance(body.get('detail_page'), dict) and body['detail_page'].get('handle') == handle:
         if str(handle).startswith('place_time:'):
             return body['detail_page'].get('page') == index
@@ -4641,6 +4763,21 @@ def _render_fitted(request, fits=None) -> list[dict[str, str]]:
         except ValueError as exc:
             if str(exc) != "skill_render_budget_exceeded":
                 raise
+            from arti_runtime.local_walks import without_eyes
+            no_eyes = without_eyes(offer)
+            if no_eyes is not offer:
+                try:
+                    return _render_once(replace_offer(request, no_eyes), fits, pager=False)
+                except ValueError as eyes_error:
+                    if str(eyes_error) != "skill_render_budget_exceeded":
+                        raise
+            from arti_runtime.page_fact_selection import without_visit_results
+            if without_visit_results(no_eyes) is not no_eyes:
+                try:
+                    return _render_once(replace_offer(request, no_eyes), fits, pager=False, visit_details=True)
+                except ValueError as detail_error:
+                    if str(detail_error) != "skill_render_budget_exceeded":
+                        raise
             unfit.update((None,) + LIMITS)
     if fits is None or not live7:
         try:
@@ -4860,7 +4997,7 @@ def decision_system(offer):
 
 @_page_budget.request_scope
 def _render_once(request, fits=None, grounding_limit=None, pager=True, page_sizes=PAGER_BYTES, rides=None, whole=True,
-                 recent=True, untrimmed=False) -> list[dict[str, str]]:
+                 recent=True, untrimmed=False, visit_details=False) -> list[dict[str, str]]:
     """Compact boundary messages; trim history before Live7's admitted travel choices. ``pager=False`` (fix58B)
     raises skill_render_budget_exceeded instead of splitting the offer into presentation pages."""
     from arti_runtime.page_fact_selection import PageOffer, render_selected
@@ -4915,7 +5052,8 @@ def _render_once(request, fits=None, grounding_limit=None, pager=True, page_size
         return messages_of(diet_payload(payload, offer.get("boundary_page"),
                                         measure=lambda body: encoded_render_bytes(messages_of(body)),
                                         grounding_limit=grounding_limit,
-                                        ceiling=offer.get("render_budget", _page_budget.ACTIVE.get().guard), _memo=True))
+                                        ceiling=offer.get("render_budget", _page_budget.ACTIVE.get().guard), _memo=True,
+                                        visit_details=visit_details))
     if untrimmed:
         return render()
     if "unknown_ui" in offer:
@@ -4926,6 +5064,7 @@ def _render_once(request, fits=None, grounding_limit=None, pager=True, page_size
         LIMITS = limits()
         original = json.loads(json.dumps(offer))
         item_aliases = getattr(request, "item_choice_aliases", {}).get("ui_action")
+        inspect_layout = getattr(request, "ui_inspect_layout", None)
         # PM-1 fix12a (a17 d7:J631-638): the shipping bin's world graph + 4 recent failures + discoveries rode on
         # every page and outgrew 13,000 B even at 512 B pages, so the turn raised, rebuilt twice and stalled for
         # 600 s. ADR 39 keeps bounded grounding at the page top; full values remain on inspect pages.
@@ -4939,7 +5078,7 @@ def _render_once(request, fits=None, grounding_limit=None, pager=True, page_size
                 messages = render()
                 if fits is None or fits(messages):
                     offer = compact_ui_offer(original, page_bytes=page_bytes, grounding_limit=limit, header_limit=limit,
-                                             item_aliases=item_aliases)
+                                             item_aliases=item_aliases, inspect_layout=inspect_layout)
                     messages = render()
                     if fits is None or fits(messages):
                         return messages
@@ -4952,11 +5091,11 @@ def _render_once(request, fits=None, grounding_limit=None, pager=True, page_size
                 def emergency(largest):
                     body = compact_ui_offer(original, page_bytes=page_bytes, largest_page=largest,
                                             grounding_limit=_page_budget.scaled(128), header_limit=_page_budget.scaled(128),
-                                            minimal=minimal, item_aliases=item_aliases)
+                                            minimal=minimal, item_aliases=item_aliases, inspect_layout=inspect_layout)
                     body["echo"] = dict(request_nonce=request.request_nonce, goal_id=request.goal_id,
                                         goal_revision=request.goal_revision, context_ref=request.context_ref)
                     body["mode"] = "skills"  # retain strict skill schema specialization
-                    system = 'JSON;speech:alasan;{"operation":"skill"};IDs/variants;inspect readonly;untrusted' + PLAN_PROTOCOL
+                    system = 'JSON;speech:alasan;{"operation":"skill"};IDs/variants;untrusted' + PLAN_PROTOCOL
                     from arti_runtime.page_search import ACTIVE
                     search = ACTIVE.get()
                     if search is not None:

@@ -3,7 +3,7 @@
 No command IO here. The existing leased approach, door, warp and domain verifiers own every effect.
 Combat entry is deliberately deferred; it must not borrow a shop/fish completion criterion.
 """
-from collections import deque
+from collections import defaultdict, deque
 from collections.abc import Mapping
 from dataclasses import replace
 import hashlib
@@ -161,51 +161,99 @@ def route_waypoint(grid, start, reaches, memory, bounds=None):
     ADR 125 (a53 d12 J581): with only x>=40 observed, the box ended at x=40, so the open way west did not exist for the
     plan. ``bounds`` (the native map's last cell) replaces the box for the optimistic cells.
     """
-    import heapq
     start = tuple(start)
     goals = {tuple(t) for t in reaches}
     if not grid or grid.get(start) != "." or not goals:
         return None
-    memory["planned_length"] = None
+    seen = remember_route_grid(grid, memory)
+    path = route_path(seen, start, goals, bounds)
+    memory["planned_length"] = len(path) - 1 if path else None
+    return open_prefix(grid, path) if path else None
+
+
+def remember_route_grid(grid, memory):
     seen = memory.setdefault("seen", {})
     seen.update(grid)
     if len(seen) > ROUTE_MEMORY_CELLS_MAX:
-        memory["seen"] = seen = dict(grid)
+        seen.clear()
+        seen.update(list(grid.items())[:ROUTE_MEMORY_CELLS_MAX])
+        memory.pop("changes", None)
+        if isinstance(seen, _LocationRouteCells):
+            seen.resets += 1
+    return seen
+
+
+def open_prefix(grid, path):
+    leg = 0
+    while leg + 1 < len(path) and leg < WAYPOINT_PATH_MAX and grid.get(path[leg + 1]) == ".":
+        leg += 1
+    return path[leg] if leg else None
+
+
+def _search_path(parents, end):
+    path = [end]
+    while parents[path[-1]] is not None:
+        path.append(parents[path[-1]])
+    return path[::-1]
+
+
+def route_path(seen, start, goals, bounds, *, witnessed=False, accepts=None, first_grid=None, spent=()):
+    """A* over the hop. A second search can constrain where its first open leg ends."""
+    import heapq
+    if not goals:
+        return None
     x0, y0, x1, y1 = route_box(seen, goals, bounds)
 
     def passable(p):
         if p in seen:
             return seen[p] == "."
-        return x0 <= p[0] <= x1 and y0 <= p[1] <= y1  # unobserved inside the observed box: optimistic
+        return not witnessed and x0 <= p[0] <= x1 and y0 <= p[1] <= y1
 
     h = lambda p: min(abs(p[0] - g[0]) + abs(p[1] - g[1]) for g in goals)
-    cost, parents, todo = {start: 0}, {start: None}, [(h(start), 0, start)]
-    end = None
+    initial = (start, 0 if spent else -1, 0)
+    issued_prefixes = {0: frozenset()}
+    cost, parents, todo = {initial: 0}, {initial: None}, [(h(start), 0, *initial)]
     while todo:
-        _, c, p = heapq.heappop(todo)
-        if c != cost[p]:
+        _, c, p, prefix, branch = heapq.heappop(todo)
+        node = (p, prefix, branch)
+        if c != cost[node]:
             continue
-        if p in goals:
-            end = p
-            break
+        if p in goals and (prefix < 0 or p not in spent):
+            path = [tile for tile, _, _ in _search_path(parents, node)]
+            if accepts is None or accepts(path):
+                return path
+        # Keep alternatives apart across their first leg boundary. A suffix
+        # can rejoin the original route, but cannot retrace its issued prefix.
+        prefix_cells = issued_prefixes[branch]
+        if prefix >= 0:
+            prefix_cells = prefix_cells | {p}
         for n in ((p[0], p[1] - 1), (p[0] - 1, p[1]), (p[0] + 1, p[1]), (p[0], p[1] + 1)):
-            if c + 1 < cost.get(n, float("inf")) and passable(n):
-                cost[n], parents[n] = c + 1, p
-                heapq.heappush(todo, (c + 1 + h(n), c + 1, n))
-    if end is None:
-        return None
-    path = [end]
-    while parents[path[-1]] is not None:
-        path.append(parents[path[-1]])
-    path.reverse()
-    leg = 0
-    while leg + 1 < len(path) and leg < WAYPOINT_PATH_MAX and grid.get(path[leg + 1]) == ".":
-        leg += 1
-    memory["planned_length"] = len(path) - 1
-    return path[leg] if leg else None
+            if n in prefix_cells or not passable(n):
+                continue
+            next_prefix = -1
+            next_branch = branch
+            if prefix >= 0:
+                if first_grid.get(n) == ".":
+                    if prefix + 1 < WAYPOINT_PATH_MAX:
+                        next_prefix = prefix + 1
+                    elif n in spent:
+                        continue
+                elif not prefix or p in spent:
+                    continue
+                if len(cost) >= ROUTE_PLAN_CELLS_MAX:
+                    continue
+                next_branch = len(issued_prefixes)
+                issued_prefixes[next_branch] = prefix_cells
+            next_node = (n, next_prefix, next_branch)
+            if c + 1 < cost.get(next_node, float("inf")):
+                if len(cost) >= ROUTE_PLAN_CELLS_MAX and next_node not in cost:
+                    continue
+                cost[next_node], parents[next_node] = c + 1, node
+                heapq.heappush(todo, (c + 1 + h(n), c + 1, *next_node))
+    return None
 
 
-def route_repair_plan(grid, start, reaches, memory, *, bounds=None):
+def route_repair_plan(grid, start, reaches, memory, *, bounds=None, accepts=None):
     """ADR 125: the hop's next step when no open route exists over its observed cells.
 
     a53 d8 J183-J1110: no open cell connects the Farm to its south exit; 2 natural pieces do (31,55 / 31,58). The repair
@@ -235,14 +283,15 @@ def route_repair_plan(grid, start, reaches, memory, *, bounds=None):
         return 1 if cell in ROUTE_CLOSED_CELLS and p not in closed else None
 
     costs, parents, todo = {start: (0, 0)}, {start: None}, [(0, 0, start)]
-    end = None
-    while todo:
+    while todo and len(costs) <= ROUTE_PLAN_CELLS_MAX:
         count, steps, p = heapq.heappop(todo)
         if costs[p] != (count, steps):
             continue
         if p in goals:
-            end = p
-            break
+            path = _search_path(parents, p)
+            plan = _repair_leg(grid, seen, path, count)
+            if accepts is None or plan is not None and accepts(plan["leg"], path):
+                return plan
         for n in ((p[0], p[1] - 1), (p[0] - 1, p[1]), (p[0] + 1, p[1]), (p[0], p[1] + 1)):
             extra = pieces(n)
             if extra is None:
@@ -251,16 +300,14 @@ def route_repair_plan(grid, start, reaches, memory, *, bounds=None):
             if n not in costs or score < costs[n]:
                 costs[n], parents[n] = score, p
                 heapq.heappush(todo, (*score, n))
-    if end is None:
-        return None
-    path = [end]
-    while parents[path[-1]] is not None:
-        path.append(parents[path[-1]])
-    path.reverse()
+    return None
+
+
+def _repair_leg(grid, seen, path, count):
     first = next((i for i, p in enumerate(path) if seen.get(p, ".") != "."), None)
     if first is None:
         return None  # an open/optimistic path: route_waypoint owns it
-    plan = dict(blocker=list(path[first]), pieces=costs[end][0], length=len(path) - 1, leg=None, reaches=None)
+    plan = dict(blocker=list(path[first]), pieces=count, length=len(path) - 1, leg=None, reaches=None)
     if path[first] in grid and all(grid.get(p) == "." for p in path[:first]):
         beyond = path[first]
         for p in path[first + 1:]:
@@ -271,13 +318,8 @@ def route_repair_plan(grid, start, reaches, memory, *, bounds=None):
                 break
         plan["reaches"] = [list(beyond)]
         return plan
-    leg = 0
-    while leg + 1 < first and leg < WAYPOINT_PATH_MAX and grid.get(path[leg + 1]) == ".":
-        leg += 1
-    if not leg:
-        return None
-    plan["leg"] = path[leg]
-    return plan
+    plan["leg"] = open_prefix(grid, path[:first])
+    return plan if plan["leg"] is not None else None
 
 
 def survey_leg(state, here, tile):
@@ -292,6 +334,120 @@ def survey_leg(state, here, tile):
     return tile
 
 
+_EXIT_KINDS = ("warp", "door", "building_door")
+
+
+def _exit_crossing(entry, stand, facts, seen, size, dead):
+    """Rank a native crossing using observed cells, including remembered off-window evidence."""
+    fact = facts.get(entry["ref"])
+    if not isinstance(fact, Mapping):
+        return (), False, None
+    if entry["kind"] != "warp":
+        return (), fact.get("enterable") is True, None
+    source = interact._fact_tile(fact, "source_tile")
+    if source is None:
+        return (), False, None
+    width, height = size
+    cells = tuple(c for c in interact.warp_crossing_cells(stand, source)
+                  if 0 <= c[0] and 0 <= c[1] and (not width or c[0] < width) and (not height or c[1] < height))
+    blocker = next((c for c in cells if seen.get(c) is not None and seen[c] not in interact.WARP_CROSSING_OPEN), None)
+    witnessed = entry["ref"] not in dead and all(seen.get(c) in interact.WARP_CROSSING_OPEN for c in cells)
+    return cells, witnessed, blocker
+
+
+def _route_observe(state, memory, grid, here):
+    """Mark changed cells on the hop, independent of window bounds and scene revisions."""
+    if grid.get(here) == "#":
+        # actor_cell_open authorizes this pose only. Do not remember it as terrain evidence.
+        grid = dict(grid)
+        grid.pop(here)
+    seen = memory.get("seen", {})
+    if memory.get("seen_resets") != getattr(seen, "resets", None):
+        memory.pop("changes", None)
+    updates = [cell for cell, value in grid.items()
+               if seen.get(cell) != value and (cell in seen or value in interact.WARP_CROSSING_OPEN)]
+    seen = remember_route_grid(grid, memory)
+    if isinstance(seen, _LocationRouteCells):
+        memory["seen_resets"] = seen.resets
+    if updates:
+        epoch = state.get("route_epoch", 0) + 1
+        memory.setdefault("changes", {}).update((cell, epoch) for cell in updates if cell in seen)
+        state["route_epoch"] = epoch
+    return seen
+
+
+def _settled_route_leg(goal, state, location, here):
+    """Return the held offer, or the newly completed edge and its route evidence."""
+    held, pending = state.get("waypoint"), state.get("waypoint_leg")
+    progress = goal.approach_progress or {}
+    if held is None or progress.get("target_ref") != held["ref"] or progress.get("status") != "ARRIVED":
+        return held, None
+    effect_request = getattr(goal, "approach_effect_request_id", None)
+    if pending is not None and effect_request and effect_request == pending[3] and here != pending[1]:
+        return held, None  # an earlier arrival at the same ref cannot retire a newly held leg
+    state.pop("waypoint")
+    state.pop("waypoint_leg", None)
+    if pending is not None:
+        origin, end, evidence_at_offer, previous_receipt = pending
+        action = getattr(goal, "last_action", None)
+        request = getattr(action, "request_id", None)
+        if (request and request != previous_receipt and request == effect_request
+                and action.lifecycle == "completed" and action.cleanup_confirmed is True
+                and action.world_effect_status == "observed_change"):
+            before, after = action.before or {}, action.after or {}
+            if (before.get("location") == after.get("location") == location
+                    and tuple(after.get("tile") or ()) == end
+                    and before.get("tile")):
+                return None, ((origin, end), evidence_at_offer)
+    return None, None
+
+
+def _unspent_frontier(parents, seen, reaches, bounds, allows):
+    """Try other observed-open leads to unseen ground after the normal survey repeats a leg."""
+    def unseen(x, y):
+        return x >= 0 and y >= 0 and (bounds is None or x <= bounds[0] and y <= bounds[1]) and (x, y) not in seen
+
+    start = next(iter(parents))
+    paths = (open_path(parents, (x, y)) for x, y in parents if (x, y) != start and any(
+        unseen(nx, ny) for nx, ny in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1))))
+
+    def rank(path):
+        x, y = path[-1]
+        remaining = min(abs(x - gx) + abs(y - gy) for gx, gy in reaches)
+        return len(path) + remaining, remaining, path[-1]
+
+    for path in sorted(paths, key=rank):
+        tile = path[min(WAYPOINT_PATH_MAX, len(path) - 1)]
+        if allows(tile, path):
+            return tile
+    return None
+
+
+def _reserve_hop_inputs(state, inputs, here, reaches, observed_path=None):
+    """Reserve the hop once, from its selected open route or the native distance."""
+    if "input_budget" not in state:
+        distance = (len(observed_path) - 1 if observed_path else
+                    min(abs(x - here[0]) + abs(y - here[1]) for x, y in reaches))
+        state["inputs_start"] = inputs
+        state["input_budget"] = min(160, max(32, 2 * distance + 8))
+
+
+def _hop_plan_state(goal, state):
+    """The receipt and planner inputs that can invalidate a cached navigation snapshot."""
+    progress = goal.approach_progress or {}
+    memory = state.get("route_memory", {})
+    return (progress.get("target_ref"), progress.get("status"), getattr(goal, "approach_effect_request_id", None),
+            getattr(goal, "last_action", None), state.get("waypoint_leg"), state.get("waypoint"),
+            state.get("route_plan_refusals"), tuple(map(tuple, memory.get("closed", ()))),
+            getattr(memory.get("seen"), "resets", None),
+            state.get("repair_plan"), tuple(map(tuple, state.get("repair_reaches") or ())))
+
+
+class _LocationRouteCells(dict):
+    """The shared location grid exposes rollovers to suspended hops."""
+    resets = 0
+
+
 def route_seen_cells(runtime, location):
     """ADR 125: one location's observed cells, kept across this runtime's trips as guidance; a person remembers the farm.
 
@@ -301,7 +457,7 @@ def route_seen_cells(runtime, location):
         store = runtime._route_seen_by_location = {}
     if location not in store and len(store) >= ROUTE_SEEN_LOCATIONS_MAX:
         store.pop(next(iter(store)))
-    return store.setdefault(location, {})
+    return store.setdefault(location, _LocationRouteCells())
 
 
 def _current_date(runtime, pin):
@@ -388,7 +544,9 @@ class GoalRoutesRuntimeMixin:
                 nav = replace(nav, target=hop, route_leg=True)
             else:
                 routed = False
-        entries = interact.navigation_entries(facts, tuple(here), nav, pin.location, grid=raw_grid, excluded=dead)
+        home_on_farm = nav is not None and nav.alias == interact.HOME and pin.location == "Farm"
+        entries = interact.navigation_entries(facts, tuple(here), nav, pin.location, grid=raw_grid, excluded=dead,
+                                              all_exits=bool(raw_grid) and (routed or home_on_farm))
         if routed:
             # GAP8F: exits of the itinerary's current hop are this objective's own targets (rank 0), never cut
             # from the eight-entry catalog by nearer actionable objects.
@@ -396,12 +554,13 @@ class GoalRoutesRuntimeMixin:
         # Native exit stands remain the intent even if the survey has no waypoint.
         goal.home_route_state["route_reaches"] = [tile for entry in entries
             for tile in (entry.get("reach_tiles") or [entry["tile"]])]
-        if not routed and (nav is None or nav.alias != interact.HOME or pin.location != "Farm"):
+        if not routed and not home_on_farm:
             return entries
-        return GoalRoutesRuntimeMixin._hop_entries(self, goal, pin, here, facts, raw_grid, entries, (pin.location, nav.target))
+        return GoalRoutesRuntimeMixin._hop_entries(self, goal, pin, here, facts, raw_grid, entries,
+                                                   (pin.location, nav.target), dead=dead)
 
-    def _hop_entries(self, goal, pin, here, facts, raw_grid, entries, basis):
-        """One hop toward ``entries[0]``, split into current-grid legs: an exit of a trip, or forage she chose (FIX73F). ADR 125."""
+    def _hop_entries(self, goal, pin, here, facts, raw_grid, entries, basis, *, dead=frozenset()):
+        """Plan once for each distinct navigation snapshot and candidate set."""
         state = goal.home_route_state
         if state.get("basis") != basis:
             reaches_seen = state.get("route_reaches", [])
@@ -409,85 +568,213 @@ class GoalRoutesRuntimeMixin:
             state["basis"] = basis
             state["route_reaches"] = reaches_seen
         if not entries:
+            state.pop("hop_plan", None)
             return []  # no native door fact: never manufacture a home offer
-        target = entries[0]
-        from arti_stardew_animal_routine import actor_cell_open
+        here = tuple(here)
+        size = interact._location_size(facts, pin.location)
+        live = getattr(self, "_live7_active", lambda: False)()
+        snapshot_id = (getattr(pin, "player_id", None), getattr(pin, "screen_id", None),
+                       getattr(pin, "observation_session_id", None), here, size, live, dead, entries)
+        memo = state.get("hop_plan")
+        # The nav reader decodes a new dict even when the native window is
+        # unchanged. Compare its contents, independent of scene revision churn.
+        if raw_grid and memo and memo[:3] == (snapshot_id, raw_grid, _hop_plan_state(goal, state)):
+            if memo[3] and state.get("waypoint") and "repair_reaches" in state:
+                # Rebuilding an already held offer retires its optional
+                # boundary projection, just as the uncached held path does.
+                state.pop("repair_reaches")
+                state["hop_plan"] = (*memo[:2], _hop_plan_state(goal, state), memo[3])
+            return list(memo[3])
+        offers = GoalRoutesRuntimeMixin._plan_hop_entries(self, goal, pin, here, facts, raw_grid,
+                                                         entries, basis, dead, live, size)
+        if raw_grid:
+            state["hop_plan"] = (snapshot_id, dict(raw_grid), _hop_plan_state(goal, state), tuple(offers))
+        else:
+            state.pop("hop_plan", None)  # an expired read never reuses a cached offer
+        return offers
+
+    def _plan_hop_entries(self, goal, pin, here, facts, raw_grid, entries, basis, dead, live, size):
+        state, target = goal.home_route_state, entries[0]
+        from arti_stardew_animal_routine import actor_cell_open, house_waypoint
         # A23: a pet/animal/farmer on ARTI's own Farm cell marks it '#'; open only that cell.
         grid = actor_cell_open(raw_grid, here)
         parents = open_paths(grid, here)
         # ADR 210: a destination may have several native exits. The first
         # (geometrically nearest) one can be on an inaccessible side of a
         # river. Plan toward every observed exit to that same next map.
-        exit_kinds = ("warp", "door", "building_door")
-        exits = ([e for e in entries if e.get("kind") in exit_kinds
-                  and e.get("target_location") == target.get("target_location")]
-                 if target.get("kind") in exit_kinds and target.get("target_location") else [target])
-        reaches = list(dict.fromkeys(tuple(t) for e in exits for t in (e.get("reach_tiles") or [e["tile"]])))
-        paths = [p for tile in reaches if (p := open_path(parents, tile)) is not None]
-        path = min(paths, key=lambda p: (len(p), p[-1])) if paths else None
-        if path:
-            target = next(e for e in exits if tuple(path[-1]) in
-                          [tuple(t) for t in (e.get("reach_tiles") or [e["tile"]])])
-        # B20: reserve a hop once from the observed-grid route length. When
-        # the rolling grid omits the exit, use its native distance, never an
-        # invented route. Re-observation cannot refill this allowance.
-        if "input_budget" not in state:
-            distance = len(path) - 1 if path else min(abs(x - here[0]) + abs(y - here[1]) for x, y in reaches)
-            state["inputs_start"] = self._physical_action_publications
-            state["input_budget"] = min(160, max(32, 2 * distance + 8))
+        routing_exit = target.get("kind") in _EXIT_KINDS and bool(target.get("target_location"))
+        exits = ([e for e in entries if e.get("kind") in _EXIT_KINDS
+                  and e.get("target_location") == target["target_location"]] if routing_exit else [target])
+        stands = [(tuple(t), e) for e in exits for t in (e.get("reach_tiles") or [e["tile"]])]
+        reaches = list(dict.fromkeys(stand for stand, _ in stands))
+        held, completed = _settled_route_leg(goal, state, pin.location, here)
+        if completed:
+            edge, evidence_at_offer = completed
+            state.setdefault("completed_legs", {})[edge] = evidence_at_offer
         if not parents:
+            if routing_exit and (state.get("waypoint") or state.get("completed_legs")):
+                return []  # an expired frame cannot re-arm a leg or replace a held route
+            _reserve_hop_inputs(state, self._physical_action_publications, here, reaches)
             # Preserve the existing nearby-door path; only the new distant leg
             # requires an observed-grid waypoint.
             return [e for e in entries if max(abs(e["tile"][0] - here[0]), abs(e["tile"][1] - here[1]))
                     <= interact.NAVIGATION_REACH]
-        held = state.get("waypoint")
-        progress = goal.approach_progress or {}
-        if held and progress.get("target_ref") == held["ref"] and progress.get("status") == "ARRIVED":
-            state.pop("waypoint", None)
-            held = None
         if held:
             state.pop("repair_reaches", None)  # continue the survey, not a stale optional clear
-            return [held] if open_path(parents, held["tile"]) is not None else []
-        if path is not None and len(path) - 1 <= WAYPOINT_PATH_MAX:
-            state.pop("repair_reaches", None)
-            return [target]
-        from arti_stardew_animal_routine import house_waypoint
-        destination = path[-1] if path else (reaches[0] if reaches else target["tile"])
-        # GAP8H: an itinerary hop follows its plan over this hop's observed cells; the original survey
-        # (best distance, frontiers, one reset) remains the fallback when no current-grid leg exists.
-        # live7-game-m4 D2 (journal L3679-L4036): the Farm home leg from the south of the Forest farm oscillated
-        # 53,44 <-> 55,38 for 59 inputs (the 55,38 window saw the exit behind a detour, the 53,44 window did not and
-        # its best-distance memory pulled it back), then home_route_unreachable. The home leg plans over the cells
-        # observed during this leg too (same rule as an itinerary hop); the survey stays the fallback.
+            stand = state.get("waypoint_leg", (None, held["tile"]))[1]
+            current = next((e for e in exits if e["ref"] == held["ref"]), None)
+            offered = (held["kind"] == "home_route_stand" or current is not None
+                       and current["tile"] == held["tile"] and current.get("reach_tiles") == held.get("reach_tiles"))
+            if offered and open_path(parents, stand) is not None:
+                return [current or held]
+            if not routing_exit:
+                return []
+            # The issued leg can no longer reach its stand on this fresh grid.
+            state.pop("waypoint")
+            state.pop("waypoint_leg", None)
+
+        local_paths = {stand: open_path(parents, stand) for stand in reaches}
         memory = state.setdefault("route_memory", {})
         if "seen" not in memory:
             memory["seen"] = route_seen_cells(self, pin.location)
-        tile = route_waypoint(grid, here, reaches, memory) if not path else None
-        state["route_planned"] = tile is not None
+        seen = _route_observe(state, memory, raw_grid, here) if routing_exit else remember_route_grid(grid, memory)
+        bounds = route_bounds(facts, pin.location) if live else None
+        current_crossing = defaultdict(list)
+        witnessed = defaultdict(list)
+        possible = defaultdict(list)
+        previous_no_effect = defaultdict(list)
+        closed_stands = defaultdict(list)
+        repair = defaultdict(list)
+        for stand, entry in stands:
+            crossing, witnessed_open, blocker = _exit_crossing(entry, stand, facts, seen, size, dead)
+            option = (entry, crossing, witnessed_open)
+            repair[blocker or stand].append(option)
+            if blocker is None:
+                pool = previous_no_effect if entry["ref"] in dead else possible
+                pool[stand].append(option)
+                if witnessed_open:
+                    witnessed[stand].append(option)
+                    if all(c in grid for c in crossing):
+                        current_crossing[stand].append(option)
+            else:
+                closed_stands[stand].append(option)
+        if not possible:
+            possible = previous_no_effect
+        else:
+            for stand, options in previous_no_effect.items():
+                closed_stands[stand].extend(options)
+        witnessed_refs = frozenset(entry["ref"] for options in witnessed.values() for entry, _, _ in options)
+        completed_legs = state.get("completed_legs", {})
+
+        # A spent edge is hop-wide, even if a different exit produced it.
+        spent = False
+        relevant = ()
+
+        def allows(tile, cells, fresh_exit=None):
+            nonlocal spent, relevant
+            previous = completed_legs.get((here, tile))
+            if previous:
+                epoch, old_cells, old_witnesses = previous
+                changes = memory.get("changes", {})
+                fresh_crossing = fresh_exit is not None and fresh_exit not in old_witnesses
+                if (not fresh_crossing and not any(changes.get(c, 0) > epoch for c in cells)
+                        and not any(changes.get(c, 0) > epoch for c in old_cells)):
+                    spent = True
+                    return False
+            relevant = tuple(cells)
+            return True
+
+        def accept(path, candidates):
+            nonlocal target
+            stand = path[-1]
+            tile = open_prefix(grid, path)
+            for entry, crossing, witnessed_open in candidates[stand]:
+                fresh_exit = entry["ref"] if witnessed_open else None
+                if stand == here or tile is not None and allows(tile, (*path, *crossing), fresh_exit):
+                    target = entry
+                    return True
+            return False
+
+        def local_path(candidates):
+            paths = sorted((local_paths[stand] for stand in candidates if local_paths[stand]),
+                           key=lambda p: (len(p), p[-1]))
+            return next((p for p in paths if accept(p, candidates)), None)
+
+        path = local_path(current_crossing) or local_path(witnessed)
+        if path is None:
+            path = route_path(seen, here, witnessed, None, witnessed=True, accepts=lambda p: accept(p, witnessed))
+        if path is None:
+            path = local_path(possible)
+        if path is None:
+            path = route_path(seen, here, possible, None, accepts=lambda p: accept(p, possible))
+        state["route_planned_map"] = False
+        if path is None and bounds:
+            path = route_path(seen, here, possible, bounds, accepts=lambda p: accept(p, possible))
+            state["route_planned_map"] = path is not None
+        if path is None and spent:
+            # The shortest predecessor to a stand may end its first leg at a
+            # spent waypoint. Search again with that leg boundary constrained.
+            spent_ends = {end for origin, end in completed_legs if origin == here}
+            path = route_path(seen, here, witnessed, None, witnessed=True,
+                              accepts=lambda p: accept(p, witnessed), first_grid=grid, spent=spent_ends)
+            if path is None:
+                path = route_path(seen, here, possible, bounds,
+                                  accepts=lambda p: accept(p, possible), first_grid=grid, spent=spent_ends)
+                state["route_planned_map"] = path is not None and bounds is not None
+        observed = path is not None and all(grid.get(cell) == "." for cell in path)
+        if observed:
+            state["route_planned_map"] = False
+        state["route_planned"] = path is not None and not observed and not state["route_planned_map"]
+        memory["planned_length"] = len(path) - 1 if state["route_planned"] or state["route_planned_map"] else None
+
         state.pop("repair_plan", None)
-        # M5 D1 L267-L573: debris enclosed the eastward route while the BusStop stand was off-window.
-        # The survey walked west; the repair's inspect gate required an observed stand and never ran.
-        # Reuse its existing boundary projection so bounded native reads/clearing get a chance first.
-        # The real native exit stays in route_reaches; no boundary can verify a crossing.
-        # Smoke 2026-10-24 D2 (J1197-J1352): the Farm HOME leg (cabin door 25,33 off-window) was never routed, so
-        # this repair stayed off; the survey shuttled 33,61 <-> 41,61 on a corridor walled by debris (32,61) and
-        # failed exit_not_offered twice. Owner: every chosen trip (any destination, exits, home) may clear natural
-        # debris with her tools under the same route_clear piece/tree/input caps; no per-destination rule.
-        state["repair_reaches"] = (local_route_reaches(grid, here, reaches)
-            if path is None and tile is None
-            and getattr(self, "_live7_active", lambda: False)() else [])
+        state["repair_reaches"] = (local_route_reaches(grid, here, repair)
+                                   if live and (path is None or state["route_planned_map"]) else [])
+        tile = open_prefix(grid, path) if path else None
+
+        # Bounded native reads and repair retain even the exits whose crossing is closed.
         plan = None
-        if path is None and tile is None and getattr(self, "_live7_active", lambda: False)():
-            # ADR 125: walk first while the map may still hold an open way; cut only once observation rules that out.
-            bounds = route_bounds(facts, pin.location)
-            tile = route_waypoint(grid, here, reaches, memory, bounds) if bounds else None
-            state["route_planned_map"] = tile is not None
-            if tile is None and state.get("route_plan_refusals", 0) < ROUTE_PLAN_REFUSALS_MAX:
-                plan = route_repair_plan(grid, here, reaches, memory, bounds=bounds)
-                tile = plan["leg"] if plan is not None else None
+        if path is None and live and state.get("route_plan_refusals", 0) < ROUTE_PLAN_REFUSALS_MAX:
+            def accept_repair(leg, route):
+                nonlocal target
+                for entry, crossing, _ in repair[route[-1]]:
+                    if leg is None or allows(leg, (*route, *crossing)):
+                        target = entry
+                        return True
+                return False
+
+            plan = route_repair_plan(grid, here, repair, memory, bounds=bounds, accepts=accept_repair)
+            if plan is not None:
+                tile = plan["leg"]
+        if path is None and plan is None:
+            # A nearby native stand stays available after repair has no plan.
+            # This still requires a current-open walk to the stand.
+            nearby_closed = {stand: entry for stand, entry in closed_stands.items()
+                             if local_paths[stand] and len(local_paths[stand]) - 1 <= WAYPOINT_PATH_MAX}
+            path = local_path(nearby_closed)
+            if path is not None:
+                observed = True
+                tile = open_prefix(grid, path)
+        _reserve_hop_inputs(state, self._physical_action_publications, here, possible or reaches, path if observed else None)
+        if observed and len(path) - 1 <= WAYPOINT_PATH_MAX:
+            if routing_exit and tile is not None:
+                state["waypoint"] = target
+                at_offer = (state.get("route_epoch", 0), relevant, witnessed_refs)
+                state["waypoint_leg"] = (here, tile, at_offer, getattr(goal, "approach_effect_request_id", None))
+            return [target]
+        survey_candidates = possible or repair
+        destination = next(iter(survey_candidates))
+        if path is None and plan is None:
+            target = survey_candidates[destination][0][0]
+
+        def survey(window_best=False):
+            leg = house_waypoint(grid, here, destination, state.setdefault("survey", {}), window_best=window_best)
+            if leg is not None and routing_exit:
+                return leg if allows(leg, open_path(parents, leg)) else None
+            return survey_leg(state, here, leg)
+
         if tile is None and plan is None:
-            tile = house_waypoint(grid, here, destination, state.setdefault("survey", {}))
-            tile = tile if path else survey_leg(state, here, tile)
+            tile = survey()
         if tile is None and plan is None and not state.get("survey_reset"):
             # PART_B3: the hop's own earlier leg set best_distance=1 for the
             # cell it was walking toward (a Farm cell whose reach tile is a wall), so on ARRIVAL at the hop
@@ -497,8 +784,9 @@ class GoalRoutesRuntimeMixin:
             # current grid authorizes a leg, and the hop's input budget is unchanged.
             state["survey_reset"] = True
             state["survey"] = {}
-            tile = house_waypoint(grid, here, destination, state["survey"], window_best=True)
-            tile = tile if path else survey_leg(state, here, tile)
+            tile = survey(window_best=True)
+        if tile is None and plan is None and spent:
+            tile = _unspent_frontier(parents, seen, reaches, bounds, allows)
         if plan is not None and plan["reaches"] is not None:
             # No waypoint: the held-leg rule below would drop this flag before the repair step reads it (0 of 210).
             state["repair_plan"] = plan
@@ -514,7 +802,7 @@ class GoalRoutesRuntimeMixin:
                 state["survey_diagnostic"] = digest
                 journal(dict(ev="home_route_survey", location=pin.location, actor_tile=list(here),
                     native_exit_ref=target["ref"], reach_tiles=reaches, grid_cells=cells,
-                    exit_path_observed=path is not None, waypoint=list(tile) if tile is not None else None,
+                    exit_path_observed=observed, waypoint=list(tile) if tile is not None else None,
                     survey_reset=bool(state.get("survey_reset")),
                     best_distance=state.get("survey", {}).get("best_distance"),
                     survey_windows=list(state.get("survey", {}).get("windows", ())),
@@ -533,6 +821,9 @@ class GoalRoutesRuntimeMixin:
                     tile=list(tile), reach="DIRECT_TARGET", target_location=target.get("target_location"),
                     revision=hashlib.sha256(str((basis, tile)).encode()).hexdigest()[:16])
         state["waypoint"] = held
+        if routing_exit:
+            at_offer = (state.get("route_epoch", 0), relevant, witnessed_refs)
+            state["waypoint_leg"] = (here, tile, at_offer, getattr(goal, "approach_effect_request_id", None))
         return [held]
 
     def _warp_no_effect_record(self, args, evidence) -> None:

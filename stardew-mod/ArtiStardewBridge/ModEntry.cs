@@ -444,7 +444,8 @@ public sealed partial class ModEntry : Mod
         ScenePreparedFact gather = SceneSnapshotCapture.CaptureGather(Game1.player, this.LastUseToolVerdict,
             this.config.BackgroundFarmToolsEnabled);
         var sceneLocation = Game1.player.currentLocation;
-        var mapAffordances = affordances ? SceneSnapshotCapture.CaptureMapAffordances(sceneLocation, payload.Tile, screen.WorldKnowledge) : null;
+        var mapAffordances = affordances ? SceneSnapshotCapture.CaptureMapAffordances(sceneLocation, payload.Tile,
+            screen.WorldKnowledge, GenericWorldCapture.CodeCells(this, Game1.player, sceneLocation)) : null;
         if (!screen.Scene.SnapshotNeeded)
         {
             screen.Deltas.Upsert(gather);
@@ -757,6 +758,7 @@ public sealed partial class ModEntry : Mod
         {
             Native = JsonSerializer.SerializeToElement(new { halt = this.actionOwner.HaltFact, rearmed = this.actionOwner.Rearmed, halt_notes = this.actionOwner.HaltNotes.ToArray() }),
             Location = player.currentLocation?.Name ?? "",
+            LocationId = CurrentLocationId(player),
             Tile = new TileXY { X = tile.X, Y = tile.Y },
             Pixel = new PixelXY { X = player.Position.X, Y = player.Position.Y },
             Facing = player.FacingDirection,
@@ -1235,6 +1237,8 @@ public sealed partial class ModEntry : Mod
     {
         if (!e.IsLocalPlayer)
             return;
+        if (!ReferenceEquals(e.OldLocation, e.NewLocation) && NativeB1Offers.HasCodeCells(e.OldLocation))
+            NativeCodeActions.Current.Reset();
         SceneSnapshotCapture.InvalidateRefillSourceCaches();
         ScreenState screen = this.screens.Value;
         screen.Scene.OnLocalWarp(e.NewLocation?.NameOrUniqueName);

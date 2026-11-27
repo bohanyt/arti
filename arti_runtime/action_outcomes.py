@@ -12,6 +12,20 @@ def unreadable(reason):
         "readback_unavailable", "readback_unreadable", "readback_missing", "readback_stale"))
 
 
+def success_observation(reason):
+    """Diagnostic label only. A command outcome cannot establish a skill finish."""
+    from arti_stardew_command import (
+        OUTCOME_EVENT_UP, OUTCOME_SUKSES, OUTCOME_SUKSES_INTERACT, OUTCOME_SUKSES_PAD_BUTTON,
+        OUTCOME_SUKSES_PRIMITIVE,
+    )
+
+    if not isinstance(reason, str):
+        return False
+    wire_kind = reason.partition("(")[0]
+    return reason.startswith("observed_") or any(wire_kind in table.values() for table in (
+        OUTCOME_EVENT_UP, OUTCOME_SUKSES, OUTCOME_SUKSES_INTERACT, OUTCOME_SUKSES_PAD_BUTTON, OUTCOME_SUKSES_PRIMITIVE))
+
+
 def get(value, name, default=None):
     return value.get(name, default) if isinstance(value, Mapping) else getattr(value, name, default)
 

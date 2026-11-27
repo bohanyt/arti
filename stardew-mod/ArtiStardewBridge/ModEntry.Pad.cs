@@ -243,7 +243,7 @@ public sealed partial class ModEntry
 
     /// <summary>fix63A: FestivalLeavePolicy.State of the current event; the free-roam token already excludes menus and minigames.</summary>
     private static string? SampleFestivalLeave() => Game1.CurrentEvent is not Event ev ? null
-        : FestivalLeavePolicy.State(ev.isFestival, NativeEventControl.Token() is not null, ev.playerControlSequence, ev.eventSwitched);
+        : FestivalLeavePolicy.State(ev.isFestival, NativeEventControl.Token() is not null, ev.playerControlSequence, ev.eventSwitched, NativeEventControl.SeatedToken() is not null);
 
     /// <summary>FIXB31: read-only facts of the current event for EventSkipPolicy (game thread).</summary>
     private static EventSkipFacts SampleEventSkipFacts()

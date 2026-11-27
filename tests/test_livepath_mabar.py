@@ -181,7 +181,7 @@ def test_manual_play_logs_the_actual_unbacked_save(backup_paths, monkeypatch, ac
     assert mabar.main(["backup", "--run", str(run), "--continue", "Test_123"]) == 0
     mabar.PREP.mkdir()
     mabar.soak.write(run / "trial-config.json", {"stardew_host_controller": "owner"})
-    mabar.soak.write(run / "continued.json", {"save": "Test_123"})
+    # A new-farm play can see an unbacked save. A prepared owner co-op now verifies its save before enrolment.
     cycle = run / "runtime/live7/c1"
 
     def fake_tool(run, script, args, name):

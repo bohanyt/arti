@@ -94,6 +94,9 @@ POLL_S = 1.5
 
 # The ceiling leaves room to join inside the HOST's 300 s startup pause (soak.py helper StartupPauseSeconds=300).
 WINDOW_BASE_S, WINDOW_GROWTH_S, WINDOW_CEILING_S = 90, 20, 240
+# The owner-word launcher runs its own checks before it starts her game: 30 s for the PID, as ever, plus its readers'
+# own bounds (tasklist 20 s, PowerShell 60 s, two netstat reads). The caller ends the wait as soon as it exits.
+PID_WAIT_S, OWNER_PID_WAIT_S = 30, 30 + 20 + 60 + 10
 
 
 def window_wait_state(elapsed, alive, log_grew_ago):
@@ -656,7 +659,7 @@ class Restart:
         self.log("deploy_verified", record=str(new[-1]), dll8=want[:8])
 
     # 5
-    def launch(self, old_pid):
+    def launch(self, old_pid, *, attempt_id=None):
         ad = self.ad
         t_launch = ad.now()
         rc, so, se = ad.prep("launch", "farmhand")
@@ -664,14 +667,16 @@ class Restart:
         if rc != 0:
             raise Exit(3, "prep_trial.py launch farmhand failed")
         new_pid = None
-        for _ in range(30):
+        wait_s = PID_WAIT_S if attempt_id is None else OWNER_PID_WAIT_S
+        for _ in range(wait_s):
             rec = ad.read_json(paths.FARMHAND_LAUNCH) or {}
-            if rec.get("pid") and rec.get("pid") != old_pid and _utc_ts(rec.get("utc")) >= t_launch - 2:
+            if (rec.get("pid") and _utc_ts(rec.get("utc")) >= t_launch - 2
+                    and (rec.get("pid") != old_pid if attempt_id is None else rec.get("owner_attempt") == attempt_id)):
                 new_pid = rec["pid"]
                 break
             ad.sleep(1.0)
         if not new_pid:
-            raise Exit(3, f"no new pid in {paths.FARMHAND_LAUNCH.name} within 30 s")
+            raise Exit(3, f"no new pid in {paths.FARMHAND_LAUNCH.name} within {wait_s} s")
         hwnd = self.wait_window(new_pid, t_launch)
         old = ad.read_text(paths.FH_HWND_FILE)
         ad.write_text(paths.FH_HWND_FILE, f"{hwnd}\n")

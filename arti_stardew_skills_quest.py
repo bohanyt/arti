@@ -1,5 +1,5 @@
-"""W1 gap B4 (S28 ``surat_quest <item> ke <npc>``): read mail -> accept the exact understood delivery quest -> bind the
-native quest -> travel / approach its NPC -> offer the requested item -> close -> reconcile the quest and the bag debit.
+"""S28 (``surat_quest <item> ke <npc>``): bind a native quest from the log or read and accept its letter.
+Travel to its NPC, offer the requested item, close the dialogue, and reconcile the quest and bag debit.
 
 Every step is an existing verified button: the actor's mailbox ``world_interact`` (LetterViewerMenu), letter RT / B,
 the letter's accept-quest A (mod QuestRules.AcceptLetter: only the presented, readable, not-yet-active item-delivery
@@ -117,21 +117,36 @@ def _owned(inventory, qid):
     return sum(f.get("stack") or 0 for f in inventory if f.get("qualified_item_id") == qid)
 
 
+def parse_request(arg: str | None) -> tuple[str, str] | None:
+    item, _, npc = (arg or "").rpartition(" ke ")
+    item, npc = item.strip().casefold(), npc.strip().casefold()
+    return (item, npc) if item and npc else None
+
+
+def inventory_item_matches(item, fact):
+    return any(item == str(fact.get(k) or "").casefold() for k in ("name", "display_name", "qualified_item_id"))
+
+
+def _matches_request(item, npc, quest, inventory):
+    if str(quest.get("target") or "").casefold() != npc:
+        return False
+    qid = str(quest.get("item") or "")
+    if not qid:
+        return False
+    return qid.casefold() == item or any(
+        inventory_item_matches(item, f) for f in inventory if f.get("qualified_item_id") == qid)
+
+
 def understood(call_item, call_npc, lq, inventory):
     """The owner's request matches this presented quest: an item-delivery quest for the named NPC and item."""
     if (lq.get("type") != ITEM_DELIVERY or lq.get("readable") is not True or lq.get("already_active") is not False
             or lq.get("accept_shown") is not True or type(lq.get("number")) is not int or lq["number"] < 1):
         return False
-    if str(lq.get("target") or "").casefold() != call_npc:
-        return False
-    qid = str(lq.get("item") or "")
-    if not qid:
-        return False
-    if qid.casefold() == call_item:
-        return True
-    names = {str(f.get(k) or "").casefold() for f in inventory if f.get("qualified_item_id") == qid
-             for k in ("name", "display_name")}
-    return call_item in names
+    return _matches_request(call_item, call_npc, lq, inventory)
+
+
+def _binding(fact):
+    return {k: fact[k] for k in ("instance", "quest_id", "target", "item", "number")}
 
 
 def _source_parts(source):
@@ -162,24 +177,29 @@ def _extras_receipt(last, kind, outcome):
                 and S._g(last, "world_effect_status") == "observed_extras_effect" and after.get("kind") == kind), after
 
 
-def plan(call, snap, state, context, attempt):
+def plan(request, snap, state, context, attempt):
     """One S28 step. ``attempt`` = arti_stardew_skills_attempts (ledger, travel, walk, end)."""
     A = attempt
     a = state["attempt"]
-    if not call.arg or " ke " not in call.arg:
-        return _fail("quest_item_and_npc_not_named")  # never a default quest, item or NPC
-    item, npc = call.arg.rsplit(" ke ", 1)
+    item, npc = request
     q = a.setdefault("quest", dict(phase="mail", letters=0))
     quests = quest_facts(context)
     if quests is None:
         return S._wait(state, "quest_facts", "quest_facts_unavailable", "Amati fakta quest native", S.WAIT_S)
     if "start_quests" not in q:
         q["start_quests"] = [dict(id=f["quest_id"], instance=f["instance"], completed=f["completed"]) for f in quests][:12]
+        if q["phase"] == "mail":
+            # The initial quest log can identify the hand-in without reopening mail.
+            hits = [f for f in quests if f.get("type") == ITEM_DELIVERY and f["completed"] is False
+                    and _matches_request(item, npc, f, context["inventory"])]
+            if len(hits) == 1 and type(hits[0].get("number")) is int and hits[0]["number"] > 0:
+                q.update(phase="deliver", bound=_binding(hits[0]))
+                A.note(state, "quest_bound_from_log", **q["bound"])
     view = context.get("ui_view")
     last = _last(snap)
     phase = q["phase"]
     if phase in ("mail", "opening", "reading", "accepting", "closing", "closed"):
-        return _mail(call, snap, state, context, A, q, item, npc, quests, view, last)
+        return _mail(snap, state, context, A, q, item, npc, quests, view, last)
     if phase in ("deliver", "delivering", "dialogue"):
         return _deliver(snap, state, context, A, q, quests, view, last)
     return _fail("quest_phase_unknown:" + str(phase))
@@ -187,7 +207,7 @@ def plan(call, snap, state, context, attempt):
 
 # ---------------------------------------------------------------------------- mail -> accept -> bind
 
-def _mail(call, snap, state, context, A, q, item, npc, quests, view, last):
+def _mail(snap, state, context, A, q, item, npc, quests, view, last):
     phase = q["phase"]
     if view is None:
         if phase == "opening":
@@ -207,6 +227,10 @@ def _mail(call, snap, state, context, A, q, item, npc, quests, view, last):
             q["phase"] = phase = "deliver" if q.get("bound") else "mail"
             if phase == "deliver":
                 return _deliver(snap, state, context, A, q, quests, view, last)
+        if phase in ("reading", "accepting", "closed"):
+            # The letter she was reading is gone without its close receipt; never open the next one.
+            A.note(state, "letter_vanished", phase=phase, receiver=q.get("receiver"))
+            return A.end(state, context, "quest_letter_vanished")
         if S.menu_up(snap):
             return _settle(snap, state)
         return _open_mailbox(snap, state, context, A, q)
@@ -290,7 +314,7 @@ def _bind(snap, state, context, A, q, quests, view, last):
                                                for h in hits][:3])
         return A.end(state, context, "quest_identity_mismatch")
     state.pop("wait:quest_accept_readback", None)
-    q["bound"] = dict(instance=f["instance"], quest_id=f["quest_id"], target=f["target"], item=f["item"], number=f["number"])
+    q["bound"] = _binding(f)
     A.note(state, "quest_accepted", **q["bound"])
     q["phase"] = "closing"
     return _ui_press(snap, "B")  # nothing is pending any more: the close accepts nothing else

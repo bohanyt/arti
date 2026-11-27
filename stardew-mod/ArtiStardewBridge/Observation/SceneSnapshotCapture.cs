@@ -639,7 +639,8 @@ public sealed class SceneSnapshotCapture
             ? new ScenePreparedFact(captured.Id, fact with { ToolBreakable = true }) : captured;
     }
 
-    internal static ScenePreparedFact? CaptureMapAffordances(GameLocation? location, TileXY origin, NativeWorldKnowledge? knowledge)
+    internal static ScenePreparedFact? CaptureMapAffordances(GameLocation? location, TileXY origin,
+        NativeWorldKnowledge? knowledge, IReadOnlyList<NativeCodeActions.Cell> codeCells)
     {
         if (location is null) return null;
         string raw = location.NameOrUniqueName;
@@ -658,6 +659,8 @@ public sealed class SceneSnapshotCapture
                 rows.Add((tile.X, tile.Y, new object[] { "map-action:" + pin[..20], tile.X, tile.Y, new[] { "press" }, group[..20] }));
             }
         }
+        if (codeCells.Count > 0)
+            NativeCodeActions.AppendVisible(rows, raw, codeCells, new Point(origin.X, origin.Y), Game1.viewport, Game1.tileSize);
         const int limit = 96;
         var cells = rows.Count <= limit ? rows : SceneTraversalOrder.Nearest(rows, origin.X, origin.Y).Take(limit);
         return new ScenePreparedFact("affordance:map", new {

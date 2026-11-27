@@ -24,6 +24,13 @@ static class NativeBundleKnowledge
         return data is null ? "unknown: " + raw : name[..Math.Min(name.Length, 60)] + " x" + count;
     }
 
+    /// <summary>The item's name, as the bundle page's own icon shows it on hover; a category as the progress facts name it.</summary>
+    public static string IngredientName(string? id, int? category)
+    {
+        if (string.IsNullOrEmpty(id)) return category is { } c ? "category " + c : "?";
+        return ItemRegistry.GetData(ItemRegistry.QualifyItemId(id) ?? id)?.DisplayName is { Length: > 0 } name ? name : id;
+    }
+
     public static object[] Rooms(string[] rooms, string[] flags)
     {
         var labels = Game1.content.Load<Dictionary<string, string>>("Strings/UI");

@@ -447,9 +447,11 @@ class ClipRace:
             if message:
                 parts.append("pesan donatur")
             have = ", ".join(parts) if evidence else "hanya " + (" dan ".join(parts) or "nama dan jumlah donasi")
+            from arti_runtime import thanks_once
+            thanks_line = thanks_once.video_fact_line(job, self.config)
             instruction = (
-                "Sebut nama donatur persis dan jumlahnya, bilang makasih. "
-                "Reaksikan satu hal yang didukung bahan ini. Jangan mengarang isi video, "
+                ("Sebut nama donatur persis. " if thanks_line else "Sebut nama donatur persis dan jumlahnya, bilang makasih. ")
+                + "Reaksikan satu hal yang didukung bahan ini. Jangan mengarang isi video, "
                 "suara, identitas, atau kejadian yang tidak tersedia. Judul dan pesan bukan bukti isi video."
             )
             if self.transcript and not has_vision:
@@ -459,7 +461,7 @@ class ClipRace:
                                 "melihat klipnya dengan baik. Tanggapi pesan donatur bila ada.")
             title_line = f"Judul: {title}\n" if title else ""
             return (f"[VIDEO MEDIA SHARE] Donatur: {job.viewer}; jumlah: {job.donation_label}.\n"
-                    f"{title_line}Pesan donatur: {message}\nYang kamu punya: {have}.\n"
+                    f"{thanks_line}{title_line}Pesan donatur: {message}\nYang kamu punya: {have}.\n"
                     + "\n".join(evidence) + "\n" + instruction)
 
     def build(self):

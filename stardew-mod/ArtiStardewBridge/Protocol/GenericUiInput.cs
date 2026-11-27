@@ -23,6 +23,8 @@ public static class GenericUiPolicy
             return No("blocked_now:" + gate);
         if (button is "B" or "LB" && f.GenericValues?.GetValueOrDefault("ui_close_blocked") is string { Length: > 0 } closeGate)
             return No("blocked_now:" + closeGate);
+        if (f.GenericValues?.GetValueOrDefault("ui_unreadable") is true && (button != "B" || args is not null))
+            return No("unreadable_menu_close_only");
         if (f.GenericValues?.GetValueOrDefault("ui_prose") is true && button is not "Start")
             return No("blocked_now:advance_only_use_confirm");
         if (args?.Keys.Any(k => k is not ("choice" or "text" or "shift" or "value" or "settle" or "qty")) == true)

@@ -88,6 +88,7 @@ class Evidence:
     host_inert: str | None = None
     outranking: list = field(default_factory=list)  # read only for a recovery caller
     launch: tuple = (None, None)
+    launch_end: dict | None = None  # what was recorded as that launch's game ended, if anybody saw it
     archive_proof: tuple = (None, None)
 
 
@@ -320,6 +321,50 @@ def launch_published(launch, session):
             and launch.get("runtime_instance_id", session["runtime_instance_id"]) == session["runtime_instance_id"])
 
 
+def launch_end(run, launch):
+    """The row `owner_join.record_ended` wrote as this launch's game ended (a pending record stands for the game
+    it replaces), or None."""
+    if isinstance(launch, Mapping) and launch.get("pid") is None:
+        launch = launch.get("replaces")
+    folder = Path(run) / "runtime/owner-game-ended"  # only a run the owner hosts has it; every other run reads as before
+    if not isinstance(launch, Mapping) or not launch.get("launch_id") or not folder.is_dir():
+        return None
+    _, row = read_record(folder / (str(launch["launch_id"]) + ".json"))
+    return row if isinstance(row, dict) and row.get("launch_id") == launch["launch_id"] else None
+
+
+def ended_lock(ev):
+    """What became of the lock of the game whose last publication `ev` holds, whatever else holds a launch now: "none",
+    "kept" (its halt file restores it at the next start), "lost" (no start can restore it) or "unknown"."""
+    session = ev.session[1]
+    disk_raw, disk = ev.halt_file
+    if (not isinstance(session, Mapping) or not _complete(session) or session["record_faulted"] or disk_raw is UNREADABLE
+            or _exit_record_malformed(*ev.mod_exit)):
+        return "unknown"
+    key = _disk_key(disk) if disk_raw is not None else None
+    halt = halt_of(session)
+    if (disk_raw is not None and key is None) or (halt is not None and halt.get("malformed")):
+        return "unknown"
+    latched = key if key is not None and disk["state"] == "latched" else None
+    if halt is None:
+        return "none" if latched is None else "unknown"
+    kept = (_clean_exit(session, ev.mod_exit[1]) and isinstance(disk_raw, bytes) and len(disk_raw) <= 32768
+            and not ev.token_present and latched == halt["key"] and _restores_latch(disk, session, halt))
+    return "kept" if kept else "lost"
+
+
+def _end_accounted(ev, session):
+    """Before a relaunch on the owner's word, how the recorded launch's game ended is known (it was recorded as it
+    died, and no lock was lost) or its last publication is still the one read here. A session somebody else published
+    since would hide a lock that nobody saw."""
+    end, launch = ev.launch_end, ev.launch[1]
+    runtime = session["runtime_instance_id"]
+    if isinstance(end, Mapping):
+        return (end.get("known") is True and end.get("lost_lock") is False) or end.get("runtime_instance_id") == runtime
+    return runtime == ev.expected.get("runtime_instance_id") or (
+        isinstance(launch, Mapping) and runtime == launch.get("previous_runtime"))
+
+
 def read_launch_record(path):
     raw, launch = read_record(path)
     if isinstance(launch, dict) and launch.get("not_started") is True and launch.get("pid") is None:
@@ -369,6 +414,26 @@ def session_kind(run):
     if controller == "owner" and not helper:
         return "owner"
     return None
+
+
+def prepared_owner_run(run):
+    """The owner hosts this run and `mabar prepare` recorded the farm it continues. Only such a run can check
+    her world against the prepared save; an owner-hosted run on a new farm has nothing to check it against."""
+    return session_kind(run) == "owner" and present(Path(run) / "continued.json")
+
+
+def _owner_admits(ev, owner_launch):
+    """Whether the owner's live word speaks for this launch. `owner_launch` is what the caller that holds the
+    word verified at this boundary: "first" (this run never started her game) or "again" (the recorded process of its
+    previous launch is verifiably gone). No record read by the table carries it. A pending record without a PID, in a
+    run that has not played, is a launcher that died before a start."""
+    if not owner_launch or ev.run is None or session_kind(ev.run) != "owner":
+        return False
+    if owner_launch == "again":
+        return True
+    launch = ev.launch[1]
+    return not _run_has_launched(ev) or (isinstance(launch, dict) and "pid" in launch and launch["pid"] is None
+                                         and not cycle_dirs(ev.run))
 
 
 def _solo_run(ev):
@@ -422,9 +487,19 @@ def restored_receipt(ev, key):
     return receipt_for(session, dict(episode_id=found[0], halt_seq=found[1]))
 
 
+def own_startup_receipt(ev, session):
+    """The mod's persisted proof that a person re-armed this very runtime's single startup lock for an unclean exit."""
+    record = ev.halt_file[1]
+    key = _disk_key(record)
+    return bool(isinstance(session, dict) and key and record["state"] == "rearmed" and len(record["entries"]) == 1
+                and record["entries"][0].get("cause") == "native_unclean_exit"
+                and record["entries"][0].get("source") == "native"
+                and key[0] == "native:%s:%s" % (session.get("runtime_instance_id"), key[1]) and restored_receipt(ev, key))
+
+
 def manual_crash_successor(ev, previous):
     """A native re-arm on the manually launched successor can replace the old enrolled runtime."""
-    session, launch, record = ev.session[1], ev.launch[1], ev.halt_file[1]
+    session, launch = ev.session[1], ev.launch[1]
     old_runtime = previous.get("runtime_instance_id")
     if (not old_runtime or not isinstance(session, dict) or session.get("world_ready") is not True
             or not launch_published(launch, session) or launch.get("previous_runtime") != old_runtime):
@@ -433,13 +508,7 @@ def manual_crash_successor(ev, previous):
     next_identity = dict(previous, runtime_instance_id=runtime, session_id=session["session_id"])
     if not _matches_expected(session, next_identity, startup=None, act="observe"):
         return None
-    key = _disk_key(record)
-    if (not key or record["state"] != "rearmed" or len(record["entries"]) != 1
-            or record["entries"][0].get("cause") != "native_unclean_exit"
-            or record["entries"][0].get("source") != "native"
-            or key[0] != "native:%s:%s" % (runtime, key[1]) or not restored_receipt(ev, key)):
-        return None
-    return next_identity
+    return next_identity if own_startup_receipt(ev, session) else None
 
 
 def _resolved(path):
@@ -656,7 +725,7 @@ def watchdog_successor(ev, session, halt):
 
 
 def decide(ev, *, act, held=None, water=False, own_relaunch=None, switch=OWN_RELAUNCH_UNCLEAN_EXIT_CLEARABLE,
-           proof_id=None, watchdog=None, clear_watchdog=False):
+           proof_id=None, watchdog=None, clear_watchdog=False, owner_launch=False):
     """The table (ADR 254) as one decision for `act` on the evidence `ev` (see `read_evidence`)."""
     if act not in ACTS:
         raise ValueError(act)
@@ -690,14 +759,19 @@ def decide(ev, *, act, held=None, water=False, own_relaunch=None, switch=OWN_REL
         return hold("session_unreadable")  # row 6
     if raw is None and (act != "launch" or ev.expected or held or ev.prior_launch or ev.mod_exit[0] is not None):
         return hold("session_absent")  # row 6: her hands are never started or her game closed on no evidence
-    # The two launch admissions below (a closed title screen; a fresh run) hold only in a solo run. Who hosts
-    # is read once per decision, here; every other act and every non-solo launch decides both rows as main does.
-    solo_launch = act == "launch" and session is not None and _solo_run(ev)
+    # The caller can pass a live grant only at a launch boundary. No record read by this table carries it.
+    solo = act == "launch" and session is not None and _solo_run(ev)
+    owner = act == "launch" and session is not None and not solo and _owner_admits(ev, owner_launch)
+    again = owner and owner_launch == "again"
     if session is not None:
         if not _complete(session):
             return hold("halt_evidence_unknown")
-        if not _matches_expected(session, ev.expected, ev.startup, act) and not (
-                solo_launch and _closed_title_screen(session, *ev.mod_exit)):
+        # On a word that relaunches her, the publication recorded as her game ended is hers whatever screen it
+        # ended on (its process is verifiably gone); any other session passes only main's identity or the clean title exit.
+        if (not _matches_expected(session, ev.expected, ev.startup, act)
+                and not ((solo or owner) and _closed_title_screen(session, *ev.mod_exit))
+                and not (again and isinstance(ev.launch_end, Mapping)
+                         and ev.launch_end.get("runtime_instance_id") == session["runtime_instance_id"])):
             return hold("foreign_session")
         if (act != "join" and isinstance(held, Mapping) and held.get("runtime_instance_id")
                 and session["runtime_instance_id"] != held["runtime_instance_id"]):
@@ -718,9 +792,11 @@ def decide(ev, *, act, held=None, water=False, own_relaunch=None, switch=OWN_REL
         return hold("halt_malformed", halt)
     binding = bind(session, halt, held) if halt is not None else None
     launch_raw, launch = ev.launch
-    if (act == "launch" and session is not None
-            and (_run_has_launched(ev) if solo_launch else (ev.run is not None or launch_raw is not None))
+    if (act == "launch" and session is not None and not owner
+            and (_run_has_launched(ev) if solo else (ev.run is not None or launch_raw is not None))
             and not launch_published(launch, session)):
+        return hold("latest_launch_session_unconfirmed", halt, binding)
+    if again and not _end_accounted(ev, session):
         return hold("latest_launch_session_unconfirmed", halt, binding)
     exit_raw, exit_record = ev.mod_exit
     if act == "launch" and _exit_record_malformed(exit_raw, exit_record):
@@ -761,6 +837,8 @@ def decide(ev, *, act, held=None, water=False, own_relaunch=None, switch=OWN_REL
     elif act == "launch" and session is not None and not clean_exit:
         if watchdog is not None and not bound:
             return Decision("nothing", "watchdog_launch", session=session, watchdog=watchdog)
+        if again:  # the mod latches this at its startup and a person clears it; the word clears nothing
+            return Decision("nothing", "owner_relaunch_unclean_exit", session=session, sentinels=bound, paths=paths)
         # The mod would latch this on its next startup. Hold before the program starts a replacement.
         return hold("native_unclean_exit_before_launch")
     if bound and act == "start":
@@ -797,6 +875,7 @@ def read_evidence(inbox, run=None, *, recovery=False, sentinels=True, expected=N
         return ev
     ev.run = Path(run)
     ev.launch = read_launch_record(ev.run / "runtime/farmhand-launch.json")
+    ev.launch_end = launch_end(ev.run, ev.launch[1])
     ev.archive_proof = read_record(ev.run / "runtime/marker-archive-proof.json")
     if ev.session[0] is None:
         ev.prior_launch |= ev.launch[0] is not None
@@ -846,7 +925,7 @@ def recovery_guard_config():
         raise HandsHeld(Decision("hold", "recovery_guard_unreadable")) from exc
 
 
-def child_recovery_gate(config, *, saved_launch=None, window_fn=None, reservation=None):
+def child_recovery_gate(config, *, saved_launch=None, window_fn=None, reservation=None, owner_launch=False):
     """Re-read launch and input authority inside the child that performs the effect."""
     if config is None:
         return None
@@ -867,11 +946,13 @@ def child_recovery_gate(config, *, saved_launch=None, window_fn=None, reservatio
     if config.get("stop_file") and present(config["stop_file"]):
         raise HandsHeld(Decision("hold", "stop_outranks_recovery:cycle_marker"))
     proof = watchdog_launch_proof(ev, reservation=reservation) if config.get("allow_watchdog") else None
-    decision = decide(ev, act=config["act"], held=config.get("held"), watchdog=proof)
+    decision = decide(ev, act=config["act"], held=config.get("held"), watchdog=proof, owner_launch=owner_launch)
     if decision.action == "hold":
         raise HandsHeld(decision)
-    if decision.sentinels:
+    if decision.sentinels and not owner_launch:  # on the word, the run's own markers are archived after the join
         raise HandsHeld(Decision("hold", "recovery_waits_for_clear_end_markers", paths=decision.paths))
+    if not owner_launch and session_kind(run) == "owner":
+        raise HandsHeld(Decision("hold", "owner_join_waits_for_operator"))
     startup = config.get("startup")
     if startup is not None:
         _, launch = ev.launch
@@ -1017,6 +1098,13 @@ def claim_hold_alert(run, decision, *, fallback=False):
         return ipc.create_json_once(path, {"episode_id": episode}, fsync=True)
     except OSError:
         return fallback  # only the cycle emits without a shared claim
+
+
+def halt_hold(decision):
+    """A hold on a native lock, or on lock evidence that cannot be read: it ends on a person's re-arm or on a fresh read."""
+    return bool(decision.halt or decision.held) or decision.reason.startswith(
+        ("halt_", "native_stop_", "operator_rearm_not_seen", "persisted_halt", "lock_would_be_lost", "restoration_",
+         "session_unreadable"))
 
 
 def operator_stop(decision):

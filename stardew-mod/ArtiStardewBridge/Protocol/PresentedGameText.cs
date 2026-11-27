@@ -11,7 +11,7 @@ public static class PresentedGameText
     public static IReadOnlyList<UiTextTickSample> Capture(UiTextTickSample binding, string kind, string id,
         string page, string text, string date, int clock, string place, string save, string? speaker = null)
     {
-        if (text.Length == 0 && kind is not ("event_watched" or "mailbox_visible")) return Array.Empty<UiTextTickSample>();
+        if (text.Length == 0 && kind is not ("event_watched" or "mailbox_visible" or "mailbox_empty_visible")) return Array.Empty<UiTextTickSample>();
         // Keep the protocol's existing wire/history limits. No prefix clipping: every piece has its total.
         var pieces = new List<string>();
         if (text.Length == 0) pieces.Add("");

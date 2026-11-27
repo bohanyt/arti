@@ -476,11 +476,13 @@ def game_first_facts(config, journal, now=None, clock=None):
     native progress/quest records retain their original date.
     """
     import arti_mind
+    from arti_runtime import mind_scope
     from arti_runtime.event_framing import safe_fact
     from arti_runtime.fact_names import projection
     now = time.time() if now is None else now
     base = arti_mind.mind_dir(config)
-    row = arti_mind.read_now(base, now=now) or {}
+    row = (mind_scope.read_now_for_config(config, now=now)
+           if mind_scope.enabled(config) else arti_mind.read_now(base, now=now)) or {}
     if row and row.get("game") != "stardew":
         return ()
     native = row.get("native_facts") or {}

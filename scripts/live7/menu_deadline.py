@@ -10,6 +10,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+SETTING = "stardew_live7_menu_visit_bound"
+
+
+def enabled(config):
+    return (config or {}).get(SETTING, False) is True
+
+
 # fix137A (ADR 237 B): the close bound. mabar 2026-11-18 c1 d2: a QuestLog page with no decision she could make held her
 # 600 s and the no-progress watchdog stopped her game. Measured from both runs of that night (native_vitals sittings):
 # the longest healthy menu sitting was 29.2 s (GameMenu, 21:38 run d7), every bed ReadyCheck ~21 s (exempt as a bed wait);
@@ -34,6 +41,8 @@ class MenuDeadline:
     done: set = field(default_factory=set)
     causes: dict = field(default_factory=dict)
     opened: float | None = None  # first boundary of this episode; `since` moves only when a settle defers the exit
+    receiver: str | None = None
+    rung_deferred: bool = False
 
     def __post_init__(self):
         if self.opened is None:
@@ -60,13 +69,19 @@ class MenuDeadline:
     def elapsed(self, now):
         return round(now - self.opened, 3)
 
+    def can_act(self, now, boundary_s):
+        """Give the first exit stage one more boundary to run before recovery takes over (counted from the start that
+        `defer_exit` moved). Once an exit stage ran (closed, refused or unavailable) recovery judges."""
+        return self.cycle == 0 and now - self.since < EXIT_S + boundary_s
 
-def observe(slot, session_id, menu, now):
+
+def observe(slot, session_id, menu, now, *, receiver=None):
     """The deadline for this session's open menu; a different menu (or none) starts a new episode."""
     if menu is None:
         return None
-    if slot is None or slot[0] != session_id or slot[1].menu != menu:
-        return session_id, MenuDeadline(since=now, menu=menu)
+    if (slot is None or slot[0] != session_id or slot[1].menu != menu
+            or receiver is not None and slot[1].receiver != receiver):
+        return session_id, MenuDeadline(since=now, menu=menu, receiver=receiver)
     return slot
 
 

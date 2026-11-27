@@ -152,7 +152,10 @@ public static class UiPadExtrasTable
         if (!x.JunimoCanClick)
             return UiPadPlan.No(button, Deny("not_ready:can_click"));
         if (x.JunimoScrambled)
-            return UiPadPlan.No(button, Deny("scrambled_text"));
+            return button != UiPadTable.BtnB ? UiPadPlan.No(button, Deny("scrambled_text"))
+                : f.HeldItemId is not null ? UiPadPlan.No(button, Deny("item_held"))
+                : f.ReadyToClose != true ? UiPadPlan.No(button, Deny("not_ready_to_close"))
+                : UiPadContextTable.MirrorClose(button, "close the menu");
         if (x.JunimoBundleBusy)
             return UiPadPlan.No(button, Deny("not_ready:bundle_completing"));
         bool held = f.HeldItemId is not null;

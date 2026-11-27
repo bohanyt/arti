@@ -294,15 +294,23 @@ class Live7RecoveryMixin:
         if self.skill_post_row_state().get("menu") is None:
             self._live7_menu_gone(session)
         native = (getattr(motor, "year", None), getattr(motor, "season", None), getattr(motor, "day", None))
+        bed_wait = not held and self._live7_sleep_waiting(session)
+        human_ready_wait = (not held and hasattr(self, "_live7_human_ready_waiting")
+                            and self._live7_human_ready_waiting(session))
         held_before = watch.held
-        self._live7_stall_hold(session, watch, now)
+        if human_ready_wait:
+            # Waiting for a human host at a native ready check is not a stall fault.
+            stall = getattr(self, "_stall_seconds", None)
+            if callable(stall):
+                watch.stall_seen = stall()
+        else:
+            self._live7_stall_hold(session, watch, now)
         stalled = max(0.0, watch.held - held_before)
         stopped = watch.observe(now, signature, completed, receipts=self._live7_semantic_receipts(),
                                 date=native if not held and None not in native else None)
-        bed_wait = not held and self._live7_sleep_waiting(session)
-        if bed_wait:
-            # ADR 154: a fresh native bed wait holds the idle clock, without
-            # manufacturing an effect receipt or crediting a completed night.
+        if bed_wait or human_ready_wait:
+            # A fresh native bed wait or owner-hosted ready check holds the idle clock,
+            # without manufacturing an effect receipt or crediting a completed night.
             watch.since, watch.recovery_attempted, stopped = now, False, False
         from arti_runtime import hands_halt
         raw = hands_halt.session_raw(self)
@@ -338,12 +346,13 @@ class Live7RecoveryMixin:
         effect = self._live7_effect_watch(session, now, reading, None if held else self.skill_post_row_state().get("menu"),
                                           native if not held and None not in native else None,
                                           stalled=stalled, bed_wait=bed_wait, known=not held,
-                                          halt_held=halt_held, rearmed=was_halted and not halt_held)
+                                          halt_held=halt_held, rearmed=was_halted and not halt_held,
+                                          human_ready_wait=human_ready_wait)
         # ADR 241 B: the ladder of generic actions on that clock (suspended while a HALT holds). A fault in it never
         # aborts the boundary; the rest of the watchdog (the 60 s re-observe, the 600 s window) runs as before.
         try:
             if not halt_held:
-                self._live7_ladder_step(session, now, effect, facts, motor, held, bed_wait, watch, context=context)
+                self._live7_ladder_step(session, now, effect, facts, motor, held, bed_wait or human_ready_wait, watch, context=context)
         except Exception as exc:  # noqa: BLE001 - named once per kind, the watchdog goes on
             seen = self.__dict__.setdefault("_live7_ladder_errors", set())
             if type(exc).__name__ not in seen:
@@ -364,7 +373,8 @@ class Live7RecoveryMixin:
         reading = native_page_reading(getattr(session.current, "state", {}))
         # Under a HALT the 60 s re-observe waits too: its menu close is a hand call (the window restarts at the clear).
         if (now - watch.since >= NO_PROGRESS_RECOVER_SECONDS and not watch.recovery_attempted and not reading
-                and not self._live7_own_menu_fresh(session, now) and not self._live7_own_menu_closed(session)):
+                and not self._live7_own_menu_fresh(session, now) and not self._live7_own_menu_closed(session)
+                and not self._live7_menu_deadline_can_act(session, now)):
             # Never race an executor/provider or change identity to escape a
             # wait. Retry this boundary once it is idle, without resetting age.
             if not self._action_busy and self._inflight_generation is None:
@@ -596,10 +606,23 @@ class Live7RecoveryMixin:
                                                                  name=LAD.NAMES[acting["rung"]], result=result,
                                                                  told=ladder.told))
 
+    def _live7_menu_deadline_can_act(self, session, now):
+        from scripts.live7 import menu_deadline as D
+        slot = self.__dict__.get("_live7_menu_deadline_slot")
+        if D.enabled(getattr(self, "_config", None)) and slot is not None and slot[0] == session.session_id:
+            from arti_stardew_generic_ui import MENU_DECISION_BOUND_S
+            deadline = slot[1]
+            view = self._ui_pad_view(self._binding_view()[1])
+            return (deadline.receiver is not None and deadline.receiver == getattr(view, "receiver_token", None)
+                    and deadline.menu == self.skill_post_row_state().get("menu")
+                    and deadline.can_act(now, MENU_DECISION_BOUND_S))
+        return False
+
     def _live7_ladder_menu(self, session, ladder, clock, now, menu, facts, motor, watch):
         """Rung 1, one generic rule for every menu kind: the game's own close; a question's leaving answer; a passive
         event is watched (the clock honours it); a minigame or a menu with no way out the game offers is said."""
         from arti_runtime import recovery_ladder as LAD
+        from scripts.live7 import menu_deadline as D
         if menu is None:
             row = ladder.judge(1, now, result="not_applicable", why="no_menu")
             return self._live7_ladder_row(session, ladder, clock, now, dict(row, kind="rung"))
@@ -607,9 +630,23 @@ class Live7RecoveryMixin:
         wait = getattr(view, "wait_reason", None)
         kind = LAD.menu_kind(view, wait, minigame=True) if self._live7_minigame_up() else LAD.menu_kind(view, wait)
         slot = self.__dict__.get("_live7_menu_deadline_slot")
+        bounded = D.enabled(getattr(self, "_config", None))
+        expired = False
         if kind == "closable" and slot is not None and slot[0] == session.session_id and slot[1].menu == menu:
-            row = ladder.judge(1, now, result="stood_aside", why="menu_deadline_owns", menu=menu)
-            return self._live7_ladder_row(session, ladder, clock, now, dict(row, kind="rung"))
+            deadline = slot[1]
+            if not bounded:
+                row = ladder.judge(1, now, result="stood_aside", why="menu_deadline_owns", menu=menu)
+                return self._live7_ladder_row(session, ladder, clock, now, dict(row, kind="rung"))
+            if deadline.receiver == view.receiver_token:
+                from arti_stardew_generic_ui import MENU_DECISION_BOUND_S
+                expired = not deadline.can_act(now, MENU_DECISION_BOUND_S)
+                if not expired:
+                    if not deadline.rung_deferred:
+                        deadline.rung_deferred = True
+                        self._live7_ladder_row(session, ladder, clock, now, dict(kind="rung_deferred", rung=1,
+                            name=LAD.NAMES[1], result="stood_aside", why="menu_deadline_owns", menu=menu,
+                            slot_age_s=deadline.elapsed(now), receiver=deadline.receiver))
+                    return
         if kind == "question":
             from arti_stardew_generic_ui import controls
             if LAD.leaving_answer(view, controls(view)) is None:
@@ -619,7 +656,7 @@ class Live7RecoveryMixin:
         if kind in ("closable", "question"):
             if not watch.recovery_attempted:
                 if (native_page_reading(getattr(session.current, "state", {}) or {})
-                        or self._live7_own_menu_fresh(session, now) or self._live7_own_menu_closed(session)):
+                        or (not expired and self._live7_own_menu_fresh(session, now)) or self._live7_own_menu_closed(session)):
                     self.__dict__.pop("_live7_ladder_leave", None)
                     return  # her fresh page or her own menu: rung 1 waits exactly as the 60 s re-observe (ADR 95, 105, FIX73A)
                 watch.recovery_attempted = True
@@ -638,6 +675,7 @@ class Live7RecoveryMixin:
     def _live7_effect_evidence(self, facts, motor, context, prior):
         base = self._live7_baseline(facts, motor, context)
         evidence = {k: base[k] for k in ("inventory", "money", "location", "tile", "crops")}
+        evidence["location"] = getattr(motor, "location_id", None) or base.get("location_id") or evidence["location"]
         physical = ("kind", "terrain_type", "qualified_item_id", "stack", "health", "crop",
                     "growth_stage", "ready", "produce", "watered", "tile_x", "tile_y", "passable")
         evidence["world"] = {ref: {k: f[k] for k in physical if k in f}
@@ -646,7 +684,7 @@ class Live7RecoveryMixin:
         return {key: value if value is not None else prior.get(key) for key, value in evidence.items()}
 
     def _live7_effect_watch(self, session, now, evidence, menu, date, *, stalled=0.0, bed_wait=False, known=True,
-                            halt_held=False, rearmed=False):
+                            halt_held=False, rearmed=False, human_ready_wait=False):
         """ADR 241 A: one boundary's reading of the game into the effect clock; one row on a reset, else one every
         ROW_INTERVAL_S. Observe-only: it sends nothing and decides nothing."""
         clock = self._live7_effect_clock(session, now)
@@ -659,17 +697,24 @@ class Live7RecoveryMixin:
                 return clock
             # Changes up to the first clear read have no attribution to her hands.
             clock.evidence = clock.date = None
+            clock.foreign_destination = None
             clock.menu_seen = clock.menu_counted = False
             self.__dict__.get("_live7_quiet_since", {}).pop(session.session_id, None)
         if not rearmed:
             clock.hold(stalled)
-        clock.seen(now, hold_why="bed_wait" if bed_wait else None)
+        if human_ready_wait:
+            # Waiting for a human host at a native ready check she joined does not spend WAIT_HONOUR_MAX_S
+            # or climb the ladder; if facts later become stale/unknown, the ordinary bounds start from here.
+            clock.seen(now, hold_why="human_ready_wait")
+            clock.restart_ladder(now)
+        else:
+            clock.seen(now, hold_why="bed_wait" if bed_wait else None)
         marks = self.__dict__.get("_live7_effect_program_marks", 0)
         program = marks != clock.program_seen or self._live7_effect_program()
         clock.program_seen = marks
         feedback = getattr(session, "choice_feedback", None)
         submitted = feedback.get("submitted") if isinstance(feedback, dict) else None
-        if isinstance(submitted, dict) and submitted.get("kind") == "wait" and feedback is not clock.wait_seen:
+        if not human_ready_wait and isinstance(submitted, dict) and submitted.get("kind") == "wait" and feedback is not clock.wait_seen:
             clock.wait_seen = feedback
             clock.honour_wait(now, "her_wait")  # her own wait at a skill boundary, honoured a bounded time
         event = None
@@ -681,7 +726,7 @@ class Live7RecoveryMixin:
                 event = None
         passive = (isinstance(event, dict) and event.get("event_up") is not False
                    and event.get("event_player_control") is not True)
-        if passive:
+        if passive and not human_ready_wait:
             if not clock.waiting(now):
                 clock.honour_wait(now, "watch_event")  # a passive native event: she watches; bounded per stretch
         # fix144A C13 (ADR 249; review R4 SF5, stream 11-19 c1 d7 J1195/J1619): while a passive event owns her input,
@@ -708,9 +753,10 @@ class Live7RecoveryMixin:
         if record.get("ev") == "live7_ui_choice" and "controller" in record:
             self._live7_effect_program_marks = self.__dict__.get("_live7_effect_program_marks", 0) + 1
             return
-        from arti_runtime.effect_clock import effect_of
+        from arti_runtime.effect_clock import effect_of, foreign_arrival
         cause = effect_of(record)
-        if cause is None:
+        destination = foreign_arrival(record)
+        if cause is None and destination is None:
             return
         session = getattr(self, "_skill_session", None)
         slot = self.__dict__.get("_live7_effect_slot")
@@ -721,12 +767,16 @@ class Live7RecoveryMixin:
             return
         now = game_now(self)
         clock = slot[1]
+        if destination is not None:
+            clock.foreign_destination = destination
+            return
         if clock.note(now, cause, program=self._live7_effect_program()) is not None:
             self._journal(clock.row(now, kind="reset", **self._live7_effect_extra(session)))
 
     def _live7_menu_gone(self, session):
         """ADR 237 B: a menu that is gone holds nobody. ADR 237 C: when it held her, one row says so, so the cycle's
         bounded recovery never acts on a menu she answered or that went away by itself."""
+        self._live7_receiver_visit = None
         gone = getattr(session, "_menu_held", None)
         session._menu_held = None
         if gone:
@@ -885,6 +935,18 @@ class Live7RecoveryMixin:
         if live.chest_memory.observe(facts.get("source_fact_id"), facts.get("container_slots"), date=c.date,
                                      clock=getattr(pose, "time_of_day", None), names=live.item_names,
                                      location=getattr(pose, "location", None)):
+            self._journal(dict(ev="live7_chest_memory", at=time.time(), game=dict(date=list(c.date)), memory=live.chest_memory.dump()))
+
+    def _live7_chest_full(self, fact):
+        """Record a verified full-chest observation on that chest's memory row and journal it."""
+        session = getattr(self, "_skill_session", None)
+        c = getattr(session, "campaign", None)
+        live = getattr(c, "live", None)
+        if getattr(c, "part", None) != "live" or live is None or not hasattr(live, "chest_memory"):
+            return
+        if live.chest_memory.note_full(fact["ref"], fact["taken"], fact["total"], date=fact["date"],
+                                       clock=fact.get("clock"), location=fact.get("location"),
+                                       slots=fact.get("slots"), names=live.item_names):
             self._journal(dict(ev="live7_chest_memory", at=time.time(), game=dict(date=list(c.date)), memory=live.chest_memory.dump()))
 
     def _live7_known_chests(self, location):

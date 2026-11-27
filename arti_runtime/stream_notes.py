@@ -501,7 +501,7 @@ def stamp(wall_ts):
                 wib=dt.astimezone(WIB).isoformat())
 
 
-def record_line(base, scope, row, observation):
+def record_line(base, scope, row, observation, *, mind_scoped=False):
     """Mirror fix121A's text_ref/record_discoveries contract; no receipt API fork."""
     import arti_mind as M
     from arti_runtime.plan_dates import label
@@ -530,7 +530,8 @@ def record_line(base, scope, row, observation):
         else:
             M.record_discoveries(base, "stardew", scope=scope, discoveries=[dict(
                 id=event_id, kind="text_read", subject=subject, text=text,
-                source=source, date=date, event_place=observation.get("place"))], day=day, day_label=date)
+                source=source, date=date, event_place=observation.get("place"))], day=day, day_label=date,
+                scoped=mind_scoped)
         # record_discoveries deliberately projects known fields. Enrich only this
         # text owner under its existing writer lock; the envelope ID never changes.
         path = M.game_dir(base, "stardew") / "discoveries.jsonl"
@@ -580,7 +581,7 @@ def _speech_owner(base, scope, event, *, day):
     ipc.append_text(path, json.dumps(row, ensure_ascii=False) + "\n")
 
 
-def ingest(base, scope, observe_at, vocabulary_at, *, day_range=None, outcomes=None):
+def ingest(base, scope, observe_at, vocabulary_at, *, day_range=None, outcomes=None, mind_scoped=False):
     """Drain atomically; callbacks use stream wall seconds, never now.json dates.
 
     A row without a preceding native observation is dropped, never stamped with
@@ -629,7 +630,7 @@ def ingest(base, scope, observe_at, vocabulary_at, *, day_range=None, outcomes=N
             if keep and row.get("speaker") in VIEWER_SOURCES:
                 keep, reason = viewer_allowed(kept, row)
             if keep:
-                reason = record_line(base, scope, row, observation)
+                reason = record_line(base, scope, row, observation, mind_scoped=mind_scoped)
                 if kept is not None and reason == "kept" and row.get("speaker") in VIEWER_SOURCES:
                     kept.append((row["session"], row["viewer"], float(row["wall_ts"])))
                 if reason == "kept" and gate == VOICE_MARKED:
@@ -858,7 +859,9 @@ def bridge_line(bridge, speaker, ingress, text, *, owner_marked=False, epoch=Non
         mentions = viewer_mentions(str(text), sorted(_VIEWERS), owners)
         now = time.time() if at is None else min(float(at), time.time())
         base = arti_mind.mind_dir(bridge.CONFIG)
-        current = arti_mind.read_now(base) or {}
+        from arti_runtime import mind_scope
+        current = (mind_scope.bridge_read_now(bridge) if mind_scope.enabled(bridge.CONFIG)
+                   else arti_mind.read_now(base)) or {}
         with _LOCK:
             recent = [t for seen, t in _MOMENTS if 0 <= now - seen <= 180 and not contains_viewer(t, _VIEWERS, owners)]
         return append_inbox(base, dict(v=1, **stamp(now), session=session, speaker=speaker,
@@ -911,7 +914,9 @@ def _bridge_viewer(bridge, viewer, text, *, donation=False, marked_by=None, at=N
                 _CHAT_RECENT.append(now)
             recent = [t for at, t in _MOMENTS if 0 <= now - at <= 180 and not contains_viewer(t, _VIEWERS, owners)]
         base = arti_mind.mind_dir(bridge.CONFIG)
-        current = arti_mind.read_now(base) or {}
+        from arti_runtime import mind_scope
+        current = (mind_scope.bridge_read_now(bridge) if mind_scope.enabled(bridge.CONFIG)
+                   else arti_mind.read_now(base)) or {}
         return append_inbox(base, dict(v=1, **stamp(now), session=session, speaker=speaker,
             ingress=VIEWER_SOURCES[speaker], text=str(text), viewer=tag, game_active=True,
             game_time=current.get("game_time"), privacy_epoch=bridge.screen_privacy.epoch,
@@ -1002,5 +1007,7 @@ def live7_ingest(runtime, scope, page):
             native = read_text(base, scope, ref)
             if native:
                 vocabulary.append(native["text"])
+    from arti_runtime import mind_scope
     return ingest(base, scope, observe_at, dict(game=vocabulary, page=list(strings(page))),
-                  outcomes=getattr(runtime, "_rig_said_outcomes", None))  # set only by scripts/free_play/said_lines
+                  outcomes=getattr(runtime, "_rig_said_outcomes", None),
+                  mind_scoped=mind_scope.enabled(getattr(runtime, "_config", None)))  # set only by scripts/free_play/said_lines

@@ -114,6 +114,15 @@ def fact_values(value):
     return value
 
 
+def without_places(value):
+    """Who is in bed, not where each player walks: another player's walk is no reason to answer twice."""
+    inner = value.get("value") if isinstance(value, dict) else None
+    if not isinstance(inner, dict) or not isinstance(inner.get("players"), list):
+        return value
+    return dict(value, value=dict(inner, players=[{k: v for k, v in p.items() if k != "place"} if isinstance(p, dict) else p
+                                                  for p in inner["players"]]))
+
+
 def _same_fact(key, a, b):
     """Values the refresh identity compares: reception stamps and the current row's age are not a change."""
     if key == "current":
@@ -176,7 +185,8 @@ async def fresh_reply(ask, system, read_row, *, context=None, prepare=None):
                 fact_values(facts["last_container"]),
                 fact_values(facts["native_story"]),
                 fact_values({k: v for k, v in facts["scene_state"].items() if k != "time"}) if facts["scene_state"] else None,
-                *(fact_values(facts[k]) for k in ("current_menu", "peer_sleep", "shop_availability", "own_crops", "goal_targets", "ready_check", "harvest")))
+                fact_values(without_places(facts["peer_sleep"])),
+                *(fact_values(facts[k]) for k in ("current_menu", "shop_availability", "own_crops", "goal_targets", "ready_check", "harvest")))
     def part(facts):
         return day_part((facts["current"]["current_time"] or {}).get("time"))
     # fix55B (a40 T40): a known day part that turned (night -> morning) is a change; a clock that only appeared is not.

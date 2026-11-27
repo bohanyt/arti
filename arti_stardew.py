@@ -417,6 +417,7 @@ class StardewState:
     own_state: dict | None = None
     menu_container: dict | None = None
     peer_sleep: dict | None = None
+    location_id: str | None = None
 
     @property
     def punya_kursor_menu(self) -> bool:
@@ -477,6 +478,7 @@ class StardewState:
             revisi=revisi,
             diterima_pada=waktu,
             location=p["location"],
+            location_id=p.get("location_id") if isinstance(p.get("location_id"), str) else None,
             tile=(p["tile"]["x"], p["tile"]["y"]),
             pixel=(float(p["pixel"]["x"]), float(p["pixel"]["y"])),
             facing=p["facing"],

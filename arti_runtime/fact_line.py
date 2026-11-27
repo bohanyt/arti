@@ -7,6 +7,7 @@ Text capture belongs to the native readers; a receipt never invents native prose
 from collections.abc import Mapping
 from arti_runtime.native_rows import native_rows
 from copy import deepcopy
+from functools import lru_cache
 import re
 
 SETTING = "live7_fact_line_enabled"
@@ -14,11 +15,16 @@ SETTING = "live7_fact_line_enabled"
 # The audit's REMOVE list. These are authored conclusions or hidden arithmetic,
 # not native statements awaiting a better paraphrase.
 DAY_REMOVE = ("tas_kegunaan", "peti_kegunaan", "day_rules", "musim", "benih_tumbuh",
-              "tempat", "cc_terbuka", "bundle_rinci", "bedtime_return", "festival_leave", "quest_lanjut")
+              "tempat", "cc_terbuka", "bundle_rinci", "bedtime_return", "festival_leave", "quest_lanjut",
+              "minutes_until_midnight")  # a deadline the game does not have; the clock stands on the page
 PROGRESS_REMOVE = ("tamat", "teman_aturan", "teman_membuka", "teman_hati", "teman",
                    "cc_hadiah", "donation_facts", "grandpa", "stats", "money_earned",
                    "money_earned_self", "uang_dihasilkan", "skill", "skills", "alat",
                    "tools", "tool_names", "tool_upgrading", "sejak_pagi", "cc", "crops")
+# An open quest changes its objective and a bundle its ticks; her newest read of one stands for it.
+NEWEST_READ = frozenset(("quest_entry_read", "bundle_note_opened"))
+QUEST_LINES, QUEST_CHARS = 4, 160  # on every page: the open quests whose journal entry she read, newest read first
+LETTERS_BYTES = 360  # on every page, per page-budget scale: the letters she opened today, newest first
 DETAIL_REMOVE = ("bundles", "rooms_done", "grandpa", "friends", "teman_aturan", "tools",
                  "stats", "donations", "quest_facts", "quests", "letters")
 
@@ -39,6 +45,12 @@ def _absolute(value):
     return None
 
 
+def fold(text):
+    """The text as a case-blind `re` search reads it, for a quick "cannot match" before the search."""
+    return text.casefold().replace("i\u0307", "i").replace("\u0131", "i")
+
+
+@lru_cache(maxsize=4096)
 def _name_pattern(name):
     """A native place name as whole words; a line wrap in displayed text matches its space (ADR 227)."""
     parts = name.split()
@@ -78,6 +90,11 @@ def visible_targets(context):
         if type(x) is int and type(y) is int and left <= x <= right and top <= y <= bottom:
             out[ref] = row
     return out
+
+
+def _read_at(receipt):
+    day, clock = (receipt.get("game_day") or {}).get("absolute"), receipt.get("clock")
+    return (day if type(day) is int else 0, clock if type(clock) is int else 0)
 
 
 class Witnesses:
@@ -146,11 +163,19 @@ class Witnesses:
     def matching(self, kinds, identity=None, *, text=True):
         if isinstance(kinds, str):
             kinds = (kinds,)
-        return [r for r in self.rows if r.get("kind") in kinds
-                and (identity is None or r.get("id") == identity)
-                and (not text or self.text(r))]
+        found = [r for r in self.rows if r.get("kind") in kinds
+                 and (identity is None or r.get("id") == identity)
+                 and (not text or self.text(r))]
+        if NEWEST_READ.isdisjoint(kinds):
+            return found
+        newest = {}
+        for at, r in enumerate(found):
+            if r["kind"] in NEWEST_READ:
+                one = (r["kind"], r.get("id"))
+                newest[one] = max(newest.get(one, (0, 0, -1)), (*_read_at(r), at))
+        return [r for at, r in enumerate(found) if r["kind"] not in NEWEST_READ or newest[r["kind"], r.get("id")][2] == at]
 
-    def provenance(self, row):
+    def provenance(self, row, *, stamp=True):
         names = {"calendar_day_read": "kalender", "letter_opened": "surat",
                  "door_message": "pintu", "shop_menu_seen": "menu toko",
                  "shipping_summary_seen": "ringkasan kiriman", "recipe_seen": "resep",
@@ -163,6 +188,9 @@ class Witnesses:
         if row.get("kind") == "calendar_day_read" and (selected := _absolute(row.get("id"))):
             from arti_runtime.plan_dates import label
             return "dilihat di kalender, %s; entri %s" % (date, label("stardew", selected))
+        if row.get("kind") == "letter_opened" and stamp:  # since when it lay in her box, from the flag she saw
+            from arti_runtime.native_notices import letter_stamp
+            return letter_stamp(self, row)
         # Keep the native year when it matters; Indonesian connective only.
         return "dilihat di %s, %s" % (names.get(row.get("kind"), "game"), date)
 
@@ -174,9 +202,10 @@ class Witnesses:
         graph = self.catalog.get("world_graph") or {}
         # fix129A: the receipt list does not depend on the place; scan it once.
         # setdefault keeps the first match, so a place already named needs no scan.
-        read = [(row, self.text(row)) for row in self.matching((
+        read = [(row, text, fold(text)) for row in self.matching((
             "menu_tab_opened", "door_message", "letter_opened", "calendar_day_read",
-            "event_watched", "quest_entry_read", "dialogue_read", "text_read"))]
+            "event_watched", "quest_entry_read", "dialogue_read", "text_read")) if (text := self.text(row))]
+        whole = "\n".join(folded for _, _, folded in read)
         for place in native_rows(graph.get("places", ())):
             if not isinstance(place,Mapping):continue
             identity = place.get("id")
@@ -184,9 +213,11 @@ class Witnesses:
                 sources.setdefault(identity, None)
             if identity in sources:
                 continue
-            patterns = [_name_pattern(n) for n in (identity, place.get("label")) if isinstance(n, str) and n]
-            for row, text in read:
-                if any(p.search(text) for p in patterns):
+            # A name stands only where its first word does: no search for the many places that no text names.
+            named = [(fold(n.split()[0]), n) for n in (identity, place.get("label")) if isinstance(n, str) and n.split()]
+            patterns = [(first, _name_pattern(n)) for first, n in named if first in whole]
+            for row, text, folded in read if patterns else ():
+                if any(first in folded and p.search(text) for first, p in patterns):
                     sources[identity] = row
                     break
         return sources
@@ -284,6 +315,7 @@ def _travel(offer, w, policy, notice=None, doors=None):
     notice names has its door in this location, and she has been here.
     """
     from arti_runtime.experience_facts import explore_arg
+    from arti_runtime.place_page import RESULT_FIELD, result_label
     notice = notice or {}
     doors = doors or {}
     from arti_stardew_world import location_arg
@@ -299,12 +331,15 @@ def _travel(offer, w, policy, notice=None, doors=None):
         known.setdefault(w.current, None)
     from arti_runtime import walk_refusal
     today = _page_day(offer, w.catalog)
+    records = policy.get("place_visits") if isinstance(policy, Mapping) else getattr(policy, "place_visits", None)
     for entry in native_rows(offer.get("skills", ())):
         if entry.get("name") != "pergi_ke":
             continue
         args, names, arrivals, after = [], {}, {}, {}
-        old_after = entry.get("after_travel") or {}
-        rows = native_rows((entry.get("arrival_facts") or {}).get("rows"))
+        old_after = entry.get("after_travel")
+        old_after = old_after if isinstance(old_after, Mapping) else {}
+        arrival = entry.get("arrival_facts")
+        rows = native_rows(arrival.get("rows")) if isinstance(arrival, Mapping) else ()
         trips = {row[0]: row[6] for row in rows if isinstance(row, (list, tuple)) and len(row) > 6
                  and isinstance(row[6], Mapping)}
         for number, arg in enumerate(native_rows(entry.get("args", ())), 1):
@@ -317,7 +352,7 @@ def _travel(offer, w, policy, notice=None, doors=None):
             args.append(shown)
             names[shown] = (w.display_name(place, known.get(identity)) if place else identity or "rumahmu") if is_known else "jalan keluar %d" % number
             if is_known and known.get(identity):
-                names[shown] += " (" + w.provenance(known[identity]) + ")"
+                names[shown] += " (" + w.provenance(known[identity], stamp=False) + ")"  # the place, not the letter's day
             if arg in notice:
                 names[shown] = notice[arg]  # today's notice names this place: its own words and time
             if arg in doors:
@@ -327,7 +362,8 @@ def _travel(offer, w, policy, notice=None, doors=None):
                 names[shown] += "; " + refused  # ADR 231 part B1: the game's words that ended this trip today
             if is_known and identity and (visited := _visit_record(policy, identity, today)):
                 names[shown] += "; " + visited  # ADR 232 part C: her own dated record of that place
-            prior = old_after.get(arg) or {}
+            prior = old_after.get(arg)
+            prior = prior if isinstance(prior, Mapping) else {}
             walked = _exact_walk(policy, w.current, identity, prior.get("route"))
             if walked:
                 from arti_runtime.travel_facts import trip_stamp
@@ -338,12 +374,14 @@ def _travel(offer, w, policy, notice=None, doors=None):
             hours = [r for r in w.matching("door_message", identity)]
             parts = [duration] + [w.line(r) for r in hours]
             trip = prior.get("last_trip") or trips.get(arg) or getattr(policy, "last_trips", {}).get((w.current, arg))
-            if trip and type(trip.get("seconds")) is int:
+            if isinstance(trip, Mapping) and type(trip.get("seconds")) is int:
                 from arti_runtime.travel_facts import destination_token
                 parts.append(destination_token([arg, None, None, [], [], None, trip]))
             arrivals[shown] = "; ".join(parts)
             after[shown] = dict(label=names[shown], jalan=duration)
-            if trip:
+            if identity and (result := result_label(records, identity)):
+                after[shown][RESULT_FIELD] = result
+            if isinstance(trip, Mapping) and trip:
                 after[shown]["last_trip"] = deepcopy(trip)
             if hours:
                 after[shown]["pesan_pintu"] = [w.line(r) for r in hours]
@@ -565,6 +603,99 @@ def _native_lines(w, kinds):
     return list(dict.fromkeys(w.line(r) for r in w.matching(kinds)))
 
 
+def _festival_lines(w, today):
+    """Every calendar read; a letter only on the day it came or the day after. An older letter opened later
+    would still say "tomorrow" about a day that has already passed."""
+    from arti_runtime.native_notices import letter_fresh
+    return list(dict.fromkeys(w.line(r) for r in w.matching(("calendar_day_read", "letter_opened"))
+                              if r.get("kind") != "letter_opened" or letter_fresh(w, r, today)))
+
+
+def _mail_apart(entry):
+    """The mailbox press is its own entry with its label, not a third TV argument."""
+    from arti_runtime.native_notices import MAIL_PRESS_LABEL
+    args = native_rows(entry.get("args", ())) if isinstance(entry, Mapping) and entry.get("name") == "cek_pagi" else []
+    if "mail" not in args or len(args) < 2:
+        return [entry]
+    tv = dict(entry, args=[a for a in args if a != "mail"], nama={k: v for k, v in (entry.get("nama") or {}).items() if k != "mail"})
+    if not tv["nama"]:
+        tv.pop("nama")
+    return [tv, dict(name="cek_pagi", does=MAIL_PRESS_LABEL[:1].upper() + MAIL_PRESS_LABEL[1:] + ".", args=["mail"],
+                     nama=dict(mail=MAIL_PRESS_LABEL))]
+
+
+def quest_lines(w, open_quests=None, today=None):
+    """The journal entries she read whose quest is still open, newest read first, title and objective first.
+
+    ``open_quests``: ids of the native journal's active quests, or None when no frame has held that journal yet. That
+    journal does not name special orders and quests without an id: those stand on the day she read them."""
+    def stands(r):
+        identity = str(r.get("id"))
+        if open_quests is None or identity in open_quests:
+            return True
+        return identity.startswith(("order:", "content:")) and today is not None and _read_at(r)[0] == today
+    rows = sorted((r for r in w.matching("quest_entry_read") if stands(r)), key=_read_at, reverse=True)
+    out = []
+    for r in rows[:QUEST_LINES]:
+        text = " / ".join(" ".join(part.split()) for part in w.text(r).split("\n") if part.strip())
+        if len(text) > QUEST_CHARS:
+            text = text[:QUEST_CHARS - 1].rstrip() + "…"
+        out.append("%s (%s)" % (text, w.provenance(r)))
+    return out
+
+
+def letters_today(w, today, *, max_bytes=LETTERS_BYTES):
+    """The letters she opened today, newest first, whole while they fit; the first one is cut, never dropped.
+
+    A letter read in the morning stays on the pages after it, as the plan made before it does. A letter's
+    pages are one line in reading order; an old letter opened again in
+    the collection is no letter of today."""
+    if today is None:
+        return []
+    from arti_runtime.native_notices import letter_stamp
+    letters = {}
+    for r in w.matching("letter_opened"):
+        if (r.get("game_day") or {}).get("absolute") != today or str(r.get("source") or "").endswith(":collection"):
+            continue
+        clock, pages, stamp = letters.setdefault(r.get("id"), (r.get("clock"), [], " (%s)" % letter_stamp(w, r)))
+        text = " ".join(w.text(r).replace("^", " ").split())
+        if text not in pages:
+            pages.append(text)
+    out, used = [], 0
+    for clock, pages, stamp in reversed(list(letters.values())):
+        head = "%02d:%02d " % divmod(clock, 100) if type(clock) is int else ""
+        line = head + " ".join(pages) + stamp
+        size = len(line.encode("utf-8"))
+        if used + size > max_bytes:
+            if out:
+                break
+            room = max(0, max_bytes - 3 - len((head + stamp).encode("utf-8")))  # the words are cut, not the stamp
+            line = head + " ".join(pages).encode("utf-8")[:room].decode("utf-8", "ignore").rstrip() + "…" + stamp
+        out.append(line)
+        used += size
+    return out
+
+
+_READ_STAMPED = re.compile(r" \(dilihat di surat, [^()]*\)$")
+
+
+def _read_today_mail(w, today, mail):
+    """The last letter she read today (``day.read_today.mail``, its words as read, cut) with the day she
+    opened it and what her box told of when it came: the stamp of today's receipt of that letter. Its receipt not
+    delivered yet: the opening day, and that she cannot know since when it waited."""
+    if today is None or _READ_STAMPED.search(mail):
+        return mail
+    from arti_runtime.native_notices import letter_stamp
+    said = " ".join(mail.replace("^", " ").split())
+    for r in sorted(w.matching("letter_opened"), key=_read_at, reverse=True):
+        if (r.get("game_day") or {}).get("absolute") == today and not str(r.get("source") or "").endswith(":collection"):
+            text = " ".join(w.text(r).replace("^", " ").split())
+            if said and text and (text in said or said in text):
+                return "%s (%s)" % (mail, letter_stamp(w, r))
+    from arti_runtime.plan_dates import label
+    return "%s (dilihat di surat, %s; tidak diketahui sejak kapan surat ini menunggu di kotak)" % (mail, label("stardew", today))
+
+
 def _page_day(offer, catalog):
     """The page's native date: the day line, else the catalogue's native date."""
     day = _absolute((offer.get("day") or {}).get("date"))
@@ -703,9 +834,10 @@ def present(offer, catalog=None, *, config=None, policy=None, context=None, coun
         # than the world catalogue. Count source rows, not invented missing input.
         for entry in native_rows(offer.get('skills')):
             if entry.get('name') == 'buat':
+                from arti_runtime.recipe_reads import native_id
                 recipes = entry.get('recipes') or {}
                 ids = recipes.keys() if isinstance(recipes, Mapping) else ()
-                counts['recipe'] = max(counts['recipe'], sum(not w.matching('recipe_seen', str(k)) for k in ids))
+                counts['recipe'] = max(counts['recipe'], sum(not w.matching('recipe_seen', native_id(k)) for k in ids))
     result = deepcopy(offer)
     result["fact_line"] = True
     # Legacy same-map memories have no camera witness. Keep only this frame's
@@ -755,6 +887,9 @@ def present(offer, catalog=None, *, config=None, policy=None, context=None, coun
     leave = (offer.get("day") or {}).get("festival_leave")
     if isinstance(leave, str) and leave.startswith("Peta festival."):
         day["festival_leave"] = "Peta festival." + (" Tetap di sini juga boleh." if "Tetap di sini juga boleh." in leave else "")
+    from arti_runtime.festival_facts import SEATED
+    if leave == SEATED:  # seated, the one line that says so
+        day["festival_leave"] = leave
     _drop(day.get("economy"), ("income_preferred", "seed_reserve_g"))
     _drop(day.get("crops"), ("next_step", "needs", "buy"))
     if isinstance(day.get("kebun"), str):
@@ -772,7 +907,9 @@ def present(offer, catalog=None, *, config=None, policy=None, context=None, coun
                        ("tas_info", ("item_description_read",)), ("weather_tomorrow", ("weather_forecast_read",)),
                        ("cc_terbuka", ("bundle_note_opened",)), ("quest_lanjut", ("quest_entry_read",))):
         day.pop(key, None)
-        if lines := _native_lines(w, kinds):
+        if lines := (quest_lines(w, (context or {}).get("open_quests"), _page_day(offer, catalog))
+                     if key == "quest_lanjut" else _festival_lines(w, _page_day(offer, catalog))
+                     if key == "festival_hari" else _native_lines(w, kinds)):
             day[key] = lines
     # Clock/capacity are A; remote openness, reserve deadlines and collapse law are not.
     if "bedtime_facts" in day:
@@ -798,12 +935,17 @@ def present(offer, catalog=None, *, config=None, policy=None, context=None, coun
         result.setdefault("facts", {})["pengumuman_game"] = notices
     mailbox = native_notices.mailbox_sighting(w, today, mailbox_count)
     if mailbox is not None:
-        result.setdefault("facts", {})["kotak_surat"] = native_notices.mailbox_line(mailbox, mailbox_count)
+        result.setdefault("facts", {})["kotak_surat"] = native_notices.mailbox_line(
+            mailbox, mailbox_count, native_notices.mailbox_since(w, mailbox))
     # ADR 230 N3: the night earnings screen the game showed her (dated by the morning it appeared), today only,
     # as her own dated record; the game's words exactly, line wrapping kept. Nothing when no screen was shown.
     if today is not None and (shipped := [r for r in w.matching("shipping_summary_seen")
                                           if ((r.get("game_day") or {}).get("absolute")) == today]):
         result.setdefault("facts", {})["kiriman_kemarin"] = [w.line(r) for r in shipped][-1:]
+    if letters := letters_today(w, today, max_bytes=LETTERS_BYTES * PageBudget.from_config(config).scale):
+        result.setdefault("facts", {})["surat_hari_ini"] = letters
+    if isinstance(day.get("read_today"), Mapping) and isinstance(day["read_today"].get("mail"), str):
+        day["read_today"] = dict(day["read_today"], mail=_read_today_mail(w, today, day["read_today"]["mail"]))
     rod = (offer.get("facts") or {}).get("mancing")
     if isinstance(rod, str) and " di tas;" in rod:
         facts["mancing"] = rod.split(";", 1)[0] + "."
@@ -862,7 +1004,7 @@ def present(offer, catalog=None, *, config=None, policy=None, context=None, coun
             known = w.names()
             details = world.get("world_details") or {}
             shown = [dict(id=p["id"], label=w.display_name(p, known.get(p["id"])),
-                          **({"sumber": w.provenance(known[p["id"]])} if known.get(p["id"]) else {}))
+                          **({"sumber": w.provenance(known[p["id"]], stamp=False)} if known.get(p["id"]) else {}))
                      for p in native_rows(details.get("places", ())) if isinstance(p, Mapping) and p.get("id") in known]
             world.clear()
             world.update(places=[p["label"] for p in shown], world_details=dict(places=shown))
@@ -908,8 +1050,12 @@ def present(offer, catalog=None, *, config=None, policy=None, context=None, coun
             entry["nama"] = {a: "warga %d" % (n + 1) for n, a in enumerate(entry["args"]) if a.startswith("jelajah-")}
             entry["nama"].update({a: event_labels[a] for a in original_args if a in event_labels})
         if entry.get("name") == "buat":
+            from arti_runtime import recipe_reads
+            raw_recipes = entry.get("recipes")
+            offered = list(native_rows(entry.get("args") or ())) or (
+                list(raw_recipes.keys()) if isinstance(raw_recipes, Mapping) else [])
             _drop(entry, ("recipes", "recipes_read"))
-            if lines := _native_lines(w, "recipe_seen"):
+            if lines := recipe_reads.buat_lines(w, offered):
                 entry["recipes"] = lines
         if entry.get("name") == "cek_jurnal":
             _drop(entry, ("jurnal_baca",))
@@ -919,6 +1065,8 @@ def present(offer, catalog=None, *, config=None, policy=None, context=None, coun
                 _drop(row, ("unit_price_g", "unit_price", "price", "price_source", "facts", "policy", "ship_policy"))
         for quantity in (entry.get("quantity") or {}).values():
             _drop(quantity, ("reserve_g", "max_affordable"))
+    if isinstance(result.get("skills"), list):
+        result["skills"] = [part for entry in result["skills"] for part in _mail_apart(entry)]
     if mailbox is not None:
         _mailbox_rows(result, w, mailbox)
     ui = result.get("unknown_ui")
@@ -932,7 +1080,8 @@ def present(offer, catalog=None, *, config=None, policy=None, context=None, coun
         # Typed Crafting capture contains all known recipe ingredients even
         # when no particular recipe row has been read. Controls remain offered.
         if "crafting" in ui:
-            ui["crafting"] = {"dibaca": _native_lines(w, "recipe_seen")}
+            from arti_runtime import recipe_reads
+            ui["crafting"] = {"dibaca": recipe_reads.dibaca_lines(w)}
         # The game's current shipping summary may state values; the bin's hidden
         # pre-sale UnitSellPrice is never that display.
         container = ui.get("menu_container") or {}

@@ -29,15 +29,20 @@ def reconcile_menu_transition(runtime, goal, pin, before, current):
     delayed_transition = (action is not None and action.reason in ('TransitionObserved','TransitionObservedEventUp')
         and action.lifecycle == 'completed' and action.after is None
         and move_location_change_expected(objective, before, current))
+    festival_leave = (action is not None and action.lifecycle == 'completed'
+        and action.world_effect_status == 'observed_pad_button'
+        and ((action.after or {}).get('pad_button') or {}).get('effect') == 'festival_leave_asked'
+        and before == 'Temp')
     receipt = getattr(goal, 'navigation_readback_pin', None)
     settled_pin = (delayed_transition and isinstance(receipt, tuple) and len(receipt) == 5
                    and receipt[:3] == (action.request_id, identity, current)
                    and type(getattr(pin, 'context_generation', None)) is int
                    and pin.context_generation > receipt[3])
-    if (action is None or not (menu_transition or delayed_transition)
+    if (action is None or not (menu_transition or delayed_transition or festival_leave)
             or action.cleanup_confirmed is not True or not action.request_id
             or objective is None or not objective.navigation or objective.blocker
-            or not before or before == current or (action.before or {}).get('location') != before
+            or not before or before == current
+            or (not festival_leave and (action.before or {}).get('location') != before)
             or run is None or run.goal_id != goal.goal_id or run.call.name != 'pergi_ke'
             or None in identity or not (getattr(goal,'play_identity',None) == identity
                 or getattr(goal,'play_identity',None) is None and settled_pin)
@@ -52,13 +57,15 @@ def reconcile_menu_transition(runtime, goal, pin, before, current):
     if (motor is None or runtime._state.is_stale(pin.player_id) or motor.location != current
             or motor.active_menu is not None or motor.is_player_free is not True
             or motor.can_player_move is not True
-            or (action.before or {}).get('player_id') != pin.player_id
-            or (action.before or {}).get('screen_id') != pin.screen_id):
+            or (not festival_leave and ((action.before or {}).get('player_id') != pin.player_id
+                                        or (action.before or {}).get('screen_id') != pin.screen_id))):
         return False
     if delayed_transition and tuple(getattr(motor,k,None) for k in ('year','season','day')) != receipt[4]:
         return False
     evidence = replace(action, lifecycle='completed', reason=(
-        'observed_transition_after_menu' if menu_transition else 'observed_transition_after_readback'),
+        'observed_transition_after_menu' if menu_transition
+        else 'observed_transition_after_festival_leave' if festival_leave
+        else 'observed_transition_after_readback'),
         outcome='LocationChanged', after=dict(location=current, location_id=current),
         world_effect_status='observed_location_change', observed_changes=('location',))
     goal.last_action = evidence

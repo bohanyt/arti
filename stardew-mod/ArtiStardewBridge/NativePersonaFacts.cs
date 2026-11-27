@@ -17,9 +17,19 @@ static class NativePersonaFacts
                 ["name"] = f.Name is { } name ? name[..Math.Min(name.Length, 40)] : "",
                 ["role"] = f == host ? "host farmer" : "farmhand",
                 ["self"] = f == player, ["in_bed"] = f.isInBed.Value,
-                ["ready_time"] = f.timeWentToBed.Value,
+                ["ready_time"] = f.timeWentToBed.Value, ["place"] = Place(f),
             }).ToArray(),
     };
+
+    static string? Place(Farmer farmer)
+    {
+        try
+        {
+            string? raw = farmer.currentLocation?.NameOrUniqueName;
+            return string.IsNullOrWhiteSpace(raw) ? null : raw[..Math.Min(raw.Length, 64)];
+        }
+        catch { return null; }
+    }
 
     public static Dictionary<string, object> OwnState(Farmer player)
     {

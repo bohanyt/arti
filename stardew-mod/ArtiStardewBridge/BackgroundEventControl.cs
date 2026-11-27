@@ -25,7 +25,13 @@ internal static class NativeEventControl
                 ev.eventSwitched, ev.festivalTimer, ev.CurrentCommand, commands.Length) ? raw : null;
     }
 
-    public static string? Token()
+    public static string? Token() => Compute(seated: false);
+
+    /// <summary>The same free-roam token while she sits on a seat of this festival map before its main
+    /// event. It authorizes only the festival_stand control; <see cref="Token"/> stays null while she sits.</summary>
+    public static string? SeatedToken() => Compute(seated: true);
+
+    private static string? Compute(bool seated)
     {
         Event? ev = Game1.CurrentEvent as Event;
         string? instance = instances.Observe(ev);
@@ -33,7 +39,9 @@ internal static class NativeEventControl
         string? raw = EffectiveRaw(ev);
         string? command = raw?.Split(' ')[0];
         if (raw is null || !Context.IsWorldReady || Context.IsMainPlayer || Context.IsSplitScreen || Game1.player?.CanMove != true
-            || Game1.player.IsSitting()
+            || Game1.player.IsSitting() != seated
+            || seated && !(ev is { isFestival: true, eventSwitched: false } && Game1.player.sittingFurniture is MapSeat seat
+                && !Game1.player.isStopSitting && Game1.currentLocation?.mapSeats.Contains(seat) == true)
             || Game1.paused || Game1.HostPaused || Game1.globalFade || Game1.fadeToBlack || Game1.freezeControls
             || Game1.panMode || Game1.locationRequest is not null
             || !(EventControlMove.Reviewed(Game1.eventUp,

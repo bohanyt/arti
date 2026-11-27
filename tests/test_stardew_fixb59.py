@@ -29,6 +29,7 @@ def effect_pair(kind):
     elif kind in ("festival_npc", "event_interact"): after.update(expected_menu=True, menu_type="DialogueBox")
     elif kind == "festival_shop": after.update(expected_menu=True, menu_type="ShopMenu")
     elif kind == "festival_seat": after.update(sitting=True)
+    elif kind == "festival_stand": before["sitting"] = True  # seated, then standing
     else: after.update(score=3, present=False)
     return before, after
 

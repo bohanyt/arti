@@ -43,6 +43,13 @@ class CoopSession:
     def clear_notes(self):
         self.notes = []
 
+    def clear_for_host_left(self):
+        """Clear co-op session block, corrections and notes at once when the host leaves."""
+        self.enabled = False
+        self.facts = ()
+        self.corrections = []
+        self.notes = []
+
     def block(self):
         notes = (" Fakta sesi ini: %s." % " | ".join(self.notes)) if self.notes else ""
         if not self.enabled:

@@ -5,6 +5,8 @@ import json
 import time
 from collections.abc import Mapping
 
+from arti_runtime.map_affordances import MAP_PRESS_PREFIXES, code_press_in_scan, code_press_ref
+
 KINDS = ("generic_action", "generic_use")
 CHANGED, UNCHANGED = "WorldDeltaObserved", "WorldUnchanged"
 SKILLS = {"aksi": KINDS[0], "pakai": KINDS[1]}
@@ -89,8 +91,9 @@ def calls(snapshot, context):
     observed = {S._wave1_xy(f.get("tile")) for f in context.get("targets", {}).values() if isinstance(f, Mapping)}
     observed |= set(grid)
     out.extend(S.SkillCall("hadap", "%d,%d" % t) for t in sorted(adjacent & observed))
-    from arti_stardew_goal_routes import open_paths, open_path
-    parents = open_paths(grid, here)
+    from arti_stardew_goal_routes import open_path
+    from scripts.live7.interactions import open_reach
+    parents = open_reach(grid, here) if grid.get(here) == "." else {}
     destinations = set()
     for f in context.get("targets", {}).values():
         tile = S._wave1_xy(f.get("tile")) if isinstance(f, Mapping) else None
@@ -177,8 +180,19 @@ def ordinary(runtime, pin):
              and not getattr(scene, "requires_resync", True) and scene.session_id == pin.observation_session_id
              and scene.screen_id == pin.screen_id and 0 <= time.monotonic() - scene.received_monotonic <= 2 else {})
     described = (getattr(runtime, "_config", None) or {}).get("live7_fact_line_enabled") is True
+    state = getattr(runtime, "_state", None)
+    motor = state.latest(pin.player_id) if state is not None else None
+    stale_motor = getattr(state, "is_stale", lambda *_: False)(pin.player_id) if state is not None else False
+    actor_tile = (getattr(motor, "tile", None)
+                  if not stale_motor and getattr(motor, "location", None) == pin.location else None)
+    grid = None
+    if actor_tile is not None and (rec.facts.get("openable_containers") or (described and facts.get("affordance:map"))):
+        from arti_stardew_animal_routine import actor_cell_open
+        from arti_stardew_world_extras import nav_grid as parse_nav_grid
+        grid = actor_cell_open(parse_nav_grid(rec.facts, pin.location), actor_tile)
     return tuple(ordinary_targets(dict(mines_ui=rec.facts, location_id=pin.location,
         scene_map_affordances=facts.get("affordance:map"), targets=facts, describe_affordances=described,
+        actor_tile=actor_tile, nav_grid=grid,
         known_chests=known(pin.location) if known else ())))
 
 
@@ -197,7 +211,7 @@ def parse_targets(facts):
     return tuple(out) if len(out) <= 2 and len({t["kind"] for t in out}) == len(out) else ()
 
 
-def receipt(envelope, args):
+def receipt(envelope, args, *, ignore_quest_time=False):
     """Validate the independently sampled native readback, not an expected gameplay outcome.
 
     The outer executor authenticates request/runtime/session and release. Deltas
@@ -220,6 +234,9 @@ def receipt(envelope, args):
                 or bool(changes) != (envelope["outcome"] == CHANGED)):
             return None
         seen, facts = set(), []
+        code_press = code_press_ref(args.get("source_fact_id"))
+        if ignore_quest_time:
+            from arti_runtime.local_walks import quest_sampling_time_only
         for cell in changes:
             if not isinstance(cell, dict) or set(cell) != {"Path", "Before", "After"}:
                 return None
@@ -235,7 +252,19 @@ def receipt(envelope, args):
                 values.append(dict(present=value is not None, value=json.loads(value) if value is not None else None))
             if cell["Before"] == cell["After"]:
                 return None
+            if ignore_quest_time and path.startswith("quest:") and quest_sampling_time_only(
+                    values[0]["value"], values[1]["value"]):
+                continue
+            if path == "menu":
+                for sample in values:
+                    menu = sample["value"]
+                    if isinstance(menu, dict) and (menu.get("unreadable") is True
+                            or code_press and menu.get("type") == "JunimoNoteMenu"):
+                        sample["value"] = dict(type="Menu", receiver=menu.get("receiver"), unreadable=True)
             facts.append(dict(path=path, before=values[0], after=values[1]))
+        if code_press and facts and (
+                len(facts) != 1 or not facts[0]["before"]["present"] or _opened_menu_in({"changes": facts}) is None):
+            return None
         return dict(before_tick=b, after_tick=a, changes=facts, causal_credit="unattributed")
     except (ValueError, KeyError, TypeError):
         return None
@@ -248,13 +277,27 @@ def opened_menu(action):
             or S._g(action, "cleanup_confirmed") is not True
             or S._g(action, "world_effect_status") != "observed_world_delta"):
         return None
-    changes = (S._g(action, "after") or {}).get("changes", ())
-    for c in changes:
+    return _opened_menu_in(S._g(action, "after") or {})
+
+
+def _opened_menu_in(delta):
+    for c in delta.get("changes", ()):
         row = (c.get("after") or {}).get("value")
         if (c.get("path") == "menu" and (c.get("before") or {}).get("value") is None
                 and isinstance(row, dict) and row.get("type") and row.get("receiver")):
             return row
     return None
+
+
+def unreadable_press(ref, episode):
+    """A pressed code cell and a linked observation of the receiver it opened."""
+    if not code_press_ref(ref) or not isinstance(episode, Mapping):
+        return False
+    opened = episode.get("opened") or {}
+    return bool(opened.get("request_id") and opened.get("receiver")
+                and opened.get("world_effect_status") == "observed_world_delta" and any(
+                    row.get("linked") is True and row.get("unreadable") is True and row.get("receiver") == opened["receiver"]
+                    for row in episode.get("observations", ())))
 
 
 def chest_open(action, state, view):
@@ -319,7 +362,7 @@ def mod_refusal(last, state):
     return S.Step("fail", reason=str(S._g(last, "reason") or "mod_refused")[:160])
 
 
-def step(call, snap, state, *, context=None):
+def step(call, snap, state, *, context=None, one_tile=False):
     """One chosen generic press, then return its observed delta to the brain."""
     import arti_stardew_skills as S
     last = S._g(S._g(snap, "working_memory"), "last_action")
@@ -333,13 +376,17 @@ def step(call, snap, state, *, context=None):
     if call.name == "pegang_slot":
         return hold_step(call, snap, state)
     if call.name == "langkah":
-        last = S._g(S._g(snap, "working_memory"), "last_action")
+        if one_tile:
+            from arti_runtime.local_walks import one_tile_step
+            return one_tile_step(call, snap, state, context=context)
+        from arti_runtime.raw_hands import OBSERVED_TRANSITIONS, step_readback
+
         if state.get("generic_pressed"):
             if (S._g(last, "request_id") and S._g(last, "request_id") != state.get("generic_previous")
-                    and S._g(last, "cleanup_confirmed") is True
-                    and S._g(last, "world_effect_status") in ("observed_change", "unchanged")):
-                state["raw_effect"] = S._g(last, "world_effect_status")  # ADR 243: her next page says which
-                return S.Step("done", reason="observed_movement")
+                    and (movement := step_readback(last)) is not None
+                    and ("transition" not in movement or movement["transition"] in OBSERVED_TRANSITIONS)):
+                state["step_movement"] = movement
+                return S.Step("done", reason=movement["kind"])
             if (refused := mod_refusal(last, state)) is not None:
                 return refused
             # fix58A (ADR 84, a39/a43: langkah 0 finished): the first act of a fresh skill goal is refused
@@ -381,6 +428,14 @@ def step(call, snap, state, *, context=None):
         return S._decision(S.act("world_key.move_cardinal", dict(direction=("up", "right", "down", "left")[direction], ticks=1)))
     last = S._g(S._g(snap, "working_memory"), "last_action")
     if state.get("generic_pressed"):
+        if code_press_ref(call.arg):
+            if _opened_menu_in(state.get("generic_readback") or {}) is not None:
+                return S.Step("done", reason="observed_menu_open")
+            if (refused := mod_refusal(last, state)) is not None:
+                return refused
+            if state.get("generic_receipt_observed"):
+                return S.Step("fail", reason="code_action_menu_unobserved")
+            return S._wait(state, "generic", "code_action_menu_unobserved", "Amati menu", S.WAIT_S)
         loc = S._g(S._g(snap, "motor"), "location")
         start = state.get("ladder_down_from")
         if start and loc and loc != start and str(loc).startswith("UndergroundMine"):
@@ -445,7 +500,15 @@ def step(call, snap, state, *, context=None):
         if observed is None or tuple(observed.get("tile", ())) != tuple(call.tile):
             return S.Step("fail", reason="interact_target_disappeared")
         tile = tuple(call.tile)
-        here = S._wave1_xy(S._g(S._g(snap, "motor"), "tile"))
+        motor = S._g(snap, "motor")
+        here = S._wave1_xy(S._g(motor, "tile"))
+        code = code_press_ref(call.arg)
+        if code:
+            if (not code_press_in_scan(tile, here) or S.menu_up(snap) or S._g(snap, "event_movement")
+                    or S._g(snap, "event_actions") or S._g(snap, "festival_reflex")):
+                return S.Step("fail", reason="interact_target_disappeared")
+            if (hand := S.plain_hand_step(snap, state)) is not None:
+                return hand
         if observed.get("kind") in ("ladder_down", "shaft"):
             state.setdefault("ladder_down_from", S._g(S._g(snap, "motor"), "location"))
         ladder = observed.get("kind") in ("ladder_down", "ladder_up", "shaft")
@@ -476,7 +539,13 @@ def step(call, snap, state, *, context=None):
         offered_target = S._g(snap, "world_interaction_target")
         matches = lambda t: isinstance(t, Mapping) and (t.get("tile_x"), t.get("tile_y")) == tile
         native = next((t for t in S._g(snap, "generic_world_targets", ()) if t.get("kind") == kind and matches(t)), None)
-        if (matches(offered_target) and offered_target.get("kind") == "chest"
+        if code:
+            if (native is None or native.get("source_fact_id") != call.arg
+                    or (native.get("actor_tile_x"), native.get("actor_tile_y")) != here
+                    or native.get("facing") != S._g(motor, "facing")
+                    or here not in [tuple(stand) for stand in observed.get("stands", ())]):
+                native = None
+        elif (matches(offered_target) and offered_target.get("kind") == "chest"
                 and offered_target.get("source_fact_id") == call.arg):
             native = offered_target
         elif native is None and observed.get("kind") not in ("map_action", "scene_pick_up") and matches(offered_target):

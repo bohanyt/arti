@@ -11,7 +11,8 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from scripts.livepath.bringup import HARD_HEADROOM_GB, headroom_check, headroom_gb as snapshot_headroom
-from scripts.livepath.halt_authority import HELPER_CONFIG, HandsHeld, session_kind  # the launch gate reads it too
+from scripts.livepath.halt_authority import (  # the gate reads session_kind too
+    HELPER_CONFIG, HandsHeld, prepared_owner_run, session_kind)
 from scripts.m1_operator.farmhand_focus import FOCUS_INDEPENDENT, release_farmhand_focus
 
 POLL_S = 10
@@ -588,7 +589,7 @@ def tick(run, state, *, now=None, clock_fn=None, games_fn=None, rejoin_fn=None,
     prior_ladder = {key: state.get(key) for key in ("ladder_recover_at", "ladder_log")}
     if named in LADDER_DRAINS:
         rung6 = _ladder_rung6(run, cycle, state, now=now, log=log, games=games, host_relaunch_fn=host_relaunch_fn,
-                              rejoin_fn=rejoin_fn, close_fn=close_fn, reason=named, menu=menu)
+                              rejoin_fn=rejoin_fn, close_fn=close_fn, reason=named, menu=menu, hold_fn=hold_fn)
         if rung6 is not None:
             return rung6
     reserved = {key: state.get(key) for key in ("menu_recover_at", "rejoin_at", "pending")}
@@ -597,7 +598,7 @@ def tick(run, state, *, now=None, clock_fn=None, games_fn=None, rejoin_fn=None,
     state["rejoin_at"] = _trim((state.get("rejoin_at") or []) + [now], now, 3600)
     state["pending"] = None
     state["last_fault"] = named
-    if hands_fault:
+    if hands_fault and not prepared_owner_run(run):
         # ADR 250: a no-op report when every hand path is focus-independent; else the release names its failure.
         cleared = release_farmhand_focus(run)
         cause = getattr(cleared, "cause", None)
@@ -898,7 +899,7 @@ def ask_game_exit(run, name, pid, *, kind=None, session=None, alive_fn=None, wai
 
 
 def _ladder_rung6(run, cycle, state, *, now, log, games, host_relaunch_fn, rejoin_fn, close_fn=None,
-                  reason=EFFECT_LADDER_DRAIN, menu=None):
+                  reason=EFFECT_LADDER_DRAIN, menu=None, hold_fn=None):
     """ADR 241 B rungs 5 and 6 on the supervisor (ADR 241 C: held-menu drains are on the same ladder). None: go on
     with the ordinary drained rejoin (rung 5)."""
     previous_log = state.get("ladder_log")
@@ -938,21 +939,24 @@ def _ladder_rung6(run, cycle, state, *, now, log, games, host_relaunch_fn, rejoi
                      "helper installed=%s); nothing was closed" % (
                          (_read_json(Path(run) / "trial-config.json") or {}).get("stardew_host_controller"),
                          (Path(run) / HELPER_CONFIG).is_file()))
+    if kind == "owner":
+        if (held := _hold(state, log, hold_fn, now, reason, run=run)) is not None:
+            return held
+        return spent("owner_join_waits_for_operator")
     if (not resume and int(state.get("host_relaunches") or 0) >= MAX_HOST_RELAUNCH_PER_STREAM) or (
-            kind == "solo" and host_relaunch_fn is None):
+            host_relaunch_fn is None):
         return spent("a fresh cycle reached rung 5 again and rung 6 is spent (%d relaunches)" % int(
             state.get("host_relaunches") or 0))
-    # Rung 6 closes only what this session started: solo = her farmhand and the helper HOST, then the helper HOST
-    # reloads the last saved morning; owner-hosted = her farmhand only, then she rejoins the owner's running farm.
+    # Only the solo route can close and relaunch here. Its helper reloads the last saved morning.
     if not resume:
         state["host_relaunches"] = int(state.get("host_relaunches") or 0) + 1
-    what = "her game from the last saved morning" if kind == "solo" else "her farmhand game into the owner's running farm"
+    what = "her game from the last saved morning"
     try:
         if not resume:
             closed = close_fn(run, kind) if close_fn else close_session_games(run, kind, session=controller_session(state))
             resume = dict(cycle=Path(cycle).name, reason=reason, closed=closed or [], host_started=False)
             state["ladder_resume"] = resume
-        if kind == "solo" and not resume["host_started"]:
+        if not resume["host_started"]:
             host_relaunch_fn()
             resume["host_started"] = True
             # the relaunch moved run/host aside: publish again; review M4d item 4: say it once if that failed (no request
@@ -977,8 +981,7 @@ def _ladder_rung6(run, cycle, state, *, now, log, games, host_relaunch_fn, rejoi
     state["ladder_relaunched_what"] = what
     state.setdefault("rejoin_at", []).append(now)
     state.update(pending=None, last_fault=reason, last_action="ladder_relaunch")
-    done = ("her game relaunched from the last saved morning" if kind == "solo"
-            else "her farmhand game relaunched into the owner's running farm")
+    done = "her game relaunched from the last saved morning"
     log("rung 6: %s (#%d, %s session, closed: %s, rejoin rc=%s); rungs so far: %s" % (
         done, state["host_relaunches"], kind, ", ".join(closed) or "nothing running", rc,
         _ladder_words(state["ladder_log"])))
@@ -1012,14 +1015,20 @@ def _deliberate_voice_stop(run):
     """Presence is authority, independent of the previous voice process's start time."""
     from scripts.livepath import halt_authority as HA, mabar
 
+    left_present = HA.present(Path(run) / "play_left.json")
     try:
         folder = mabar.inbox()
     except FileNotFoundError:
+        if left_present:
+            return True
         folder = Path(run) / "runtime" / "command"
     except (OSError, TypeError, ValueError, KeyError):
         return True
     evidence = HA.read_evidence(folder, run, recovery=True)
-    return bool(evidence.outranking or evidence.sentinels or evidence.stops or evidence.host_inert)
+    if not left_present:
+        return bool(evidence.outranking or evidence.sentinels or evidence.stops or evidence.host_inert)
+    from scripts.livepath.she_leaves import deliberate_voice_stop_after_leave
+    return deliberate_voice_stop_after_leave(run, evidence)
 
 
 def voice_tick(run, state, *, now, log, bridge_fn, start_voice_fn):
@@ -1167,6 +1176,9 @@ def _hold(state, log, hold_fn, now, named, decision=None, *, run=None):
         state["hands_held"] = decision.held
     said = (state.get("hands_held") or {}).get("episode_id") or decision.reason
     if state.get("hold_alerted") != said:
+        if run is not None and (getattr(decision, "halt", None) or decision.reason.startswith("native_stop_")):
+            from scripts.livepath import mabar, owner_join
+            owner_join.stop_notice(run, mabar.inbox, mabar.log, episode=said)
         state["hold_alerted"] = said
         from scripts.livepath.halt_authority import claim_hold_alert
         if claim_hold_alert(run, decision):
@@ -1230,7 +1242,7 @@ def run_supervise(a, *, sleep_fn=None, clock_fn=None, once=False, **hooks):
 
     def recovery_args(deadline):
         return Namespace(**dict(vars(a), recovery=True, recovery_deadline=deadline, recovery_expected=None,
-                                recovery_clock=None))
+                                recovery_clock=None, owner_ready=False))
 
     def rejoin(deadline):
         from scripts.livepath import mabar
@@ -1294,11 +1306,16 @@ def run_supervise(a, *, sleep_fn=None, clock_fn=None, once=False, **hooks):
     while True:
         recovery_end = None
         if (run / "SUPERVISE_STOP").exists():
+            from scripts.livepath import mabar, owner_join
+            owner_join.stop_notice(run, mabar.inbox, mabar.log)
             log_line(run, "off SUPERVISE_STOP", clock_fn=clock_fn)
             save_state(run, state)
             return 0
         try:
             voice()
+            if session_kind(run) == "owner":
+                from scripts.livepath import mabar, owner_join
+                owner_join.worker_notice(run, mabar.inbox, mabar.log)
             tick(run, state, clock_fn=clock_fn, **hooks)
         except Exception as exc:  # noqa: BLE001 — a failed recovery is journalled; supervision goes on
             state["last_error"] = "%s: %s" % (type(exc).__name__, str(exc)[:200])

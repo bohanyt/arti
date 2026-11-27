@@ -167,7 +167,7 @@ def _attribution(receipt, owner):
     return said_label(dict(owner) if isinstance(owner, Mapping) else {})
 
 
-def build(base, scope, *, day, place=None, actions=None, now=None, catalog=None):
+def build(base, scope, *, day, place=None, actions=None, now=None, catalog=None, mind_scoped=False):
     """The projection, from the existing ledger only. ``actions``: {day: [verified outcome text, ...]}.
 
     ``catalog`` (ADR 231 part G): the page's native world read, for the names her page shows for places."""
@@ -246,7 +246,7 @@ def build(base, scope, *, day, place=None, actions=None, now=None, catalog=None)
     said.sort(key=lambda r: (r["day"], r.get("wib") or r["date"]), reverse=True)
     said.sort(key=lambda r: not (here and r.get("place") == here))
     said = [{k: v for k, v in r.items() if k != "wib"} for r in said[:SAID_MAX]]
-    journey = {r.get("day"): r for r in M.load_journey(base, GAME) if isinstance(r, Mapping)}
+    journey = {r.get("day"): r for r in M.load_journey(base, GAME, scope=scope, scoped=mind_scoped) if isinstance(r, Mapping)}
     days = {}
     for name, d in (("kemarin", day - 1), ("hari_ini", day)):
         summary = ((journey.get(d) or {}).get("reflection") or {}).get("today")
@@ -254,7 +254,7 @@ def build(base, scope, *, day, place=None, actions=None, now=None, catalog=None)
         if (isinstance(summary, str) and summary.strip()) or done:
             days[name] = dict(date=_label(d), summary=summary.strip() if isinstance(summary, str) else None,
                               verified=done)
-    goals = M.open_goals(M.load_goals(base, GAME), day, horizons=M.SEASON_HORIZONS)
+    goals = M.open_goals(M.load_goals(base, GAME, scope=scope, scoped=mind_scoped), day, horizons=M.SEASON_HORIZONS)
     wants = [dict(horizon=h, text=g["text"]) for h in ("long", "season", "today", "week") for g in goals.get(h, ())][:WANTS_MAX]
     people_rows = sorted(people.values(), key=lambda p: (p.get("place") != here or not here, p["first_day"]))[:PEOPLE_MAX]
     place_rows = sorted(places.values(), key=lambda p: (p["place"] != here, -p["first_day"]))[:PLACES_MAX]
@@ -418,9 +418,14 @@ def live7_write(runtime, session, *, place=None):
             history = getattr(getattr(campaign, "live", None), "history", None) or ()
             place = next((h.get("location") for h in reversed(history) if isinstance(h, Mapping) and h.get("location")), None)
         import arti_mind
+        from arti_runtime import mind_scope
+        mind_scoped = mind_scope.enabled(config)
         folder = arti_mind.game_dir(Path(base), GAME)
         stamps = []
-        for name in ("discoveries.jsonl", arti_mind.JOURNEY_FILE, arti_mind.GOALS_FILE, arti_mind.LEDGER_FILE):
+        stamp_names = ("discoveries.jsonl", arti_mind.JOURNEY_FILE, arti_mind.GOALS_FILE, arti_mind.LEDGER_FILE)
+        if mind_scoped:
+            stamp_names = stamp_names + (mind_scope.LEGACY_SCOPES_FILE,)
+        for name in stamp_names:
             try:
                 st = os.stat(folder / name)
                 stamps.append((st.st_mtime_ns, st.st_size))
@@ -431,14 +436,19 @@ def live7_write(runtime, session, *, place=None):
         catalog = catalog if isinstance(catalog, Mapping) else None
         names = ([(r.get("id"), r.get("label")) for r in ((catalog or {}).get("world_graph") or {}).get("places") or ()
                   if isinstance(r, Mapping)], ((catalog or {}).get("rest") or {}).get("home"))
-        key = json.dumps([scope, day, place, stamps, actions.get(day), actions.get(day - 1), names], default=str)
+        key = json.dumps([scope, day, place, stamps, actions.get(day), actions.get(day - 1), names, mind_scoped], default=str)
         cached = _BUILT.get(str(base))
         if cached is not None and cached[0] == key:
             digest = dict(cached[1], written_ts=time.time())  # unchanged record; fresh for the voice's privacy scope
         else:
-            digest = build(base, scope, day=day, place=place, actions=actions, catalog=catalog)
+            digest = build(base, scope, day=day, place=place, actions=actions, catalog=catalog, mind_scoped=mind_scoped)
             _BUILT[str(base)] = (key, digest)
-        if write(base, digest) and digest.get("own_actions"):
+        if mind_scoped:
+            with mind_scope.file_lock(path(base)):
+                wrote = write(base, digest)
+        else:
+            wrote = write(base, digest)
+        if wrote and digest.get("own_actions"):
             current = tuple(digest["own_actions"])
             if current != getattr(runtime, "_experience_digest_action_rows", ()):
                 runtime._experience_digest_action_rows = current
@@ -460,8 +470,9 @@ class Reader:
         self._key = None
         self._text = ""
         self._written = 0.0
+        self._scope_hash = None
 
-    def block(self, file, *, not_before=0.0, restricted=False):
+    def block(self, file, *, not_before=0.0, restricted=False, scope_hash=None, require_scope=False):
         if restricted:
             return ""
         try:
@@ -471,7 +482,7 @@ class Reader:
         key = (str(file), st.st_mtime_ns, st.st_size)
         with self._lock:
             if key != self._key:
-                self._key, self._text, self._written = key, "", 0.0
+                self._key, self._text, self._written, self._scope_hash = key, "", 0.0, None
                 try:
                     if st.st_size > 64 * 1024:
                         raise ValueError("oversized")
@@ -482,10 +493,17 @@ class Reader:
                             and "\n" not in text and "\ufffd" not in text and len(text.encode("utf-8")) <= BLOCK_MAX_BYTES
                             and type(written) in (int, float)):
                         self._text, self._written = text, float(written)
+                        self._scope_hash = row.get("scope_hash") if isinstance(row.get("scope_hash"), str) else None
                 except (OSError, ValueError, TypeError, AttributeError):
                     pass
-            text, written = self._text, self._written
-        return "\n" + text + "\n" if text and written >= float(not_before or 0.0) else ""
+            text, written, row_scope = self._text, self._written, self._scope_hash
+        if not text or written < float(not_before or 0.0):
+            return ""
+        if require_scope:
+            from arti_runtime import mind_scope
+            if not mind_scope.is_scope_hash(scope_hash) or row_scope != scope_hash:
+                return ""
+        return "\n" + text + "\n"
 
 
 _READERS = {}
@@ -500,19 +518,30 @@ def bridge_block(bridge):
     """The bridge hook (called only with the setting on): the current privacy scope bounds freshness."""
     try:
         import arti_mind
+        from arti_runtime import mind_scope
         privacy = bridge.screen_privacy
-        return voice_block(arti_mind.mind_dir(bridge.CONFIG), not_before=privacy.changed_at,
+        cfg = getattr(bridge, "CONFIG", None) or {}
+        if mind_scope.enabled(cfg):
+            lived, playing = mind_scope.bridge_memory_scope(bridge)
+            if not lived:
+                return ""
+            block = voice_block(arti_mind.mind_dir(cfg), not_before=privacy.changed_at,
+                                restricted=privacy.restricted, scope_hash=lived, require_scope=True)
+            # The header's "Sekarang <date> di <place>" is true only while she plays; afterwards it is where she last was.
+            return block if playing else block.replace(" Sekarang ", " Terakhir main ", 1)
+        return voice_block(arti_mind.mind_dir(cfg), not_before=privacy.changed_at,
                            restricted=privacy.restricted)
     except Exception:  # noqa: BLE001 - a persona turn never fails on the memory file
         return ""
 
 
-def voice_block(base, *, not_before=0.0, restricted=False):
+def voice_block(base, *, not_before=0.0, restricted=False, scope_hash=None, require_scope=False):
     """``"\\n[INGATAN GAME] ...\\n"`` or '' (missing/stale/broken/restricted -> nothing). Never raises."""
     try:
         file = path(base)
         with _READERS_LOCK:
             reader = _READERS.setdefault(str(file), Reader())
-        return reader.block(file, not_before=not_before, restricted=restricted)
+        return reader.block(file, not_before=not_before, restricted=restricted, scope_hash=scope_hash,
+                            require_scope=require_scope)
     except Exception:  # noqa: BLE001 - a persona turn never fails on the memory file
         return ""

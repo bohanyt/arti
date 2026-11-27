@@ -221,6 +221,8 @@ class Booking:
         config["live7_fact_line_enabled"] = True
         config["stardew_game_text_delivery_enabled"] = True
         config["stardew_live7_ship_on_the_way"] = True
+        config["stardew_live7_menu_visit_bound"] = True
+        config["stardew_live7_success_stays"] = True
         config["stardew_live7_place_time_page"] = True
         if spec.get("voice_memory") is True:
             config["voice_game_memory_enabled"] = True

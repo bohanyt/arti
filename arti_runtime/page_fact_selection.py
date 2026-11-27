@@ -9,6 +9,7 @@ from arti_runtime.native_rows import native_rows
 from copy import deepcopy
 from dataclasses import dataclass
 from arti_runtime.page_snapshot import plain_snapshot, fact_policy_snapshot
+from arti_runtime.place_page import RESULT_FIELD
 from arti_runtime.self_hud import KEYS as VITALS
 import hashlib
 import json
@@ -23,15 +24,22 @@ PROTECTED = frozenset(('muat_ulang','siap_panen','ruang_tas','tujuan_dibawa','ta
     'journal_choice','journal_result','menu_kini','held_notice','grant_notice','readiness_notice',
     'native_transfer','transfer_actions','peti_ambil','peti_cocok','kontrol_efek','native_place',
     'pengumuman_game','kotak_surat',  # ADR 227: the game's own words today; the mailbox flag she saw
+    'surat_hari_ini',  # the letters she opened today, in the game's words.
     'kiriman_kemarin','map_affordances',  # Recent earnings screen and the current map affordance count.
     'jalan_keluar','dunia_tidak_muat',  # ADR 237 A: the menu's way out (or its answers); world choices left off.
     'ditahan','pemulihan_terakhir',  # ADR 241: a withheld choice and why; what the ladder did, once.
     'tangan','tangan_hasil',  # ADR 243: her raw hands in one line; what the game answered to her last raw press.
+    'hasil_berulang',  # what a spot has answered every time she pressed it.
     'tangan_ditahan'))  # ADR 249: a latched HALT holds her hands: why, and who clears it.
 ROOT_KEEP = frozenset(('live7','fact_line','owner_goal','mind','budget','danger','gift','decision_feedback',
     '_game_text','action_facts','social_availability','counter_status','native_ui_notices','game_text',
-    'halaman_baca','question_reads_closed','help_advisories'))
-SKILL_KEEP = frozenset(('name','args','nama','quantity','quantity_rule','batch','items','jurnal','jurnal_baca'))
+    'halaman_baca','question_reads_closed','help_advisories','peer_sleep'))
+# A world page's read is her own notes: what the game showed her and what she was told.
+NOTES_FIELD = 'catatan_kubaca'
+NOTES = ('game_facts', 'discoveries')
+NOTES_BYTES = 6000
+NOTE_CHARS = 600
+SKILL_KEEP = frozenset(('name','args','nama','lantai','quantity','quantity_rule','batch','items','jurnal','jurnal_baca','peti'))
 
 
 def enabled(config):
@@ -111,6 +119,29 @@ class PageOffer(dict):
         self.text_batch = None
         self.left_off = {}
         self.left_off_paths = set()
+        self.notes = None  # the notes she has not read this session (rows); None = the snapshot read
+
+
+def notes(source, read=()):
+    """What the game showed her and what she was told, newest first, without the rows she has read this
+    session. The fact policy has passed over the source."""
+    found = [r.get('text') for r in native_rows(source.get('discoveries', ())) if isinstance(r, Mapping)]
+    rows = [r for r in [*native_rows(source.get('game_facts', ()))][::-1] + found[::-1] if isinstance(r, str) and r.strip()]
+    rows = dict.fromkeys(r if len(r) <= NOTE_CHARS else r[:NOTE_CHARS - 1].rstrip() + '…' for r in rows)
+    return [r for r in rows if digest(r) not in read]
+
+
+def notes_answered(session, messages):
+    """The page she just answered carried notes: those rows are read, for this session. The rows stand on the
+    session (`notes_unread`): a page reused after a rejected answer keeps its messages, not its offer's attributes."""
+    unread = getattr(session, 'notes_unread', None)
+    if not unread:
+        return
+    try:
+        seen = json.loads(messages[1]['content']).get(NOTES_FIELD)
+        session.notes_read.update(digest(r) for r in unread[:seen['sampai']] if seen)
+    except (ValueError, TypeError, IndexError, KeyError, AttributeError):
+        return
 
 
 def places_for(offer, catalog=None):
@@ -124,7 +155,7 @@ def places_for(offer, catalog=None):
     for entry in native_rows(offer.get('skills', ())):
         if entry.get('name') != 'pergi_ke':
             continue
-        after = entry.get('after_travel') or {}
+        after = _travel_by_arg(entry.get('after_travel'))
         for arg in native_rows(entry.get('args', ())):
             row = after.get(arg) or {}
             loc = row.get('location') or (graph.get('home') if arg == 'home' else destination_map(arg))
@@ -156,6 +187,10 @@ def destination_row(arg, row, now=None):
             row.get('pesan_pintu',hours),status,counter,row.get('can_do') or []]
 
 
+def _travel_by_arg(travel):
+    return {arg: row for arg, row in travel.items() if isinstance(row, Mapping)} if isinstance(travel, Mapping) else {}
+
+
 def put(body, path, value):
     for key in path[:-1]:
         body = body.setdefault(key, {})
@@ -163,6 +198,8 @@ def put(body, path, value):
 
 
 def record(path, value, here, today):
+    if path == ('facts', 'lantai'):
+        return FactRecord(path, value, (here,) if here else (), None, None, False, 9, False)
     places, observed, valid = (), None, None
     calendar = path[0] == 'calendar'
     if isinstance(value, Mapping):
@@ -184,7 +221,7 @@ def record(path, value, here, today):
                       path[0] in ('discoveries','game_facts','outcomes','recovery','forage_seen_on_way'))
 
 
-def prepare(offer, *, config=None, budget=None, deferred=None, catalog=None, policy=None):
+def prepare(offer, *, config=None, budget=None, deferred=None, catalog=None, policy=None, notes_read=None):
     if not enabled(config):
         return offer
     from arti_runtime.page_budget import DEFAULT
@@ -199,12 +236,26 @@ def prepare(offer, *, config=None, budget=None, deferred=None, catalog=None, pol
         if isinstance(value,dict):return {k:read_identity(v) for k,v in value.items() if k!='captured_tick'}
         if isinstance(value,(list,tuple)):return [read_identity(v) for v in value]
         return value
-    result.handle = READ + digest(read_identity(dict(source=source,scope=(catalog or {}).get('scope'),
-        deferred={k:v.arguments for k,v in result.deferred.items()})))
+    if source.get('fact_line') and not isinstance(source.get('unknown_ui'), Mapping):
+        # The whole-snapshot read handle was bound to a world that moves, so any change in the world made it stale
+        # (`Dunia berubah`). This handle covers only her notes and the scope. Her notes change only when she learns something.
+        result.notes = notes(source, notes_read or ())
+        result.handle = READ + digest(dict(notes=result.notes, scope=(catalog or {}).get('scope')))
+        read = result.handle + ':0' if result.notes else None
+    else:
+        result.handle = READ + digest(read_identity(dict(source=source,scope=(catalog or {}).get('scope'),
+            deferred={k:v.arguments for k,v in result.deferred.items()})))
+        read = result.handle + ':0'
     here, places, aliases = places_for(source, catalog)
     today = day_number((source.get('day') or {}).get('date'))
+    from arti_runtime.human_host import bounded_peer_sleep, waiting_for_peer_sleep
+    waiting_sleep = waiting_for_peer_sleep(source)
     result['live7'] = source.get('live7', True)
     for key in ROOT_KEEP:
+        if key == 'peer_sleep':
+            if waiting_sleep and key in source:
+                result[key] = bounded_peer_sleep(source[key])
+            continue
         if key in source:
             result[key] = deepcopy(source[key])
     recent = source.get('recent_actions', [])
@@ -215,17 +266,24 @@ def prepare(offer, *, config=None, budget=None, deferred=None, catalog=None, pol
         if entry.get('name') == 'read_boundary':
             continue  # replaced with the one executable snapshot entry point
         row = {k:deepcopy(v) for k,v in entry.items() if k in SKILL_KEEP}
+        if source.get('fact_line') and entry.get('name') == 'buat' and entry.get('recipes'):
+            row['recipes'] = deepcopy(entry['recipes'])
         if entry.get('name') == 'pergi_ke':
-            after = entry.get('after_travel') or {}
+            after = _travel_by_arg(entry.get('after_travel'))
             if after:
                 row.pop('nama',None)  # names ride the destination rows once
                 row['after_travel'] = dict(fields=['arg','name','walk','door_facts','door_now','counter_hours_open','today'],
                     unknown=None, rows=[destination_row(a,after[a]) for a in native_rows(entry.get('args', ())) if a in after])
+                if any(RESULT_FIELD in facts for facts in after.values()):
+                    row['after_travel']['fields'].append(RESULT_FIELD)
+                    for travel in row['after_travel']['rows']:
+                        travel.append(after[travel[0]].get(RESULT_FIELD))
             elif entry.get('arrival_facts'):
                 row['arrival_facts'] = deepcopy(entry['arrival_facts'])
         result['skills'].append(row)
-    result['skills'].append(dict(name='read_boundary', args=[result.handle + ':0']))
-    result['detail_read'] = result.handle + ':0'
+    if read:
+        result['skills'].append(dict(name='read_boundary', args=[read]))
+        result['detail_read'] = read
     for root in ('facts','day'):
         result[root] = {}
         for key,value in (source.get(root) or {}).items():
@@ -265,27 +323,50 @@ def prepare(offer, *, config=None, budget=None, deferred=None, catalog=None, pol
                 put(result, path, p.get('facts', []))
             else:
                 result.records.append(record(path,p.get('facts', []),here,today))
+    skip_root = ROOT_KEEP | {'skills','recent_actions','facts','day','world','unknown_ui','boundary_page','render_budget','detail_read'}
+    if not waiting_sleep:
+        skip_root = skip_root - {'peer_sleep'}
     for key,value in source.items():
         if value is None or isinstance(value,(Mapping,list,tuple)) and not value:continue
-        if key not in ROOT_KEEP | {'skills','recent_actions','facts','day','world','unknown_ui','boundary_page','render_budget','detail_read'}:
+        if key not in skip_root:
             # Native text is never interpreted as a place label. Unknown labels stay uncertainty.
             result.records.append(record((key,),value,here,today))
     from dataclasses import replace
     from collections import Counter
     result.left_off_paths = {r.path for r in result.records if not r.matches(places,today) or
         r.historical and (r.observed_day is None or today is None or today-r.observed_day>2)}
-    result.records = [replace(r, value=dict(records=len(r.value) if isinstance(r.value,(list,dict)) else 1,
-        observed_day=r.observed_day, status='catatan lama' if r.observed_day is not None else 'waktu pengamatan tidak diketahui',
-        read=result.handle+':0')) if r.historical and (r.observed_day is None or today is None or today-r.observed_day>2)
+    def behind(r):
+        value = dict(records=len(r.value) if isinstance(r.value,(list,dict)) else 1, observed_day=r.observed_day,
+                     status='catatan lama' if r.observed_day is not None else 'waktu pengamatan tidak diketahui')
+        if result.notes is None:
+            value['read'] = read
+        elif r.path[0] in NOTES:
+            value.update(dict(read=read) if read else dict(status='sudah kamu baca, belum ada yang baru'))
+        return value
+    result.records = [replace(r, value=behind(r)) if r.historical and (r.observed_day is None or today is None or today-r.observed_day>2)
         else r for r in result.records if r.matches(places,today)]
     result.records.sort(key=lambda r:(r.priority, -(r.observed_day or -1), tuple(map(str,r.path))))
     # Whole source stays bounded independently of the provider's page budget.
     selected_records = []
+    limit = min(16000, budget.page_limit)
+    has_eyes = without_local_walks_eyes(result) is not result
     for r in result.records:
         candidate = deepcopy(dict(result)); put(candidate,r.path,r.value)
-        if len(encoded(candidate)) <= min(16000, budget.page_limit):
+        size = len(encoded(candidate))
+        if size <= limit:
             put(result,r.path,r.value)
             selected_records.append(r)
+        elif has_eyes and r.path != ('facts', 'lantai') and size <= limit + 400:
+            trimmed = without_local_walks_eyes(candidate)
+            if trimmed is not candidate and len(encoded(trimmed)) <= limit:
+                result['skills'] = trimmed.get('skills', result.get('skills', []))
+                if 'facts' in trimmed:
+                    result['facts'] = trimmed['facts']
+                has_eyes = False
+                put(result,r.path,r.value)
+                selected_records.append(r)
+            else:
+                result.left_off_paths.add(r.path)
         else:
             result.left_off_paths.add(r.path)
     # The renderer may spend less, never draw more data from the read snapshot.
@@ -328,7 +409,7 @@ RAW_FLOOR = ('langkah', 'hadap', 'pakai')  # ADR 243: her raw hands are page flo
 RAW_FRONT = 'depan'
 WORLD_ROWS = frozenset(('di_sini', 'bisa_di_sini', 'map_affordances', 'kunjungan', 'warga', 'native_place', 'crops',
     'kebun', 'pengumuman_game', 'risiko_tambang', 'jalan_terhalang', 'route_home_blocked', 'festival_hari', 'peti_cocok',
-    'peti_ambil', 'kontrol_efek', 'siap_panen', 'kotak_surat', 'kiriman_kemarin'))  # rows about the world around her
+    'peti_ambil', 'kontrol_efek', 'siap_panen', 'kotak_surat', 'kiriman_kemarin', 'hasil_berulang'))  # rows about the world around her
 CUT_LINE = ('Halaman ini terlalu panjang, jadi dipotong berurutan (baris dunia dulu, lalu fakta tertua): %s tidak muat. '
             'Yang tampil tetap lengkap dan bisa dipilih.')
 SHORT_TEXT = 160
@@ -354,7 +435,64 @@ def _age(value):
     return (0, min(found)) if found else (1, ('', 0))
 
 
-def cut_to_fit(body, accepts):
+def _without_result(row):
+    if isinstance(row, Mapping) and RESULT_FIELD in row:
+        return {key: value for key, value in row.items() if key != RESULT_FIELD}
+    return row
+
+
+def _without_travel_results(travel):
+    if not isinstance(travel, Mapping):
+        return travel
+    fields = native_rows(travel.get('fields'))
+    if RESULT_FIELD in fields:
+        column = fields.index(RESULT_FIELD)
+        rows = native_rows(travel.get('rows'))
+        if any(len(native_rows(row)) > column and row[column] is not None for row in rows):
+            return dict(travel, fields=fields[:column] + fields[column + 1:],
+                        rows=[row[:column] + row[column + 1:] if len(native_rows(row)) > column else row
+                              for row in rows])
+        return travel
+    rows = {arg: _without_result(row) for arg, row in travel.items()}
+    if any(row is not travel[arg] for arg, row in rows.items()):
+        return rows
+    return travel
+
+
+def without_visit_results(body):
+    """Remove the optional evidence without changing a destination arg or want."""
+    if not isinstance(body, Mapping):
+        return body
+    updates = {}
+    original_skills = native_rows(body.get('skills'))
+    skills = []
+    for entry in original_skills:
+        travel = entry.get('after_travel') if isinstance(entry, Mapping) else None
+        stripped = _without_travel_results(travel)
+        skills.append(dict(entry, after_travel=stripped) if stripped is not travel else entry)
+    if any(new is not old for new, old in zip(skills, original_skills)):
+        updates['skills'] = skills
+    mind = body.get('mind')
+    wants = mind.get('tujuan') if isinstance(mind, Mapping) else None
+    if isinstance(wants, Mapping):
+        changed_wants = {}
+        for horizon, views in wants.items():
+            rows = native_rows(views)
+            stripped = [_without_result(view) for view in rows]
+            if any(new is not old for new, old in zip(stripped, rows)):
+                changed_wants[horizon] = stripped
+        if changed_wants:
+            updates['mind'] = dict(mind, tujuan={**wants, **changed_wants})
+    return dict(body, **updates) if updates else body
+
+
+def without_local_walks_eyes(body):
+    """Remove local-walk eyes fields first when over budget, before any existing fact."""
+    from arti_runtime.local_walks import without_eyes
+    return without_eyes(body)
+
+
+def cut_to_fit(body, accepts, *, optional=()):
     """ADR 241 C2: the one rule for a page over its budget, instead of refusing it (no provider call, no decision).
 
     Order: (1) world rows: world choices riding a menu (ADR 237 `menu_floor`), then the page's rows about the world
@@ -364,8 +502,15 @@ def cut_to_fit(body, accepts):
     from collections import Counter
     if accepts(body):
         return body, {}
+    stripped_eyes = without_local_walks_eyes(body)
+    if stripped_eyes is not body:
+        body = stripped_eyes
+        if accepts(body):
+            return body, {}
     counts = Counter()
-    body, world_calls = menu_floor(body)
+    without_results = without_visit_results(body)
+    original = body
+    body, world_calls = menu_floor(body) if without_results is body or not accepts(without_results) else (body, 0)
     counts['pilihan dunia'] += world_calls
 
     def noted(candidate):
@@ -390,6 +535,20 @@ def cut_to_fit(body, accepts):
             break
         body = dict(body, **{root: {k: v for k, v in body[root].items() if k != key}})
         counts['baris dunia' if world else 'fakta tertua'] += 1
+    # A visit result stays after lower-priority facts, but it must never cost a choice.
+    if without_results is not original:
+        body = deepcopy(body)
+        for path in (*reversed(optional), ('recent_actions',), ('world',)):
+            if fits():
+                break
+            parent = body
+            for key in path[:-1]:
+                parent = parent.get(key) if isinstance(parent, dict) else None
+            if isinstance(parent, dict) and path[-1] in parent:
+                parent.pop(path[-1])
+                counts['baris dunia'] += 1
+        if not fits():
+            return cut_to_fit(without_results, accepts)
     menu_parts = ('ui_action', 'read_boundary')
     raw = bool((body.get('facts') or {}).get('tangan'))  # ADR 243: the raw-hands block is on this page
     floor = menu_parts + (RAW_FLOOR if raw else ())
@@ -437,13 +596,47 @@ def full_read(offer):
             value = present(dict(full, **value), **offer.policy)
         for key,block in value.items():
             if key == 'skills':
-                for entry in block:
-                    target = next((r for r in native_rows(full.get('skills', ())) if r.get('name') == entry.get('name')), None)
-                    if target is not None:
-                        target.update(entry)
+                rows = native_rows(full.get('skills', ()))
+                for n, entry in enumerate(block):
+                    # One name can hold two entries (cek_pagi mail); each pairs with its own occurrence
+                    same = [r for r in rows if r.get('name') == entry.get('name')]
+                    k = sum(e.get('name') == entry.get('name') for e in block[:n])
+                    if k < len(same):
+                        same[k].update(entry)
             else:
                 full[key] = block
     return full
+
+
+def notes_page(body, offer, accepts):
+    """The newest of her unread notes on an ordinary decision page. A read that was offered is always
+    answered, however the world or her notes moved since."""
+    rows = offer.notes
+
+    def page(end):
+        return notes_rows(body, offer, end)
+
+    if not rows:
+        return page(0)
+    end, size = 0, 0
+    while end < len(rows) and (not end or size + len(encoded(rows[end])) <= NOTES_BYTES):
+        size += len(encoded(rows[end]))
+        end += 1
+    while end > 1 and not accepts(page(end)):
+        end -= 1
+    return page(end if accepts(page(end)) else 0)
+
+
+def notes_rows(body, offer, end):
+    """The page with her first `end` unread notes and the way to the next ones; with none it has no read at all."""
+    out = {k: v for k, v in body.items() if k not in (NOTES_FIELD, 'detail_read')}
+    out['skills'] = [e for e in body['skills'] if e.get('name') != 'read_boundary']
+    if not end:
+        return out
+    out[NOTES_FIELD] = dict(baris=offer.notes[:end], sampai=end, belum_dibaca=len(offer.notes) - end)
+    if end < len(offer.notes):
+        out['skills'].append(dict(name='read_boundary', args=['%s:%d' % (offer.handle, end)]))
+    return out
 
 
 def render_selected(request, fits=None, *, metrics=None):
@@ -493,11 +686,22 @@ def render_selected(request, fits=None, *, metrics=None):
     world_left = 0
     cut = {}
     if not accepts(body):
-        body, world_left = menu_floor(body)
+        stripped = without_local_walks_eyes(body)
+        if stripped is not body:
+            body = stripped
+    if not accepts(body):
+        without_results = without_visit_results(body)
+        if without_results is body or not accepts(without_results):
+            body, world_left = menu_floor(body)
     if not accepts(body):
         # ADR 241 C2 (was `place_time_mandatory_floor_exceeds_budget`, a refusal: no provider call, no decision).
         body, cut = cut_to_fit(body, accepts)
     selected = offer.get('boundary_page')
+    reading = offer.notes is not None and bool(selected) and str(selected[0]).startswith(READ)
+    if reading:
+        body = notes_page(body, offer, accepts)
+    if offer.notes is not None:
+        selected = None
     if selected and selected[0] == offer.handle:
         # Read chunks are lossless UTF-8 JSON slices of the complete frozen source.
         # Every field, including an arbitrarily long string, is reachable without truncation.
@@ -516,10 +720,18 @@ def render_selected(request, fits=None, *, metrics=None):
     else:
         if selected:
             body['halaman_baca'] = 'Dunia berubah; bacaan ini terikat snapshot sebelumnya.'
+        has_eyes = without_local_walks_eyes(body) is not body
         for r in offer.records:
+            if reading and r.path[0] in NOTES:
+                continue  # the notes themselves are on this page, or none of them fits it
             candidate = deepcopy(body); put(candidate,r.path,r.value)
             if accepts(candidate):
                 body = candidate
+            elif has_eyes and r.path != ('facts', 'lantai'):
+                trimmed = without_local_walks_eyes(candidate)
+                if trimmed is not candidate and accepts(trimmed):
+                    body = trimmed
+                    has_eyes = False
     if metrics is not None and world_left:
         metrics['menu_world_left_off'] = world_left
     if metrics is not None:
@@ -536,8 +748,18 @@ def render_selected(request, fits=None, *, metrics=None):
         metrics['selection_left_off'] = omitted
     result = messages(reads_closed(body,offer))
     if fits is not None and not fits(result):
+        stripped = without_local_walks_eyes(body)
+        if stripped is not body:
+            body = stripped
+            result = messages(reads_closed(body, offer))
+    while fits is not None and NOTES_FIELD in body and not fits(result):
+        # Her notes never cost a choice: they leave first, the oldest half each time, unread; a later page offers them.
+        body = notes_rows(body, offer, body[NOTES_FIELD]['sampai'] // 2)
+        result = messages(reads_closed(body, offer))
+    if fits is not None and not fits(result):
         # ADR 241 C2 (was `place_time_provider_budget_exceeded`): the same cut, to the provider's own bound.
-        body, more = cut_to_fit(body, lambda b: accepts(b) and fits(messages(reads_closed(b,offer))))
+        body, more = cut_to_fit(body, lambda b: accepts(b) and fits(messages(reads_closed(b,offer))),
+                                optional=tuple(r.path for r in offer.records))
         cut = {k: cut.get(k, 0) + more.get(k, 0) for k in set(cut) | set(more)}
         result = messages(reads_closed(body,offer))
     if shop and (not accepts(body) or fits is not None and not fits(result)):

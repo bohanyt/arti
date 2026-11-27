@@ -91,6 +91,24 @@ def _transcript_with_failing_writer(monkeypatch, tmp_path, failures=1):
     return config, sink
 
 
+def test_a_transcript_folder_outside_the_checkout_is_written(monkeypatch, tmp_path):
+    """A live run keeps its transcript in the run folder; init must not raise before the file is opened."""
+    root, run = tmp_path / "checkout", tmp_path / "run" / "transcripts"
+    root.mkdir()
+    monkeypatch.setattr(st, "_ROOT", root)
+    config = {"transcript_dir": str(run), "session_log_keep": 0}
+    st.init_session_artifacts(config)
+    try:
+        st.append_transcript({"ts": "20:00:00", "kind": "streamer", "text": "halo"}, config)
+    finally:
+        st.close_transcript_file()
+    written = list(run.glob("*.jsonl"))
+    assert len(written) == 1 and "halo" in written[0].read_text(encoding="utf-8")
+    manifest = json.loads((run / "session_manifest.json").read_text(encoding="utf-8"))
+    assert Path(manifest["transcript_path"]) == written[0]
+    assert not (root / "data").exists()
+
+
 def test_log_trigger_survives_writer_failure_and_transcript_resumes(monkeypatch, tmp_path, capsys):
     config, sink = _transcript_with_failing_writer(monkeypatch, tmp_path)
     try:

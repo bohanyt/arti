@@ -987,9 +987,13 @@ REALPATH_STOP_TIMEOUT_S = 45
 
 def trial_mod_flags(trial_config, trial_defaults):
     """ADR 243: farmhand mod flags the effective trial config needs. Raw hands need the mod's generic ACTION/USE
-    target for any faced tile (GenericWorldInputEnabled), not only beside a chest, a counter or an Action tile."""
-    raw = dict(trial_config, **trial_defaults).get("stardew_live7_raw_hands") is True
-    return {"GenericWorldInputEnabled": True} if raw else {}
+    target for any faced tile (GenericWorldInputEnabled), not only beside a chest, a counter or an Action tile.
+    The text delivery needs the mod's exact capture (GameTextDeliveryEnabled)."""
+    effective = dict(trial_config, **trial_defaults)
+    flags = {"GenericWorldInputEnabled": True} if effective.get("stardew_live7_raw_hands") is True else {}
+    if effective.get("stardew_game_text_delivery_enabled") is True:
+        flags["GameTextDeliveryEnabled"] = True
+    return flags
 
 
 def realpath_mind_dir(trial_config):
@@ -1599,12 +1603,11 @@ def _run_soak(a):
         join_config["CharacterCreationEnabled"] = True
         if bench:
             join_config["UiPadMenusEnabled"] = True
-        join_config.update(trial_mod_flags(read(a.trial_config), getattr(a, "rehearsal_trial_defaults",
-                                                                           REALPATH_TRIAL_DEFAULTS) if real_path else {}))
-        if read(a.trial_config).get("stardew_game_text_delivery_enabled") is True:
-            join_config["GameTextDeliveryEnabled"] = True
-        elif "GameTextDeliveryEnabled" in join_config:
+        flags = trial_mod_flags(read(a.trial_config), getattr(a, "rehearsal_trial_defaults",
+                                                              REALPATH_TRIAL_DEFAULTS) if real_path else {})
+        if "GameTextDeliveryEnabled" in join_config:
             join_config["GameTextDeliveryEnabled"] = False
+        join_config.update(flags)
         if getattr(a, "q12_drill", False):
             join_config["Q12BackendEdgesEnabled"] = True
         write(mod / "config.json", join_config)

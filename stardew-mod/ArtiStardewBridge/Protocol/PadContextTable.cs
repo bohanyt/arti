@@ -161,6 +161,8 @@ public static class PadContextTable
             case PadContext.Event:
                 if (button == PadAbstractButton.Select && f.PadButtonEnabled && f.FestivalLeave is "")
                     return PadMeaning.Ok(button, FamilyPadButton, FestivalLeaveDetail);
+                if (button == PadAbstractButton.Select && f.PadButtonEnabled && f.FestivalLeave is FestivalLeavePolicy.Seated)
+                    return PadMeaning.No(button, Denied + ":festival_leave:" + FestivalLeavePolicy.Seated);
                 if (button == PadAbstractButton.Select && f.EventSkip is { } skip)
                 {
                     // FIXB31 (EventSkipEnabled): Select = the vanilla gamepad Back skip, on a plain cutscene only.

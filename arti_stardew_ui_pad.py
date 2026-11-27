@@ -148,6 +148,7 @@ class UiPadView:
     # never in model_view; one cell's string reaches her page only when she reads that cell (calendar_board).
     calendar_days: tuple = field(default=(), repr=False)
     named_item_args: bool = field(default=False, repr=False)
+    unreadable: bool = field(default=False, repr=False)
 
     def decision_view(self) -> dict:
         """Semantic comparison: native-learned ambient values are visible but do not fence input."""
@@ -603,6 +604,7 @@ def baca_ui_pad(facts: object, *, age_s: float | None, authoritative: bool = Tru
     wait = block.get("wait_reason")
     if wait is not None and not _bounded(wait, 128):
         return None
+    unreadable = block.get("ui_unreadable") is True
     try:
         components: list[dict] = []
         bounds: list[tuple[int, int, int, int, int]] = []
@@ -780,6 +782,7 @@ def baca_ui_pad(facts: object, *, age_s: float | None, authoritative: bool = Tru
                      crafting=_crafting_page(block.get("crafting"), {c["id"] for c in components}), shop=shop,
                      journal=parse_journal(block.get("journal")),
                      calendar_days=parse_calendar(block.get("calendar_days")) if menu_type == "Billboard" else (),
+                     unreadable=unreadable,
                      menu_container=block.get("menu_container") if isinstance(block.get("menu_container"), dict)
                          and block["menu_container"].get("kind") in ("shipping_bin", "chest", "other") else None)
 

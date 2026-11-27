@@ -106,6 +106,9 @@ def player_identity(sleep, config):
             if not isinstance(player, Mapping):
                 continue
             row = {k: player.get(k) for k in ('name', 'role', 'self', 'in_bed', 'ready_time')}
+            if 'place' in player:
+                place = player.get('place')
+                row['place'] = place.strip()[:64] if isinstance(place, str) and place.strip() else None
             row['controller'] = (config.get('stardew_host_controller', 'unknown')
                                  if row['role'] == 'host farmer' else 'this agent' if row['self'] else 'unknown')
             result['players'].append(row)

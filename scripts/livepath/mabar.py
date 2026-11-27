@@ -11,7 +11,7 @@ Steps (CT runs them in order; each writes its own log in RUN, nothing is scored)
   join     after the intro: join the free cabin, ARTI creates her own farmer, she hears her own choice as a moment
   play     wait in-world, start the Live7 cycle and chain days until STOP (blocks)
   rejoin   re-arm and start a new cycle as the same farmhand (needs --name or self_facts)
-           With both games up, moves farmhand focus to the operator console or shell desktop if needed.
+           With both games up, verifies the live farmer. --owner-ready starts the owner-hosted first-launch handoff.
   supervise  background recovery: classify cycle/helper stops, bounded rejoin, host --relaunch at morning
   solo     one background bring-up from cold; READY_TO_GO_LIVE only after real play (see mabar_solo)
   chat     hand a late YouTube video id to the running bridge (run/youtube-video-id.txt; no restart)
@@ -221,11 +221,14 @@ def utc():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
 
 
-def log(run, event, **fields):
+def log(run, event, *, message=None, stream=None, **fields):
+    if message is not None:
+        fields["message"] = message
     row = dict(utc=utc(), event=event, **fields)
     with (Path(run) / "mabar.jsonl").open("a", encoding="utf-8") as f:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
-    print("[mabar] " + json.dumps(row, ensure_ascii=False), flush=True)
+    print(message if message is not None else "[mabar] " + json.dumps(row, ensure_ascii=False),
+          file=stream, flush=True)
 
 
 def sha(path):
@@ -482,6 +485,8 @@ def vault_status(run):
 
 
 def prepare(a):
+    if getattr(a, "relay", False) and getattr(a, "step", "prepare") != "solo" and not getattr(a, "helper", False):
+        raise RuntimeError("--relay is not allowed for a run a person hosts (solo relay only)")
     run = Path(a.run)
     backup_record = run / "backup.json"
     if not backup_record.is_file():
@@ -497,6 +502,9 @@ def prepare(a):
     continued = None
     if save_name:
         continued = continued_state(run, save_name)
+        if not getattr(a, "solo_worker", False):
+            from scripts.livepath.owner_join import prepared_cabins
+            continued.update(prepared_cabins(APPDATA / "Saves" / save_name))
         soak.write(run / "continued.json", continued)
         log(run, "continued", farm=continued["farm"], evening=continued["evening"],
             saved="%s %s Y%s" % (continued["season"], continued["day"], continued["year"]))
@@ -958,7 +966,21 @@ def _preflight_dll(a):
     return True, "installed hash matches booking"
 
 
-def preflight(a, *, skip_memory=False, launch=None):
+def _preflight_game_dir(a):
+    run = getattr(a, "run", None)
+    if run is not None:
+        trial = Path(run) / "trial-config.json"
+        if trial.is_file():
+            try:
+                configured = soak.read(trial).get("game_dir")
+                if isinstance(configured, str) and configured.strip():
+                    return Path(configured)
+            except (OSError, ValueError, TypeError, AttributeError):
+                pass
+    return GAME
+
+
+def preflight(a, *, skip_memory=False, launch=None, skip_disk_active=False):
     """Print one line per bring-up check; return 1 on BLOCKER so voice/rejoin never claim ready."""
     from scripts.livepath import bringup
     for line in live_profile_lines():
@@ -973,10 +995,15 @@ def preflight(a, *, skip_memory=False, launch=None):
         alert_fn=_preflight_alert_keys,
         dll_fn=lambda: _preflight_dll(a),
         skip_memory=skip_memory,
+        skip_disk_active=skip_disk_active,
         launch=launch or getattr(a, "launch", None),
         runtime_fn=lambda: bringup.runtime_missing(ROOT),
         vts_window1_fn=lambda: vts_reachable(8001),
         private_fn=lambda: [p for p in bringup.private_state_in(ROOT) if p not in LIVE_SELF_FILES],
+        gpu_fn=lambda: bringup.probe_gpu(_preflight_game_dir(a)),
+        disk_active_fn=bringup.probe_disk_active,
+        ears_fn=lambda: bringup.probe_ears(ROOT / "venv"),
+        save_date_fn=lambda: bringup.probe_save_date(getattr(a, "run", None)),
     )
 
 
@@ -1489,6 +1516,10 @@ def remember_look(run, choice, profile, *, lines=None, mismatches=()):
 def join(a):
     from scripts.livepath import halt_authority as HA
     run = Path(a.run)
+    if HA.prepared_owner_run(run):
+        log(run, "hands_held", reason="owner_join_requires_human_input",
+            message="Join the selected farm from her window using the rejoin handoff.")
+        return 2
     games = soak.ps("@(Get-Process StardewModdingAPI -ErrorAction SilentlyContinue).Count")
     decision = rearm_halt(run, a, "launch" if games.strip() == "1" else "observe")
     if decision.halt is not None:
@@ -1554,17 +1585,25 @@ LIVE_PLAY = dict(
     stardew_decision_effort="medium", stardew_decision_service_tier="priority",
     stream_game_notes=True, live7_fact_line_enabled=True, stardew_page_budget_scale=2,
     stardew_game_text_delivery_enabled=True, stardew_live7_place_time_page=True, stardew_live7_goal_ladder=True,
-    stardew_live7_ship_on_the_way=True, stardew_offer_cache_enabled=False, live7_own_play_enabled=True,
+    live7_mind_scope=True,
+    stardew_live7_plan_on_page=True,
+    stardew_live7_ship_on_the_way=True, stardew_live7_mail_on_the_way=True, stardew_live7_menu_visit_bound=True,
+    stardew_live7_success_stays=True,
+    stardew_live7_press_results=True,
+    stardew_offer_cache_enabled=False, live7_own_play_enabled=True,
     # The game lane writes her experience digest only with its own copy of this key (experience_digest.SETTING,
     # arti_stardew_live7). It was only in LIVE_BRIDGE, so the voice read a digest that was never written.
     voice_game_memory_enabled=True,
     # ADR 243 (2026-11-19): her raw hands (step, face, the action button, the held tool; a menu's own keys) on every page.
     stardew_live7_raw_hands=True,
+    # Open-floor local walks, one-tile step, and sampling-time quest delta filter.
+    stardew_live7_local_walks=True,
 )
 LIVE_BRIDGE = dict(
     owner_chat_as_owner=True,  # the channel's own account is the owner, not a viewer
-    stream_game_notes=True, live_voice_fixes_v1=True, live_play_rules_enabled=True, mic_priority_mark=True,
+    stream_game_notes=True, live_voice_fixes_v1=True, thanks_once_enabled=True, live_play_rules_enabled=True, mic_priority_mark=True,
     voice_game_memory_enabled=True,  # the owner's "[recorded remark omitted]"
+    live7_mind_scope=True,  # farm-scoped mind stores and active-cycle gated voice state
     # V13 (2026-11-18), ADR 200 "[recorded remark omitted]": her voice child carries no Codex harness
     # (`codex debug prompt-input` showed ~65k chars of tools, skills, MCP and multi-agent text).
     codex_voice_lean_harness=True,
@@ -1582,7 +1621,10 @@ LIVE_BRIDGE = dict(
 )
 # ADR 243: GenericWorldInputEnabled lets the mod publish its generic ACTION/USE target for any faced tile.
 LIVE_MOD_FLAGS = dict(CharacterCreationEnabled=True, UiPadMenusEnabled=True, GenericWorldInputEnabled=True,
-                      FestivalReflexEnabled=True, ReflexFishingEnabled=True)
+                      FestivalReflexEnabled=True, ReflexFishingEnabled=True,
+                      # The mod's half of the text delivery. Free play stages it from the trial setting; without it here
+                      # only the Python half would be on, and no game text would become hers on this path.
+                      GameTextDeliveryEnabled=LIVE_PLAY["stardew_game_text_delivery_enabled"])
 
 
 def live_profile_lines():
@@ -1613,17 +1655,31 @@ def play_trial_config(trial, run, cap=DECISION_CAP_USD):
     """ADR 164: API decisions, existing latched Codex fallback; one budget across days; the live profile."""
     if isinstance(cap, bool) or not isinstance(cap, (int, float)) or not math.isfinite(cap) or cap <= 0:
         raise ValueError("positive finite decision cap required")
-    return dict(trial, **LIVE_PLAY, stardew_openai_session_cap_usd=float(cap),
-                stardew_openai_session_state_file=str(Path(run) / "decision-api-session.json"))
+    config = dict(trial, **LIVE_PLAY, stardew_openai_session_cap_usd=float(cap),
+                  stardew_openai_session_state_file=str(Path(run) / "decision-api-session.json"))
+    if trial.get('stardew_live7_plan_on_page') is False:
+        config['stardew_live7_plan_on_page'] = False  # a matched control can opt out.
+    if trial.get('live7_mind_scope') is False:
+        config['live7_mind_scope'] = False  # a trial config may switch mind scoping off.
+    if trial.get('stardew_live7_local_walks') is False:
+        config['stardew_live7_local_walks'] = False  # a trial config may switch local walks off.
+    return config
 
 
 def play_once(a, cycle=None):
     """One Live7 cycle until STOP, host_left, or refusal. Does not wait for the HOST to return."""
+    from scripts.livepath import halt_authority as HA, owner_join
     run = Path(a.run)
+    bound = getattr(a, "recovery_expected", None) or {}
+    owner_play = bool(bound.get("owner_host")) or HA.prepared_owner_run(run)
+    origin = getattr(a, "owner_origin", None)
+    if owner_play and not bound.get("owner_host"):
+        origin = tuple(HA.cycle_dirs(run))
+        a.recovery_expected = verify_owner_play(a, run)
     background = getattr(a, "background_cycle", False)
     start_opts = {"deadline": a.recovery_deadline} if background else {}
     recovery = getattr(a, "recovery", False) or getattr(a, "recovery_expected", None)
-    if recovery:
+    if recovery and not owner_play:
         rearm_halt(run, a)
     trial = play_trial_config(soak.read(run / "trial-config.json"), run,
                               getattr(a, "decision_cap_usd", DECISION_CAP_USD))
@@ -1634,18 +1690,34 @@ def play_once(a, cycle=None):
     tool(run, "witness_run.py", ["wait-ready", "--who", "farmhand", "--max-hour", "23", "--timeout", "120",
                                  "--any-screen"], "wait-ready", **start_opts)
     _check_recovery_deadline(run, a)
-    released = release_farmhand_focus(run)  # ADR 250: a no-op report when every hand path is focus-independent
-    log(run, "focus_release", step="play", ok=bool(released), cause=getattr(released, "cause", None))
-    if not released:
-        raise RuntimeError("farmhand_window_active")
+    if not owner_play:
+        released = release_farmhand_focus(run)  # no-op when every hand path is focus-independent
+        log(run, "focus_release", step="play", ok=bool(released), cause=getattr(released, "cause", None))
+        if not released:
+            raise RuntimeError("farmhand_window_active")
     cycle = cycle or next_cycle(run)
-    if recovery:
+    if recovery and not owner_play:
         rearm_halt(run, a)
     enroll = ["start-cycle", "--cycle-dir", cycle, "--host-owner", "human"]
     if getattr(a, "recovery_expected", None):
         enroll += ["--expected-native", json.dumps(a.recovery_expected)]
     _check_recovery_deadline(run, a)
-    tool(run, "live_cycle.py", enroll, "start-cycle", **start_opts)
+    if owner_play:
+        try:
+            with owner_join.spawn_lock(inbox()):
+                if tuple(HA.cycle_dirs(run)) != origin or cycle != next_cycle(run):
+                    owner_join.refuse("owner_join_cycle_changed")
+                if owner_join.running_cycle(run) is not None:  # `play` beside a cycle that waits for her: use `rejoin`
+                    owner_join.refuse("owner_join_cycle_running")
+                owner_join.enrollment_session(run, inbox(), a.recovery_expected)
+                tool(run, "live_cycle.py", enroll, "start-cycle", **start_opts)
+        except HA.HandsHeld as exc:
+            report_hold(run, exc.decision, a)
+        except RuntimeError:
+            owner_join.stop_notice(run, inbox, log, episode="start-cycle")
+            raise
+    else:
+        tool(run, "live_cycle.py", enroll, "start-cycle", **start_opts)
     if trial.get("stardew_host_controller") != "harness":
         try:
             save_name = cycle_status(cycle).get("save_name")
@@ -1655,8 +1727,24 @@ def play_once(a, cycle=None):
     log(run, "cycle_started", cycle=str(cycle))
     if background:
         start_opts["background"] = True
-    tool(run, "live_cycle.py", ["start-day", "--cycle-dir", cycle], "start-day", **start_opts)
+    try:
+        tool(run, "live_cycle.py", ["start-day", "--cycle-dir", cycle], "start-day", **start_opts)
+    except RuntimeError:  # her cycle's process ended on a fault; in an owner-hosted run she may still stand in his world
+        owner_join.cycle_notice(run, inbox, log, cycle)
+        raise
     return cycle
+
+
+def verify_owner_play(a, run):
+    from scripts.livepath import halt_authority as HA, owner_join
+
+    folder = inbox()
+    try:
+        host = owner_join.host_binding(run)
+        return owner_join.verify_joined(run, folder, host, owner_join.selected(run, farmhand_name(a, run)),
+                                        held=getattr(a, "hands_held", None))
+    except HA.HandsHeld as exc:
+        report_hold(run, exc.decision, a)
 
 
 def cycle_status(cycle):
@@ -1807,9 +1895,9 @@ def stop_sentinels(run):
     return [p for p in found if p.is_file()]
 
 
-def rearm_halt(run, a=None, act="start", *, sleep_fn=None, clock_fn=None, allow_watchdog=False):
+def rearm_halt(run, a=None, act="start", *, sleep_fn=None, clock_fn=None, allow_watchdog=False, owner_word=None):
     """Apply the table at a recovery boundary and archive only its own ended-cycle markers."""
-    from scripts.livepath import halt_authority as HA
+    from scripts.livepath import halt_authority as HA, owner_join
     from arti_runtime import ipc
     from arti_stardew_stop import StopRefused
     from tools.arti_rearm import archive_retry_marker
@@ -1825,7 +1913,8 @@ def rearm_halt(run, a=None, act="start", *, sleep_fn=None, clock_fn=None, allow_
         _check_recovery_deadline(run, a)
         decision = HA.check(folder, run, act=act, recovery=True, held=getattr(a, "hands_held", None),
                             expected=getattr(a, "recovery_expected", None), proof_id=proof_id,
-                            allow_watchdog=allow_watchdog)
+                            allow_watchdog=allow_watchdog,
+                            **({"owner_launch": owner_join.require_mode(owner_word, run)} if owner_word else {}))
         _check_recovery_deadline(run, a)
         return decision
 
@@ -1933,9 +2022,15 @@ def report_hold(run, decision, a=None):
     from scripts.livepath import halt_authority as HA
     said = (decision.held or {}).get("episode_id") or decision.reason
     if a is None or getattr(a, "hands_said", None) != said:
+        from scripts.livepath import owner_join
+        owner_join.stop_notice(run, getattr(a, "command_dir", None) or inbox, log,  # owner-hosted and connected only
+                               episode=said if not HA.operator_stop(decision) else "stop")
+        # A refusal of the owner-hosted join is no lock; the re-arm tool has nothing to clear there.
+        owner_join_hold = decision.reason.startswith("owner_join_")
         log(run, "hands_held", alert=HA.claim_hold_alert(run, decision), reason=decision.reason,
-            halt=decision.halt, held=decision.held, clears="operator_rearm",
-            command=HA.operator_command(getattr(a, "command_dir", None) or inbox(), decision.paths))
+            halt=decision.halt, held=decision.held, clears="a_person" if owner_join_hold else "operator_rearm",
+            command=None if owner_join_hold else HA.operator_command(
+                getattr(a, "command_dir", None) or inbox(), decision.paths))
         if a is not None:
             a.hands_said = said
     if a is not None and decision.held is not None:
@@ -1943,7 +2038,7 @@ def report_hold(run, decision, a=None):
     raise HA.HandsHeld(decision)
 
 
-def recover_farmhand(run, slot, *, held=None, expected=None, stop_file=None, env=None, deadline=None):
+def recover_farmhand(run, slot, *, held=None, expected=None, stop_file=None, env=None, deadline=None, owner_word=None):
     """Run the recovery in the operator tools' run-scoped environment."""
     from scripts.livepath import halt_authority as HA
     from scripts.m1_operator.witness_run import RESTART_TIMEOUT_S
@@ -1955,10 +2050,15 @@ def recover_farmhand(run, slot, *, held=None, expected=None, stop_file=None, env
                 stop_file=str(stop_file) if stop_file is not None else None, deadline=deadline)
     child_env = env if env is not None else dict(env_for_tools(run), ARTI_M1_COMMAND_DIR=str(inbox()))
     try:
-        result = subprocess.run([sys.executable, "-B", "-m", "scripts.livepath.mabar", "_recover-farmhand", json.dumps(args)],
-                                cwd=ROOT, env=child_env, capture_output=True, text=True, encoding="utf-8", errors="replace",
-                                timeout=max(0, deadline - time.time()),
-                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        command = [sys.executable, "-B", "-m", "scripts.livepath.mabar", "_recover-farmhand"]
+        if owner_word is None:
+            transfer = dict(capture_output=True, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            command.append(json.dumps(args))
+        else:
+            # Stderr stays attached so the person sees the handoff as soon as the worker pins the window.
+            transfer = dict(input=json.dumps(dict(args, owner_word=owner_word)), stdout=subprocess.PIPE)
+        result = subprocess.run(command, cwd=ROOT, env=child_env, text=True, encoding="utf-8", errors="replace",
+                                timeout=max(0, deadline - time.time()), **transfer)
     except subprocess.TimeoutExpired as exc:
         raise HA.RecoveryTimedOut("farmhand recovery exceeded its restart budget") from exc
     try:
@@ -1974,13 +2074,14 @@ def recover_farmhand(run, slot, *, held=None, expected=None, stop_file=None, env
     return outcome["expected"]
 
 
+OWNER_TRIAL_WAIT_S = 45  # how long a word waits for the cycle that lost her game to end its trial
 HOST_ACCEPT_WAIT_S = 60  # a watchdog launch waits this long at most for a HOST that can accept her
 
 
 def _recover_farmhand(run, slot, *, held, expected, stop_file, deadline, origin_cycle=None,
-                      restart_module=None, save_identity_fn=None):
+                      restart_module=None, save_identity_fn=None, owner_word=None):
     """Own the close, launch and join until the same successor can safely play."""
-    from scripts.livepath import halt_authority as HA, mabar_supervise as sup
+    from scripts.livepath import halt_authority as HA, mabar_supervise as sup, owner_join
     from scripts.m1_operator.witness_run import RESTART_TIMEOUT_S
     deadline = min(deadline if deadline is not None else float("inf"), time.time() + RESTART_TIMEOUT_S)
     if restart_module is None:
@@ -1996,6 +2097,10 @@ def _recover_farmhand(run, slot, *, held, expected, stop_file, deadline, origin_
     restored = None
     prior = None
     launch_started_ms = None
+    launcher = None
+    her_window = False  # owner word: her window is known, so her own startup lock can be named with it
+    previous = {}
+    unread = {}
     cabin = False
     watchdog_attempted = False
     _, helper_cfg = HA.read_record(run / sup.HELPER_CONFIG)
@@ -2022,12 +2127,15 @@ def _recover_farmhand(run, slot, *, held, expected, stop_file, deadline, origin_
         nonlocal prior, restored
         ev = read()
         stop_check(ev)
-        proof = HA.watchdog_launch_proof(ev) if act == "launch" else None
-        decision = HA.decide(ev, act=act, held=state.hands_held, watchdog=proof)
+        proof = HA.watchdog_launch_proof(ev) if act == "launch" and owner_word is None else None
+        decision = HA.decide(ev, act=act, held=state.hands_held, watchdog=proof, owner_launch=(
+            owner_join.require_mode(owner_word, run) if owner_word is not None else False))
+        if decision.action == "hold" and owner_word is not None:
+            raise HA.HandsHeld(decision)
         if decision.action == "hold":
             report_hold(run, decision, state)
         if act == "launch":
-            if decision.sentinels:
+            if decision.sentinels and owner_word is None:
                 report_hold(run, HA.Decision("hold", "launch_waits_for_clear_end_markers", held=state.hands_held,
                                               paths=decision.paths), state)
             if prior is not None and HA.identity(prior.session) != HA.identity(decision.session):
@@ -2039,11 +2147,40 @@ def _recover_farmhand(run, slot, *, held, expected, stop_file, deadline, origin_
         return decision
 
     class GuardedAdapter(R.LiveAdapter):
+        def alive(self, pid):
+            if previous.get("pid") == pid:  # owner word: the recorded process, not whatever reuses its PID
+                return not owner_join.wf.process_gone(pid, previous.get("process_start"))
+            return super().alive(pid)
+
         def check_stop(self):
-            stop_check(read())
+            ev = read()
+            stop_check(ev)
+            if owner_word is not None:
+                launch = ev.launch[1] if isinstance(ev.launch[1], dict) else {}
+                if launch.get("owner_attempt") == owner_word["id"] and launch.get("pid"):
+                    owner_join.check_wait(ev, state.hands_held, restored=restored, window=her_window, unread=unread)
+                owner_join.require_attempt(owner_word, run, slot=slot, parent="worker")
+                if launcher is not None and launcher.poll() is not None:
+                    try:
+                        result = json.loads(launcher.stdout.read())
+                    except ValueError:
+                        owner_join.refuse("owner_join_launcher_failed")
+                    if "hold" in result:
+                        raise HA.HandsHeld(HA.Decision(**result["hold"]))
+                    owner_join.refuse("owner_join_launcher_failed")
 
         def run(self, tool, *args, timeout=300):
-            nonlocal launch_started_ms
+            nonlocal launch_started_ms, launcher
+            if owner_word is not None:
+                if tool != "prep_trial.py" or args != ("launch", "farmhand"):
+                    owner_join.refuse("owner_join_requires_human_input")
+                self.check_stop()
+                gate("launch")
+                from scripts.m1_operator.prep_trial import start_owner_launcher
+                guard = dict(run=str(run), inbox=str(folder), act="launch", deadline=deadline, origin_cycle=origin_cycle,
+                             expected=expected, held=state.hands_held)
+                launcher = start_owner_launcher(guard, owner_word)
+                return 0, "", ""
             act = None
             if tool == "ui_op.py" and args[0] == "close":
                 raise RuntimeError("farmhand recovery must use the in-game exit request")
@@ -2088,6 +2225,8 @@ def _recover_farmhand(run, slot, *, held, expected, stop_file, deadline, origin_
 
         def separate_window(self, hwnd):
             nonlocal startup
+            if owner_word is not None:
+                return
             launch = adapter.read_json(R.paths.FARMHAND_LAUNCH) or {}
             pid = (adapter.window(hwnd) or {}).get("pid")
             if (not pid or launch.get("pid") != pid or not launch.get("launch_id") or launch_started_ms is None
@@ -2198,6 +2337,40 @@ def _recover_farmhand(run, slot, *, held, expected, stop_file, deadline, origin_
             state.hands_held = None
             return decision.session
 
+    if owner_word is not None:
+        # Reuse the restart tool's process checks and window wait, with geometry and input disabled.
+        owner_join.require_attempt(owner_word, run, slot=slot, parent="worker")
+        gate("launch")
+        # The cycle that lost her game ends its own trial first; a word never runs beside one.
+        until = time.time() + OWNER_TRIAL_WAIT_S
+        while adapter.trial_running() is not False:
+            if time.time() >= until:
+                owner_join.refuse("owner_join_trial_running")
+            adapter.sleep(2)
+        owner_word = dict(owner_word, worker_pid=os.getpid(), worker_start=owner_join.wf.process_start(os.getpid()))
+        previous = owner_join.replaced(HA.read_launch_record(run / owner_join.FARMHAND_LAUNCH)[1]) or {}
+        try:
+            old_pid, _, host, _ = worker.identify()
+            worker.host_hwnd = host
+            worker.check_prefs("after_exit", repair=False)
+            previous = {}
+            pid, hwnd, _ = worker.launch(old_pid, attempt_id=owner_word["id"])
+            her_window = True
+            return owner_join.wait_for_person(run, folder, owner_word, adapter, pid, hwnd, held=state.hands_held,
+                                              save_reader=save_identity_fn, tell=log)
+        except HA.HandsHeld as exc:
+            owner_join.handoff_held(run, folder, owner_word, exc.decision, tell=log)
+            raise
+        except R.Exit as exc:
+            log(run, "owner_join_launch_failed", error=str(exc))
+            owner_join.refuse("owner_join_launch_failed")
+        finally:
+            if launcher is not None:
+                launcher.stdout.close()
+
+    if HA.session_kind(run) == "owner":
+        gate("launch")
+        owner_join.refuse("owner_join_waits_for_operator")
     previous_launch = adapter.read_json(R.paths.FARMHAND_LAUNCH) or {}
     old_pid = previous_launch.get("pid")
     if old_pid and adapter.alive(old_pid):
@@ -2285,6 +2458,18 @@ def _recovery_main(raw):
         return 1
 
 
+def farmhand_name(a, run):
+    name = getattr(a, "name", None)
+    if not name and (run / "self_facts.json").is_file():
+        name = soak.read(run / "self_facts.json").get("name")
+    if not name:
+        profile, _, _ = creation_facts(run / "buat-karakter.jsonl")
+        name = (profile or {}).get("name")
+    if not name:
+        raise RuntimeError("her farmhand name is unknown: pass --name")
+    return name
+
+
 def rejoin_farmhand(a, *, count_fn=None, sleep_fn=None, clock_fn=None, halt_fn=None, focus_host=None):
     """Re-arm a stale halt and join the SAME farmhand by name. Never starts HOST or writes the save.
 
@@ -2293,14 +2478,15 @@ def rejoin_farmhand(a, *, count_fn=None, sleep_fn=None, clock_fn=None, halt_fn=N
     """
     run = Path(a.run)
     _check_recovery_deadline(run, a)
-    name = a.name or (soak.read(run / "self_facts.json").get("name") if (run / "self_facts.json").is_file() else None)
-    profile, _, _ = creation_facts(run / "buat-karakter.jsonl")
-    name = name or (profile or {}).get("name")
-    if not name:
-        raise RuntimeError("her farmhand name is unknown: pass --name")
+    name = farmhand_name(a, run)
     games = _recovery_game_count(a, count_fn)
+    from scripts.livepath import halt_authority as HA
+    if HA.prepared_owner_run(run):
+        return rejoin_owner(a, run, name, games)
+    if getattr(a, "owner_ready", False):
+        a.owner_ready = False
+        report_hold(run, HA.Decision("hold", "owner_join_host_role_unknown"), a)
     if games == "1":
-        from scripts.livepath import halt_authority as HA
         decision = rearm_halt(run, a, "launch", allow_watchdog=True)
         if decision.sentinels:
             rearm_halt(run, a)
@@ -2331,6 +2517,53 @@ def rejoin_farmhand(a, *, count_fn=None, sleep_fn=None, clock_fn=None, halt_fn=N
     return name
 
 
+def rejoin_owner(a, run, name, games):
+    from scripts.livepath import halt_authority as HA, owner_join
+
+    folder = inbox()
+    a.owner_origin = tuple(HA.cycle_dirs(run))
+    flagged, issued = getattr(a, "owner_ready", False), getattr(a, "owner_issued", None)
+    a.owner_ready, a.owner_issued = False, None  # one word, one attempt: nothing later in this process may use it again
+    a.owner_cycle = None
+    try:
+        a.recovery_expected = None
+        if games == "1":
+            if not flagged:
+                rearm_halt(run, a, "launch", allow_watchdog=True)  # preserve the table's existing reason
+                owner_join.refuse("owner_join_waits_for_operator")
+            word = owner_join.new_attempt(run, name, issued=issued)
+            with owner_join.live_attempt(word["lease"]):
+                log(run, "owner_ready", attempt_id=word["id"], run_path=word["run"], mode=word["mode"],
+                    selected=word["selected"], host=word["host"])
+                owner_join.require_attempt(word, run)
+                rearm_halt(run, a, "launch", owner_word=word)
+                keep_smapi_logs(run, "before-relaunch")
+                a.recovery_expected = recover_farmhand(
+                    run, "name:" + name, held=getattr(a, "hands_held", None),
+                    expected=HA.read_evidence(folder, run).expected,
+                    deadline=getattr(a, "recovery_deadline", None), owner_word=word)
+                owner_join.require_attempt(word, run)
+        elif games == "2":
+            host = owner_join.host_binding(run)
+            binding = owner_join.selected(run, name)
+            a.recovery_expected = owner_join.verify_joined(run, folder, host, binding,
+                                                           held=getattr(a, "hands_held", None))
+        else:
+            owner_join.refuse("owner_join_games_unknown")
+        rearm_halt(run, a)  # apply main's audited end-marker handling to the connected farmhand
+        a.owner_cycle = owner_join.running_cycle(run)
+        if a.owner_cycle is not None:
+            owner_join.hand_over(run, a.owner_cycle, a.recovery_expected)
+    except HA.HandsHeld as exc:
+        report_hold(run, exc.decision, a)
+    except HA.RecoveryTimedOut:
+        report_hold(run, HA.Decision("hold", "owner_join_attempt_timed_out"), a)
+    a.hands_held = None
+    log(run, "rejoined", name=name, games_before=games,
+        running_cycle=a.owner_cycle.name if a.owner_cycle is not None else None)
+    return name
+
+
 def release_helper_pause(run):
     """A helper HOST holds the world paused at load (ADR 65 startup gate) so nothing moves the HOST farmer during
     her join; release it once she is in, exactly as soak does after launch-farmhand. No-op without a gated helper."""
@@ -2354,13 +2587,29 @@ def rejoin(a, *, count_fn=None):
     owner's farm as the SAME farmhand by name, then a fresh Live7 cycle. Her mind dir and the farm save are kept."""
     games = _recovery_game_count(a, count_fn)
     # Both games up: rejoin launches nothing and is never memory-gated (11-15: 90% blocked a no-launch rejoin).
-    if preflight(a, skip_memory=(games == "2"), launch="farmhand"):
+    # Any game up during rejoin skips disk-active sampling so preflight adds no load.
+    missing = object()
+    prev_skip_disk = getattr(a, "skip_disk_active", missing)
+    a.skip_disk_active = bool(getattr(a, "skip_disk_active", False) or games != "0")
+    try:
+        blocked_preflight = preflight(a, skip_memory=(games == "2"), launch="farmhand")
+    finally:
+        if prev_skip_disk is missing:
+            delattr(a, "skip_disk_active")
+        else:
+            a.skip_disk_active = prev_skip_disk
+    if blocked_preflight:
         return 1
     _check_recovery_deadline(a.run, a)
     a.recovery = True
     rejoin_farmhand(a)
     _check_recovery_deadline(a.run, a)
-    release_helper_pause(a.run)
+    if getattr(a, "owner_cycle", None) is not None:
+        log(a.run, "rejoined_running_cycle", cycle=a.owner_cycle.name,
+            message="Her running cycle (%s) goes on with her; no second cycle is started." % a.owner_cycle.name)
+        return 0
+    if not (getattr(a, "recovery_expected", None) or {}).get("owner_host"):
+        release_helper_pause(a.run)
     _check_recovery_deadline(a.run, a)
     return play(a, cycle=next_cycle(Path(a.run)))
 
@@ -2385,9 +2634,16 @@ def keep_smapi_logs(run, label):
     return dest if kept else None
 
 
+def leave(a):
+    from scripts.livepath.she_leaves import leave as run_leave
+    return run_leave(a)
+
+
 def stop(a):
     run = Path(a.run)
     keep_smapi_logs(run, "stop")  # ADR 241 C3: the session's last stretch of both logs stays with the run
+    from scripts.livepath import owner_join
+    owner_join.stop_notice(run, inbox, log)
     cycle = current_cycle(run)
     if cycle.exists():
         subprocess.run([sys.executable, "-B", str(ROOT / "scripts/m1_operator/live_cycle.py"), "stop",
@@ -2674,8 +2930,8 @@ def chat(a):
 
 
 STEPS = dict(backup=backup, prepare=prepare, preflight=preflight, voice=voice, host=host, join=join, play=play,
-             stop=stop, restore=restore, status=status, say=say, remember=remember, export=export, rejoin=rejoin,
-             supervise=supervise, solo=solo, chat=chat)
+             leave=leave, stop=stop, restore=restore, status=status, say=say, remember=remember, export=export,
+             rejoin=rejoin, supervise=supervise, solo=solo, chat=chat)
 STEPS.update({"link-runtime": link_runtime, "unlink-runtime": unlink_runtime, "memory-report": memory_report})
 
 
@@ -2703,6 +2959,8 @@ def main(argv=None):
     args = list(sys.argv[1:] if argv is None else argv)
     if len(args) == 2 and args[0] == "_recover-farmhand":
         return _recovery_main(args[1])
+    if args == ["_recover-farmhand"]:
+        return _recovery_main(sys.stdin.read())
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("step", choices=sorted(STEPS))
     p.add_argument("--run", type=Path, default=None, help="e.g. ARTI\\operator-staging\\run\\mabar-20261109")
@@ -2757,6 +3015,8 @@ def main(argv=None):
                    help="say, rehearsal runs only: the owner's double toggle (stops her turn) as a scripted line")
     p.add_argument("--to-live", action="store_true", help="export: write into stream-folder vault/diary (owner OK)")
     p.add_argument("--name", default=None, help="rejoin: her farmhand name (default: her verified readback name)")
+    p.add_argument("--owner-ready", action="store_true",
+                   help="rejoin: pass once when the owner says his selected farm is hosted and she may join")
     p.add_argument("--rehearsal-scratch", type=Path, default=None,
                    help="rehearsal only: scratch mind + vault + index here; scripted `say` lines enter as PTT; "
                         "refused with live chat")
@@ -2772,6 +3032,11 @@ def main(argv=None):
     p.add_argument("--from-backup", default=None,
                    help="restore: the pre-mabar backup folder (the night's FIRST mabar backup), default this run's own")
     a = p.parse_args(argv)
+    if a.owner_ready:
+        if a.step != "rejoin":
+            p.error("--owner-ready is for rejoin only")
+        from scripts.livepath.owner_join import time as owner_clock
+        a.owner_issued = owner_clock.monotonic()
     a.argv = list(sys.argv[1:] if argv is None else argv)
     if getattr(a, "rehearsal_scratch", None):
         apply_rehearsal_scratch(a)
@@ -2782,12 +3047,19 @@ def main(argv=None):
     a.run = a.run.resolve()
     a.run.mkdir(parents=True, exist_ok=True)
     if a.step in ("rejoin", "play"):
-        from scripts.livepath.halt_authority import HandsHeld, operator_stop
+        from scripts.livepath.halt_authority import HandsHeld, halt_hold, operator_stop, prepared_owner_run
+        flagged = a.owner_ready
+        if argv is None and a.step == "rejoin" and prepared_owner_run(a.run):
+            from scripts.livepath.owner_join import quiet_console
+            if (rc := quiet_console(["-B", str(Path(__file__).resolve()), *a.argv])) is not None:
+                return rc
         while True:
             try:
                 return STEPS[a.step](a) or 0
             except HandsHeld as exc:
-                if operator_stop(exc.decision):
+                # A word is one attempt, and a refused join needs a person. A lock is waited out as anywhere else.
+                if (operator_stop(exc.decision) or flagged or exc.decision.reason.startswith("owner_join_")
+                        or (prepared_owner_run(a.run) and not halt_hold(exc.decision))):
                     return 2
                 time.sleep(1)
     return STEPS[a.step](a) or 0

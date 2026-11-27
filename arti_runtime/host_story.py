@@ -135,8 +135,13 @@ class HostStoryRelay:
                 return None
         return presence["runtime_id"], presence["relay_window"]
 
+    def _owner_hosted(self):
+        """Never offer the solo relay in a run a person hosts, before join or after leave."""
+        from arti_runtime.human_host import is_owner_hosted_run
+        return is_owner_hosted_run(self.path.parent)
+
     def _read_window(self):
-        return None if self._closed or self._stopped() else self._open_window(self._read_presence())
+        return None if self._closed or self._owner_hosted() or self._stopped() else self._open_window(self._read_presence())
 
     def _fresh(self, stamp, now_ms):
         return (type(stamp) is int and stamp >= self._started_ms
@@ -178,7 +183,7 @@ class HostStoryRelay:
                 data = stream.read(READ_MAX)
         except OSError:
             data = b""
-        stopped = self._closed or self._stopped()
+        stopped = self._closed or self._owner_hosted() or self._stopped()
         presence = None if stopped else self._read_presence()
         window = self._open_window(presence)
         now_ms = self._clock() * 1000
@@ -376,6 +381,9 @@ class HostStoryRelay:
         witness and past tense stay attached; these are never her current pose.
         """
         with self._lock:
+            if self._closed or self._owner_hosted() or self._stopped():
+                self._discard()
+                return ""
             self._poll()
             lines = [line for line in self.context_lines
                      if not self.save_hint or line.get("save_id") == self.save_hint]

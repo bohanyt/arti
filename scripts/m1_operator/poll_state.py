@@ -11,16 +11,20 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import m1_paths as paths  # noqa: E402
 
 
-def sample(seconds=2.5, diagnostics=None):
+def sample(seconds=2.5, diagnostics=None, *, peer_pid=None):
     if diagnostics is not None:
         diagnostics.update(connection_accepted=False, accept_timeout=False, peer_closed=False,
                            events=0, state_events=0)
     srv = socket.socket(); srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     srv.bind(("127.0.0.1", paths.PORT)); srv.listen(1); srv.settimeout(seconds)
-    try: conn, _ = srv.accept()
+    try: conn, peer = srv.accept()
     except socket.timeout:
         if diagnostics is not None: diagnostics["accept_timeout"] = True
         srv.close(); return None
+    if peer_pid is not None:
+        from scripts.m1_operator.win_facts import loopback_peer
+        if not loopback_peer(peer_pid, srv.getsockname()[1], peer[1]):
+            conn.close(); srv.close(); return None
     if diagnostics is not None: diagnostics["connection_accepted"] = True
     conn.settimeout(1.0); buf = b""; t0 = time.time(); st = None
     while time.time() - t0 < seconds:

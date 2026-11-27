@@ -25,6 +25,7 @@ def note(runtime, call, *, date, clock, place, text):
     with M._JOURNEY_LOCK:
         M.record_discoveries(base, "stardew", scope=scope, discoveries=[dict(
             id=record_id, kind="text_read", subject=call.arg, text=text, source=source,
-            date=game_date, event_place=place)], day=day, day_label=game_date)
+            date=game_date, event_place=place)], day=day, day_label=game_date,
+            scoped=(getattr(runtime, "_config", None) or {}).get("live7_mind_scope", False) is True)
         SeenReceipts(base, scope).note("map_action_read", call.arg, game_day=day, clock=clock,
                                       place=place, source=source, text_ref=text_ref)

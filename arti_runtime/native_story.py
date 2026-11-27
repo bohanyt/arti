@@ -4,6 +4,7 @@ import re
 
 import arti_mind as M
 import arti_state
+from arti_runtime import jsonl_snapshot
 from arti_runtime.plan_dates import RELATIVE_DATES, ordinal, event_references, fact, label
 from arti_stardew_screen_text import game_text
 
@@ -37,7 +38,7 @@ def record_scope(record):
     return f"{ring['save_id']}:{record.player_id}"
 
 
-def remember(base, record):
+def remember(base, record, *, mind_scoped=False):
     """Accepted actor-bound ui.context only; consume native occurrence identities once, across restarts."""
     scope = record_scope(record)
     if scope is None:
@@ -93,19 +94,19 @@ def remember(base, record):
             changed.append(dict(ev="native_story_memory", scope=scope, day=day, date=f["date"],
                                 event_id=detail["event_id"], location=detail["location"], phase=f.get("phase")))
         if changed:
-            keep_witnessed(base, scope, kept, day=current_day)  # ADR 228: the one record keeps what she saw
-            retire(base, scope, current_day)
+            keep_witnessed(base, scope, kept, day=current_day, mind_scoped=mind_scoped)  # the one record keeps what she saw
+            retire(base, scope, current_day, mind_scoped=mind_scoped)
     return changed
 
 
-def retire(base, scope, day, *, keep_into=None):
+def retire(base, scope, day, *, keep_into=None, mind_scoped=False):
     """Retire only this actor's story rows; preserve every other ledger kind/scope.
 
     ADR 228 part C: before a row leaves, its witnessed lines are kept as receipts in the
     one record (``keep_into``: her actor scope; a HOST scope is never kept under itself).
     """
     path = M.game_dir(base, "stardew") / M.LEDGER_FILE
-    rows = arti_state.read_jsonl(path) if path.exists() else []
+    rows = jsonl_snapshot.rows(path)  # read only here; a changed ledger is written whole below
     scoped = lambda r: r.get("kind") == "native_story" and r.get("scope_hash") == M._scope_hash(scope)
     # The native wake/date edge can precede Campaign's next-day handoff. A future
     # row is hidden until that handoff, never deleted as though it were stale.
@@ -117,7 +118,7 @@ def retire(base, scope, day, *, keep_into=None):
         host = str(scope).endswith(":host")
         target = keep_into if host else (keep_into or scope)
         leaving = [dict(r, item_id=r.get("item_id") or r.get("id")) for r in rows if scoped(r) and r.get("id") not in keep]
-        if target and keep_witnessed(base, target, leaving, host=host, day=day):
+        if target and keep_witnessed(base, target, leaving, host=host, day=day, mind_scoped=mind_scoped):
             # Keeping acknowledges through this same ledger file: drop the leaving rows from a fresh read.
             gone = {r.get("id") for r in leaving}
             result = [r for r in arti_state.read_jsonl(path) if r.get("id") not in gone]
@@ -128,7 +129,7 @@ KEPT_SOURCES = ("own_screen", "host_screen")  # ADR 228: receipts kept from stor
 _KEPT = {}
 
 
-def keep_witnessed(base, scope, rows, *, host=False, day=None):
+def keep_witnessed(base, scope, rows, *, host=False, day=None, mind_scoped=False):
     """ADR 228 part C: what she saw of a story episode (speaker, words) becomes receipts in the one record.
 
     Spoken lines become ``dialogue_read``, narrator lines ``event_watched``, each with a text owner holding
@@ -171,7 +172,8 @@ def keep_witnessed(base, scope, rows, *, host=False, day=None):
     with M._JOURNEY_LOCK:
         for seen_day in sorted({p[2] for p in pending}):
             M.record_discoveries(base, "stardew", scope=scope, day=seen_day, day_label=label("stardew", seen_day),
-                                 discoveries=[o for o, p in zip(owners, pending) if p[2] == seen_day])
+                                 discoveries=[o for o, p in zip(owners, pending) if p[2] == seen_day],
+                                 scoped=mind_scoped)
         fresh, old = 0, []
         for memo, count, seen_day, place, kind, identity, event_id, _, _ in pending:
             text_ref = hashlib.sha256((scope + "\0" + event_id).encode()).hexdigest()
@@ -253,22 +255,22 @@ def dated_story(base, scope, rows, calendar):
     return rows
 
 
-def recent(base, scope, day, limit=CONTEXT_MAX, *, calendar=()):
+def recent(base, scope, day, limit=CONTEXT_MAX, *, calendar=(), mind_scoped=False):
     if base is None or not scope or day is None:
         return []
     try:
         from arti_runtime.host_story import host_scope
         host = host_scope(scope)
         with M._JOURNEY_LOCK, _LOCK:  # journey before ledger, the order game_text_delivery uses
-            retire(base, scope, day)
+            retire(base, scope, day, mind_scoped=mind_scoped)
             calendar = calendar_memory(base, scope, day, calendar)
             rows = dated_story(base, scope, M.ledger_rows(base, "stardew", scope=scope, kind="native_story"), calendar)
-            keep_witnessed(base, scope, rows, day=day)  # rows written before ADR 228 too
+            keep_witnessed(base, scope, rows, day=day, mind_scoped=mind_scoped)  # old-style rows too
             if host and host != scope:
                 # Mabar: episodes the HOST watched for this same save, before or while she was elsewhere.
                 keep_witnessed(base, scope, M.ledger_rows(base, "stardew", scope=host, kind="native_story"),
-                               host=True, day=day)
-                retire(base, host, day, keep_into=scope)
+                               host=True, day=day, mind_scoped=mind_scoped)
+                retire(base, host, day, keep_into=scope, mind_scoped=mind_scoped)
                 hosted = M.ledger_rows(base, "stardew", scope=host, kind="native_story")
                 rows = sorted(rows + hosted, key=lambda r: day_of((r.get("facts") or {}).get("date")) or 0)
         rows = [r for r in rows if (seen := day_of((r.get("facts") or {}).get("date"))) is not None
@@ -345,13 +347,13 @@ def context_lines(lines):
     return narrated + spoken
 
 
-def reflection_facts(base, scope, day, *, calendar=()):
+def reflection_facts(base, scope, day, *, calendar=(), mind_scoped=False):
     """Individual dated refs fit reflection's 140-character fact budget, including the native changes."""
     if base is None or not scope or day is None:
         return []
     try:
         with M._JOURNEY_LOCK, _LOCK:
-            retire(base, scope, day)
+            retire(base, scope, day, mind_scoped=mind_scoped)
             calendar = calendar_memory(base, scope, day, calendar)
             rows = [r for r in dated_story(base, scope, M.ledger_rows(base, "stardew", scope=scope, kind="native_story"), calendar)
                     if (seen := day_of((r.get("facts") or {}).get("date"))) is not None

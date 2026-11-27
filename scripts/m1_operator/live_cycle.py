@@ -205,6 +205,7 @@ DAY_START_PASS_RESULTS = ("LIVE7_DAY_START_CLEARED", "LIVE7_DAY_START_IDLE")
 SAVE_IDENTITY_SAMPLES = 4
 SAVE_IDENTITY_RETRY_S = 1.0
 SAVE_IDENTITY_WAIT_S = 15.0
+OWNER_REJOIN_RETRY_S = 15  # between two checks of a join that was handed over and did not verify
 
 
 def day_terminal(report):
@@ -410,11 +411,11 @@ class Backend:
         value = self.live.session()
         return value if isinstance(value, dict) else {}
 
-    def save_identity(self, session):
+    def save_identity(self, session, *, peer_pid=None):
         if self.live.trial_running():
             raise Refused("native_save_identity_port_in_use")
         diagnostics = {}
-        self.witness.PS.sample(diagnostics=diagnostics)
+        self.witness.PS.sample(diagnostics=diagnostics, **({"peer_pid": peer_pid} if peer_pid is not None else {}))
         current = self.session()
         if any(current.get(k) != session.get(k) for k in
                ("session_id", "runtime_instance_id", "player_id", "screen_id", "world_ready")):
@@ -857,6 +858,10 @@ class Cycle:
             from scripts.livepath.halt_authority import claim_hold_alert
             runtime = Path(self.backend.paths.RUN)
             run = runtime.parent if runtime.name == "runtime" else None
+            if run is not None and (decision.halt or decision.reason.startswith("native_stop_")):
+                from scripts.livepath import mabar, owner_join
+                owner_join.stop_notice(run, getattr(self.backend.paths, "COMMAND_DIR", mabar.inbox),
+                                       mabar.log, episode=marker)
             note("hands_held", reason=decision.reason, held=decision.held,
                  alert=claim_hold_alert(run, decision, fallback=True))
         return True
@@ -875,6 +880,62 @@ class Cycle:
                 raise Stopped(decision.reason)
             self.check()
             self.backend.sleep(1)
+
+    def owner_run(self):
+        """This cycle's run, when the owner hosts it on a prepared farm; None in every other run."""
+        from scripts.livepath.halt_authority import prepared_owner_run
+        runtime = Path(getattr(getattr(self.backend, "paths", None), "RUN", "."))
+        return runtime.parent if runtime.name == "runtime" and prepared_owner_run(runtime.parent) else None
+
+    def wait_for_person(self, run):
+        """In an owner-hosted run nothing here closes, starts or joins her game. A person brings her back (the
+        owner's next word, or a start by hand), `rejoin` verifies that join and hands it to this cycle, and it is verified
+        again here before her hands start. One small file is read a second; STOP ends the wait."""
+        from scripts.livepath import halt_authority as HA, owner_join
+        folder = self.backend.paths.COMMAND_DIR
+        self._crash_wait = True
+        host = None
+        try:
+            while True:
+                self.check()
+                decision = self.hands("observe")
+                if decision is not None and HA.operator_stop(decision):
+                    self.hands_held(decision, "rejoin")
+                    self.check()
+                    raise Stopped(decision.reason)
+                # A lock or a native stop is said as what it is, with its binding; it never hides behind the plain wait.
+                locked = decision is not None and decision.action == "hold" and HA.halt_hold(decision)
+                if locked:
+                    self.hands_held(decision, "rejoin")
+                proof = pause = None
+                try:
+                    host = host or owner_join.host_binding(run)
+                    proof = owner_join.handed_over(run, folder, self.folder, self.state,
+                                                   getattr(self, "_hands_held", None), host=host)
+                    if proof is None:
+                        owner_join.refuse("owner_join_waits_for_operator")
+                except HA.HandsHeld as exc:
+                    if HA.operator_stop(exc.decision):
+                        raise Stopped(exc.decision.reason) from None
+                    if not (locked and exc.decision.reason == "owner_join_waits_for_operator"):
+                        self.hands_held(exc.decision, "rejoin")
+                    # A handed join that does not verify reads slow facts; only a fresh look later can change them.
+                    pause = 1 if exc.decision.reason == "owner_join_waits_for_operator" else OWNER_REJOIN_RETRY_S
+                if proof is not None:
+                    session = self.backend.session()
+                    if HA.identity(session) == tuple(proof[k] for k in HA.IDENTITY_FIELDS):
+                        self.hands_held(None, "rejoin")
+                        self.state["stop_scope"] = stops.scope(session)
+                        self._manual_crash_rejoined = True
+                        self.save()
+                        return
+                    pause = 1
+                until = self.clock() + pause
+                while self.clock() < until:
+                    self.backend.sleep(1)
+                    self.check()
+        finally:
+            self._crash_wait = False
 
     def reconcile_stops(self, session, boundary):
         """Wait at this boundary while held and return the sample that cleared it."""
@@ -1133,19 +1194,41 @@ class Cycle:
         if actual.get("dirty") or not actual.get("dll"):
             raise Refused("clean source and installed DLL required")
         self._enroll_expected = expected_native
-        session = self.reconcile_stops(self.backend.session(), "start-cycle")
+        from scripts.livepath import halt_authority as HA
+
+        runtime = Path(self.backend.paths.RUN)
+        run = runtime.parent if runtime.name == "runtime" else None
+        owner_host = (expected_native or {}).get("owner_host")
+        if run is not None and HA.prepared_owner_run(run) and not owner_host:
+            raise Refused("owner_join_unverified")
+        if owner_host:
+            from scripts.livepath import owner_join as owner_gate
+
+            def verify_owner():
+                try:
+                    return owner_gate.enrollment_session(run, self.backend.paths.COMMAND_DIR, expected_native)
+                except HA.HandsHeld as exc:
+                    self.hands_held(exc.decision, "start-cycle")
+                    raise Refused(exc.decision.reason) from exc
+
+            session = verify_owner()
+        else:
+            session = self.reconcile_stops(self.backend.session(), "start-cycle")
         name = session.get("player_name")
         if (not isinstance(name, str) or not 1 <= len(name) <= 12 or not session.get("player_id")
                 or session.get("is_main_player") is not False or not session.get("world_ready")):
             raise Refused("an existing named farmhand must be world-ready; owner is HOST")
         p = self.backend.paths
-        save_identity = self.backend.save_identity(session)
+        peer = {"peer_pid": expected_native["owner_farmhand"]["pid"]} if owner_host else {}
+        save_identity = self.backend.save_identity(session, **peer)
         if (expected_native and expected_native.get("save_id") is not None
                 and str(save_identity["save_id"]) != str(expected_native["save_id"])):
             raise Refused("native_save_identity_changed")
         save_state = dict(save_id=save_identity["save_id"], save_identity=save_identity,
                           saves_root=str(p.SAVES), save_name=None, save_folder=None)
         save_state.update(self.backend.resolve_save(save_state) or {})
+        if owner_host:
+            verify_owner()
         self.folder.mkdir(parents=True, exist_ok=True)
         write_json(self.folder / "identity.json", actual)
         self.state = dict(schema="live7_cycle.v1", status="ready", cycle=self.folder.name,
@@ -1258,6 +1341,9 @@ class Cycle:
         kinds = self.state.get("hints", {}).get("catch_kinds")
         if kinds:
             resume = dict(resume or {}, catch_kinds=kinds)  # FIX73D: landed catches by kind, across days
+        presses = self.state.get("hints", {}).get("press_results")
+        if presses:
+            resume = dict(resume or {}, press_results=presses)  # repeated press answers, across days of this run
         chests = self.state.get("hints", {}).get("chest_memory")
         if chests:
             resume = dict(resume or {}, chest_memory=chests)  # FIX72D: what her chests held, past the day and a restart
@@ -1450,6 +1536,8 @@ class Cycle:
                 hints["catch_totals"] = row["totals"]
                 if isinstance(row.get("kinds"), dict):
                     hints["catch_kinds"] = row["kinds"]  # FIX73D
+            if row.get("ev") == "live7_press_results" and isinstance(row.get("spots"), dict):
+                hints["press_results"] = row["spots"]
             if row.get("ev") == "live7_chest_memory" and isinstance(row.get("memory"), dict):
                 hints["chest_memory"] = row["memory"]
             if row.get("ev") == "live7_forage_memory" and isinstance(row.get("memory"), dict):
@@ -1534,19 +1622,28 @@ class Cycle:
         from scripts.livepath import halt_authority as HA
         self._manual_crash_rejoined = False
         crashed = not self.backend.farmhand_alive()
+        owner_run = self.owner_run()
         if crashed:
             self.event("crash", day_trial=attempt["id"])
             try:
                 self.backend.preserve_process_evidence(attempt)
             except OSError:
                 pass  # the table will hold if it cannot correlate the watchdog's two witnesses
-            self._crash_wait = True
-            try:
-                self.wait_for_hands("launch", "rejoin")
-            finally:
-                self._crash_wait = False
-        self.wait_for_hands("observe", "rejoin")
-        self.stop_child(child, attempt)
+            if owner_run is None:
+                self._crash_wait = True
+                try:
+                    self.wait_for_hands("launch", "rejoin")
+                finally:
+                    self._crash_wait = False
+            else:  # her launcher says it too; this cycle is the witness when that process died with her game
+                from scripts.livepath import owner_join
+                try:
+                    owner_join.record_ended(owner_run, self.backend.paths.COMMAND_DIR)
+                except OSError:
+                    pass  # an end nobody recorded only makes a hand-started game need more proof
+        if not crashed or owner_run is None:
+            self.wait_for_hands("observe", "rejoin")
+        self.stop_child(child, attempt)  # an owner-hosted crash ends its trial now: a word never runs beside one
         self.scan(attempt)
         self.backend.preserve_process_evidence(attempt)
         attempt["status"] = "interrupted"
@@ -1571,7 +1668,10 @@ class Cycle:
         while self.day.get("rejoin_used", 0) < self.state["rejoin_attempts"]:
             self.check()
             if not self._manual_crash_rejoined:
-                self.wait_for_hands("close" if self.backend.farmhand_alive() else "launch", "rejoin")
+                if owner_run is not None:
+                    self.wait_for_person(owner_run)
+                else:
+                    self.wait_for_hands("close" if self.backend.farmhand_alive() else "launch", "rejoin")
             retry = self.day.get("rejoin_used", 0) + 1
             self.day["rejoin_used"] = retry
             self.save()  # reserve before launch; successful joins alone do not reset the retry bound
@@ -1618,24 +1718,41 @@ class Cycle:
             self.backend.sleep(2)
         raise Refused("rejoin_retries_exhausted")
 
+    def owner_hosted(self):
+        """True iff this cycle is human-hosted AND its run has `session_kind == 'owner'` (no helper)."""
+        if not self.human_host():
+            return False
+        from arti_runtime.human_host import is_owner_hosted_run, run_dir_from_paths
+        return is_owner_hosted_run(run_dir_from_paths(getattr(self.backend, "paths", None)))
+
     def day_was_saved(self):
-        """Whether this leg already passed a night save (on disk or native next morning)."""
-        if self.day.get("status") == "night_saved" or self.day.get("checkpoint"):
+        """True only for a verified save of this day (night_saved/ended/checkpoint or on-disk save_date)."""
+        if not self.state.get("days"):
+            return False
+        if self.day.get("status") in ("night_saved", "ended") or self.day.get("checkpoint"):
             return True
         native = None
         try:
             native = self.backend.save_date(self.state)
         except Exception:
             native = None
-        session = self.backend.session()
-        if isinstance(session, dict) and isinstance(session.get("date"), dict):
-            native = session["date"]
         if isinstance(native, dict):
             try:
                 return date_key(native) == tomorrow(self.day["date"])
             except (KeyError, TypeError, ValueError):
                 return False
         return False
+
+    def last_verified_save_date(self):
+        """Date of the last verified saved day in this cycle, or None before the first verified save."""
+        if not self.state.get("days"):
+            return None
+        if self.day_was_saved():
+            return self.day.get("date")
+        for item in reversed(self.state["days"][:-1]):
+            if isinstance(item, dict) and (item.get("status") in ("night_saved", "ended") or item.get("checkpoint")):
+                return item.get("date")
+        return None
 
     def host_away(self, attempt):
         """Human-owned HOST: process gone or unbound actor. Does not read the HOST SMAPI log.
@@ -1650,15 +1767,49 @@ class Cycle:
             return dict(observed="connection_closed", basis="unbound_actor")
         return None
 
+    def _clear_mind_live_state(self, reason="cycle_end"):
+        """Clear now.json at cycle end when live7_mind_scope is on (the digest, what she lived, stays)."""
+        try:
+            from arti_runtime import mind_scope
+            cfg = {}
+            paths = getattr(self.backend, "paths", None)
+            candidates = []
+            if paths is not None and getattr(paths, "TRIAL_CONFIG", None) is not None:
+                candidates.append(Path(paths.TRIAL_CONFIG))
+            candidates.append(self.folder.parent.parent / "trial-config.json")
+            candidates.append(self.folder.parent.parent.parent / "trial-config.json")
+            for cand in candidates:
+                loaded = read_json(cand, None)
+                if isinstance(loaded, dict):
+                    cfg = loaded
+                    break
+            if not mind_scope.enabled(cfg):
+                return
+            import arti_mind
+            raw_scope = mind_scope.make_scope(
+                self.state.get("save_id") or (self.state.get("save_identity") or {}).get("save_id"),
+                self.state.get("player_id") or (self.state.get("stop_scope") or {}).get("player_id"),
+            )
+            mind_scope.clear_cycle_live_state(arti_mind.mind_dir(cfg), scope=raw_scope, reason=reason)
+        except Exception:  # noqa: BLE001 - clearing live state never breaks cycle shutdown
+            pass
+
     def end_host_left(self, exc):
         """End this cycle leg with host_left. Not a SAFETY_STOP. Does not touch the HOST save."""
+        for attempt_id in list((self.__dict__.get("_human_night_waits") or {}).keys()):
+            self._end_human_night_wait(dict(id=attempt_id), reason="host_left")
         info = dict(exc.info or {})
+        if "last_saved_date" not in info:
+            last_saved = self.last_verified_save_date()
+            if last_saved is not None:
+                info["last_saved_date"] = last_saved
         payload = dict(observed=exc.observed, day_saved=exc.day_saved, **info)
         self.state["status"] = "host_left"
         self.state["host_left"] = payload
         self.request_stop(source="host_left")
         self.event("host_left", **payload)
         self.save()
+        self._clear_mind_live_state(reason="host_left")
         return self.state
 
     def session_dropped(self, attempt):
@@ -1730,6 +1881,7 @@ class Cycle:
                     raise HostLeft(day_saved=self.day_was_saved(), **away)
                 dropped = self.session_dropped(attempt)
                 if dropped:
+                    # His process is alive: her lost connection is not his leaving. A person clicks her back in.
                     child, attempt = self.rejoin(child, attempt, host_lost=False)
                     if child is None:
                         return
@@ -1844,11 +1996,27 @@ class Cycle:
                     raise HostLeft("process_gone", day_saved=self.day_was_saved(),
                                    phase="lost_night")
                 raise Refused("host_lost_during_lost_day")
+            if self.owner_hosted():
+                away = self.host_away(attempt)
+                if away:
+                    raise HostLeft(day_saved=self.day_was_saved(), phase="lost_night", **away)
+                if self.backend.farmhand_alive() and self.session_dropped(attempt):
+                    sess = self.backend.session()
+                    obs = ("title" if isinstance(sess, dict) and sess.get("world_ready") is False
+                           and unbound_actor(sess) else "disconnect")
+                    raise HostLeft(observed=obs, day_saved=self.day_was_saved(),
+                                   phase="lost_night", basis="session_dropped")
             if not self.backend.farmhand_alive():
                 raise Refused("farmhand_exited_during_lost_day")
             self.night_wait_reason = self.night_clock = None
             if self.night_readback(attempt):
                 return
+            human_allowed = self.__dict__.pop("_human_night_wait_allowed", 0.0)
+            if human_allowed > 0:
+                started += human_allowed
+                progress_at += human_allowed
+                if night_since is not None:
+                    night_since += human_allowed
             reason = self.night_wait_reason or "night_not_saved"
             now = self.game_clock.now()
             tod = self.night_clock
@@ -2060,9 +2228,13 @@ class Cycle:
                 or control.get("freeze_controls") is True or control.get("dialogue_up") is True):
             since = attempt.setdefault("native_wake_since", self.clock())
             self.night_wait_reason = "native_wake_pending"
+            human_wait = self._step_human_night_wait(attempt, pose) if self.owner_hosted() else (False, 0.0)
+            if human_wait[1] > 0:
+                attempt["native_wake_since"] = since + human_wait[1]
+                since = attempt["native_wake_since"]
             if self.clock() - since >= NIGHT_SAVE_WAIT_S:
                 raise Refused("native_wake_timeout")
-            self.night_progress_check(attempt, pose)
+            self.night_progress_check(attempt, pose, _human_wait=human_wait)
             return False
         if isinstance(control, dict) and all(type(control.get(k)) is bool for k in ("paused", "host_paused")):
             self.game_clock.note(dict(ev="game_paused" if control["paused"] or control["host_paused"]
@@ -2088,10 +2260,20 @@ class Cycle:
             return False
         if date_key(date) != tomorrow(self.day["date"]):
             raise Refused("next_morning_not_observed")
+        human_wait = None
+        if self.owner_hosted():
+            # Step human night wait before save_readback timeout so waiting up to 60 min for a person
+            # on shipping/level-up/save barrier does not trip night_save_date_timeout at 10 min.
+            saved_now = self.backend.save_date(self.state)
+            if not (isinstance(saved_now, dict) and date_key(saved_now) == date_key(date)):
+                human_wait = self._step_human_night_wait(attempt, pose)
+                if human_wait[1] > 0 and "save_readback_since" in self.day:
+                    self.day["save_readback_since"] += human_wait[1]
         if not self.saved_date_matches(date):
             self.night_wait_reason = "night_save_not_on_disk"
-            self.night_progress_check(attempt, pose)
+            self.night_progress_check(attempt, pose, _human_wait=human_wait)
             return False
+        self._end_human_night_wait(attempt, reason="completed")
         self.day.update(status="night_saved", next_date=date, outcome=verdict)
         if verdict == "lost":
             self.day["lost_night_facts"] = dict(attempt.get("lost_night_facts", {}),
@@ -2138,7 +2320,86 @@ class Cycle:
         tod = pose.get("time_of_day") if isinstance(pose, dict) else None
         return tod if type(tod) is int else None
 
-    def night_progress_check(self, attempt, pose=None):
+    def _read_human_night_fact(self, pose=None):
+        """Read native night facts (inspect + pose) without touching HOST or helper."""
+        from arti_runtime.human_host import human_night_wait_fact
+        live = getattr(self.backend, "live", None)
+        inspect_fn = getattr(live, "inspect", None)
+        ctx = None
+        if callable(inspect_fn):
+            try:
+                ctx = inspect_fn()
+            except Exception:  # noqa: BLE001 - unread facts never claim a wait
+                ctx = None
+        player_id = self.state.get("player_id")
+        fact = human_night_wait_fact(ctx, pose, self_player_id=player_id)
+        if fact is None and pose is None:
+            pose_fn = getattr(live, "pose", None)
+            if callable(pose_fn):
+                try:
+                    p2 = pose_fn()
+                except Exception:  # noqa: BLE001
+                    p2 = None
+                fact = human_night_wait_fact(ctx, p2, self_player_id=player_id)
+        return fact
+
+    def _step_human_night_wait(self, attempt, pose=None):
+        """Track owner-hosted human end-of-night wait up to HUMAN_NIGHT_WAIT_MAX_S (60 min)."""
+        if not self.owner_hosted():
+            return False, 0.0
+        from arti_runtime.human_host import HUMAN_NIGHT_WAIT_MAX_S
+        now = self.game_clock.now()
+        waits = self.__dict__.setdefault("_human_night_waits", {})
+        slot = waits.setdefault(attempt["id"], dict(
+            active=False, fact=None, started_at=None, last_at=None, elapsed_s=0.0, exhausted=False))
+        fact = self._read_human_night_fact(pose=pose)
+        if fact is not None and not slot["exhausted"]:
+            if not slot["active"]:
+                slot.update(active=True, fact=fact, started_at=now, last_at=now)
+                self.event("human_night_wait_started", day_trial=attempt["id"], fact=fact)
+                self._human_night_wait_allowed = 0.0
+                return True, 0.0
+            slot["fact"] = fact
+            delta = max(0.0, now - (slot["last_at"] if slot["last_at"] is not None else now))
+            slot["last_at"] = now
+            remaining = max(0.0, HUMAN_NIGHT_WAIT_MAX_S - slot["elapsed_s"])
+            allowed = min(delta, remaining)
+            slot["elapsed_s"] += allowed
+            self._human_night_wait_allowed = allowed
+            if slot["elapsed_s"] >= HUMAN_NIGHT_WAIT_MAX_S:
+                slot["exhausted"] = True
+                self._end_human_night_wait(attempt, now=now, reason="limit_reached")
+                return False, allowed
+            return True, allowed
+        if slot["active"]:
+            delta = max(0.0, now - (slot["last_at"] if slot["last_at"] is not None else now))
+            remaining = max(0.0, HUMAN_NIGHT_WAIT_MAX_S - slot["elapsed_s"])
+            allowed = min(delta, remaining)
+            slot["elapsed_s"] += allowed
+            slot["last_at"] = now
+            self._end_human_night_wait(attempt, now=now, reason="native_fact_cleared")
+            self._human_night_wait_allowed = allowed
+            return False, allowed
+        self._human_night_wait_allowed = 0.0
+        return False, 0.0
+
+    def _end_human_night_wait(self, attempt, *, now=None, reason="completed"):
+        waits = self.__dict__.get("_human_night_waits") or {}
+        slot = waits.get(attempt["id"]) if isinstance(attempt, dict) else None
+        if slot is None or not slot.get("active"):
+            return
+        from arti_runtime.human_host import HUMAN_NIGHT_WAIT_MAX_S
+        now = self.game_clock.now() if now is None else now
+        if reason in ("completed", "host_left"):
+            delta = max(0.0, now - (slot["last_at"] if slot["last_at"] is not None else now))
+            remaining = max(0.0, HUMAN_NIGHT_WAIT_MAX_S - slot["elapsed_s"])
+            slot["elapsed_s"] += min(delta, remaining)
+            slot["last_at"] = now
+        slot["active"] = False
+        self.event("human_night_wait_ended", day_trial=attempt["id"], fact=slot["fact"],
+                   seconds=round(slot["elapsed_s"], 3), reason=reason)
+
+    def night_progress_check(self, attempt, pose=None, *, _human_wait=None):
         """Exited-trial night waits also obey the generic ten-minute progress rule."""
         watches = self.__dict__.setdefault("_night_progress", {})
         # ADR 255 (review M4c rule 5): a night held by the owner's HOST (the helper waits for him or for a clean HOST) is a
@@ -2161,6 +2422,12 @@ class Cycle:
             return
         self.__dict__["_night_held"] = None
         watch = watches.setdefault(attempt["id"], ProgressWatchdog(self.game_clock.now()))
+        if self.owner_hosted():
+            waiting, allowed = self._step_human_night_wait(attempt, pose) if _human_wait is None else _human_wait
+            if allowed > 0:
+                watch.since += allowed
+            if waiting:
+                return
         signature = None
         if pose is not None:
             signature = json.dumps({k: pose.get(k) for k in
@@ -2234,6 +2501,18 @@ class Cycle:
         self.save()
         self.event("day_ended", index=self.day["index"], date=self.day["date"])
 
+    def connected_notice(self):
+        """However a cycle ends (a stop, a safety stop, the decision cap, a worker that died, a drain): while she still
+        stands in a world a person hosts, say whose window it is. Nothing is closed."""
+        runtime = Path(getattr(getattr(self.backend, "paths", None), "RUN", "."))
+        if runtime.name != "runtime" or self.state.get("status") not in ("stopped", "safety_stop", "not_recovered"):
+            return
+        from scripts.livepath.halt_authority import session_kind
+        if session_kind(runtime.parent) != "owner":
+            return
+        from scripts.livepath import mabar, owner_join
+        owner_join.cycle_notice(runtime.parent, self.backend.paths.COMMAND_DIR, mabar.log, self.folder)
+
     def drive(self, *, once=False):
         # Reconcile before starting a guard or granting any action authority.
         if self.state.get("status") not in {"stopped", "safety_stop", "not_recovered"}:
@@ -2290,7 +2569,9 @@ class Cycle:
                     except subprocess.TimeoutExpired:
                         self.event("guard_cleanup_timeout")
                 self.save()
+                self._clear_mind_live_state(reason=str(self.state.get("status") or "cycle_end"))
                 lock.unlink()
+                self.connected_notice()
 
 
 def main(argv=None, backend=None):

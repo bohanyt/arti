@@ -6,11 +6,71 @@ the clock runs in a menu at the native rate (`Game1.shouldTimePass`: `IsMultipla
 back identical, so every decision was her first. These are the true facts a person holds without thinking. Nothing here
 closes a menu, counts against her, or tells her what to do.
 """
+import hashlib
+import json
+from dataclasses import dataclass, field
+
 from arti_runtime.fact_names import control_label
 
 VISIT_GAP_MINUTES = 60  # game minutes without this menu's page: it was closed, and this is another visit
 MENU_FACT_CHARS = 340
 PRESSES_SHOWN = 3
+
+
+@dataclass
+class ReceiverVisit:
+    key: tuple
+    pages: dict = field(default_factory=dict)
+    last_verified_press: tuple | None = None
+    cells: dict = field(default_factory=dict)
+    read_renewals: int = 0
+    renewed_since_new: bool = True
+
+    def read(self, entries, key, identity, offered):
+        repeated = entries.get(key) == identity or self.read_renewals >= offered + 2
+        entries[key] = identity
+        if not repeated:
+            self.renewed_since_new = False
+        return repeated
+
+
+def identity(content):
+    encoded = json.dumps(content, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
+    return hashlib.sha256(encoded.encode()).hexdigest()[:12]
+
+
+def page_identity(page, selected, global_actions, facts):
+    """Use the pager's native labels and terms. The full digest still fences input."""
+    ids = {row[g["fields"].index("id")] for g in selected.get("groups", ()) for row in g["rows"]}
+    stock_ids = {arg.split(":")[1] for arg in (*global_actions, *selected.get("native_args", ()))
+                 if arg.startswith("buy:")}
+    text = [facts.get("text")] if page == 0 else []
+    stock_rows = set()
+    for path, value in selected.get("details", ()):
+        if not path:
+            text.append(value.get("text"))
+            stock_rows.update(range(len((value.get("shop") or {}).get("stock", ()))))
+        elif path[0] == "text":
+            text.append(value)
+        elif path[0] == "components" and (len(path) == 2 or path[2] in ("label", "value")):
+            ids.add(path[1])
+        elif path == ["shop"]:
+            stock_rows.update(range(len(value.get("stock", ()))))
+        elif path[:2] == ["shop", "stock"]:
+            stock_rows.update([path[2]] if len(path) > 2 else range(len(value)))
+    components = [(c["id"], c.get("label"), tuple((c.get("value") or {}).get(k) for k in ("item", "stack", "price")))
+                  for c in facts["components"] if c["id"] in ids]
+    stock = [(row[8], *row[1:6], row[9]) for i, row in enumerate((facts.get("shop") or {}).get("stock", ()))
+             if row[8] in ids or str(row[8]) in stock_ids or i in stock_rows]
+    return identity((page, components, stock, text))
+
+
+def receiver_visit(owner, session, view):
+    key = (session.session_id, view.receiver_token)
+    visit = getattr(owner, "_live7_receiver_visit", None)
+    if visit is None or visit.key != key:
+        visit = owner._live7_receiver_visit = ReceiverVisit(key)
+    return visit
 
 
 def _minutes(clock):

@@ -3,6 +3,7 @@ using Microsoft.Xna.Framework;
 using StardewValley;
 using StardewValley.Locations;
 using StardewValley.Menus;
+using StardewValley.Network;
 
 namespace ArtiStardewBridge;
 
@@ -95,13 +96,18 @@ internal static class NativeB1Offers
 
     internal static int? ResolveNote(GameLocation location, Farmer actor, Point tile, Vector2 stand)
     {
-        if (location is not CommunityCenter cc || NoteArea is null
-            || !actor.hasOrWillReceiveMail("canReadJunimoText")) return null;
+        if (location is not CommunityCenter cc || !actor.hasOrWillReceiveMail("canReadJunimoText")) return null;
+        return PresentNote(cc, tile, stand) is int area && !cc.bundleMutexes[area].IsLocked() ? area : null;
+    }
+
+    static int? PresentNote(CommunityCenter cc, Point tile, Vector2 stand)
+    {
+        if (NoteArea is null) return null;
         int index = cc.getTileIndexAt(tile.X, tile.Y, "Buildings", "indoors");
         int area = index == 1799 && cc.numberOfCompleteBundles() > 2 ? 5
             : index is >= 1824 and <= 1833 ? (int)(NoteArea.Invoke(cc, new object[] { stand }) ?? -1) : -1;
         if (area < 0 || area >= cc.bundleMutexes.Count || !cc.isJunimoNoteAtArea(area)
-            || cc.areasComplete[area] || cc.bundleMutexes[area].IsLocked()) return null;
+            || cc.areasComplete[area]) return null;
         return area;
     }
 
@@ -113,14 +119,19 @@ internal static class NativeB1Offers
     /// <summary>S27: one entry per area whose native note tile resolves (ResolveNote) from a cardinal stand inside that
     /// same area. Bounded by the native area count; never a scan radius, never a copied coordinate.</summary>
     internal static List<(int Area, Point Tile)> NoteTiles(CommunityCenter cc, Farmer actor)
+        => actor.hasOrWillReceiveMail("canReadJunimoText")
+            ? PresentNoteTiles(cc).Where(note => !cc.bundleMutexes[note.Area].IsLocked()).ToList() : new();
+
+    static List<(int Area, Point Tile)> PresentNoteTiles(CommunityCenter cc)
     {
         var notes = new List<(int Area, Point Tile)>();
         if (NotePosition is null) return notes;
         for (int area = 0; area < cc.bundleMutexes.Count; area++)
         {
             if (NotePosition.Invoke(cc, new object[] { area }) is not Point tile || tile.Equals(default(Point))) continue;
+            if (cc.bundleMutexes[area].IsLocked() && !cc.bundleMutexes[area].IsLockHeld()) continue;
             foreach (var (sx, sy) in Protocol.WorldExtras.StandCandidates(tile.X, tile.Y))
-                if (ResolveNote(cc, actor, tile, new Vector2(sx, sy)) == area)
+                if (PresentNote(cc, tile, new Vector2(sx, sy)) == area)
                 {
                     notes.Add((area, tile));
                     break;
@@ -128,6 +139,58 @@ internal static class NativeB1Offers
         }
         return notes;
     }
+
+    static class CodeNoteMethods
+    {
+        internal static readonly Func<CommunityCenter, int, Point>? Position =
+            NotePosition?.CreateDelegate<Func<CommunityCenter, int, Point>>();
+        internal static readonly Func<CommunityCenter, Vector2, int>? Area =
+            NoteArea?.CreateDelegate<Func<CommunityCenter, Vector2, int>>();
+    }
+
+    static readonly Point[] NoteStandOffsets = { new(0, 1), new(0, -1), new(1, 0), new(-1, 0) };
+
+    internal static bool HasCodeCells(GameLocation location) => location is CommunityCenter;
+
+    // Readable notes keep their typed offer. The shared sample only includes first-contact cells.
+    internal static void CollectUnreadNoteCells(GameLocation location, Farmer actor, List<NativeCodeActions.Cell> cells)
+    {
+        if (location is not CommunityCenter cc || actor.hasOrWillReceiveMail("canReadJunimoText")) return;
+        var position = CodeNoteMethods.Position ?? throw new MissingMethodException("getNotePosition");
+        var areaAt = CodeNoteMethods.Area ?? throw new MissingMethodException("getAreaNumberFromLocation");
+        for (int area = 0; area < cc.bundleMutexes.Count; area++)
+        {
+            Point tile = position(cc, area);
+            if (tile.Equals(default(Point)) || !UnreadAreaPresent(cc, area)) continue;
+            int index = cc.getTileIndexAt(tile.X, tile.Y, "Buildings", "indoors");
+            bool hasStand = index == 1799 && area == 5 && cc.numberOfCompleteBundles() > 2;
+            if (index is >= 1824 and <= 1833)
+                foreach (Point offset in NoteStandOffsets)
+                    if (areaAt(cc, new Vector2(tile.X + offset.X, tile.Y + offset.Y)) == area)
+                    {
+                        hasStand = true;
+                        break;
+                    }
+            if (hasStand) cells.Add(new NativeCodeActions.Cell(tile, area));
+        }
+    }
+
+    static bool UnreadAreaPresent(CommunityCenter cc, int area) =>
+        !cc.areasComplete[area] && (!cc.bundleMutexes[area].IsLocked() || cc.bundleMutexes[area].IsLockHeld())
+        && cc.isJunimoNoteAtArea(area);
+
+    internal static bool CanPressUnreadNote(GameLocation location, Farmer actor, NativeCodeActions.Cell cell, Vector2 stand)
+    {
+        if (location is not CommunityCenter cc || actor.hasOrWillReceiveMail("canReadJunimoText")
+            || cell.Area >= cc.bundleMutexes.Count || !UnreadAreaPresent(cc, cell.Area)) return false;
+        int index = cc.getTileIndexAt(cell.Tile.X, cell.Tile.Y, "Buildings", "indoors");
+        return index == 1799 && cell.Area == 5 && cc.numberOfCompleteBundles() > 2
+            || index is >= 1824 and <= 1833 && CodeNoteMethods.Area?.Invoke(cc, stand) == cell.Area;
+    }
+
+    internal static NetMutex? NoteMutex(GameLocation? location, JunimoNoteMenu note) =>
+        !note.fromGameMenu && location is CommunityCenter cc && note.whichArea >= 0 && note.whichArea < cc.bundleMutexes.Count
+            ? cc.bundleMutexes[note.whichArea] : null;
 
     internal static bool NoteReceiver(object? menu, CommunityCenter cc, int area) =>
         menu is JunimoNoteMenu note && note.whichArea == area && JunimoNoteMenu.canClick && !note.scrambledText

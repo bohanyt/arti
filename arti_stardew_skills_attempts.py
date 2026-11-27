@@ -1402,19 +1402,17 @@ def _donation(call, snap, state, context):
 
 
 def _quest(call, snap, state, context):
-    """W1 gap B4 S28: mail -> exact accept -> bound native quest -> its NPC -> quest_delivery A -> reconcile
-    (arti_stardew_skills_quest). The gift leg is never used: a gift counter is not a delivery."""
-    if not call.arg or " ke " not in call.arg:
-        # The quest log/billboard are not native targets: delivery needs the owner's named item and NPC.
-        return S.Step("fail", reason="quest_item_and_npc_not_named")
-    item = call.arg.rsplit(" ke ", 1)[0]
-    q = state["attempt"].get("quest") or {}
-    if not q.get("bound") and not any(item in (str(f.get("name") or "").casefold(), str(f.get("display_name") or "").casefold(),
-                                               str(f.get("qualified_item_id") or "").casefold()) for f in context["inventory"]):
-        return end(state, context, "quest_item_missing")
+    """S28 requires a named item and villager before binding a native quest."""
     import sys
-    from arti_stardew_skills_quest import plan as quest_plan
-    return quest_plan(call, snap, state, context, sys.modules[__name__])
+    from arti_stardew_skills_quest import inventory_item_matches, parse_request, plan as quest_plan
+
+    request = parse_request(call.arg)
+    if request is None:
+        return S.Step("fail", reason="quest_item_and_npc_not_named")
+    q = state["attempt"].get("quest") or {}
+    if not q.get("bound") and not any(inventory_item_matches(request[0], f) for f in context["inventory"]):
+        return end(state, context, "quest_item_missing")
+    return quest_plan(request, snap, state, context, sys.modules[__name__])
 
 
 # ---------------------------------------------------------------------------- S31 inventory attach

@@ -19,6 +19,10 @@ public sealed record StatePayload
     [JsonPropertyName("location")]
     public string Location { get; init; } = "";
 
+    [JsonPropertyName("location_id")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? LocationId { get; init; }
+
     [JsonPropertyName("tile")]
     public TileXY Tile { get; init; } = new();
 

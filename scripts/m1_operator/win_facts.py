@@ -27,6 +27,7 @@ PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 PROCESS_VM_READ = 0x0010
 WAIT_OBJECT_0, WAIT_TIMEOUT = 0x0, 0x102
 STILL_ACTIVE = 259
+NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)  # a reader started by a console-less process opens none of its own
 
 VK = {"w": 0x57, "a": 0x41, "s": 0x53, "d": 0x44, "c": 0x43, "x": 0x58, "e": 0x45, "lbutton": 0x01, "rbutton": 0x02,
       **{str(n): 0x30 + n for n in range(10)}}
@@ -173,6 +174,90 @@ def event_signaled(name: str) -> bool:
         k32.CloseHandle(handle)
 
 
+def event_exists(name: str) -> bool:
+    _, k32 = _w()
+    handle = k32.OpenEventW(SYNCHRONIZE, False, name)
+    if not handle:
+        return False
+    try:
+        return k32.WaitForSingleObject(handle, 0) == WAIT_TIMEOUT
+    finally:
+        k32.CloseHandle(handle)
+
+
+def process_start(pid):
+    """Creation FILETIME for a live PID. A recycled PID has a different value."""
+    from ctypes import wintypes as W
+    handle = _open(pid, SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION)
+    if not handle:
+        return None
+    _, k32 = _w()
+    get_times = k32.GetProcessTimes
+    get_times.argtypes = [W.HANDLE] + [ctypes.POINTER(W.FILETIME)] * 4
+    get_times.restype = W.BOOL
+    try:
+        times = [W.FILETIME() for _ in range(4)]
+        if (get_times(handle, *(ctypes.byref(t) for t in times))
+                and k32.WaitForSingleObject(handle, 0) == WAIT_TIMEOUT):
+            return (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime
+        return None
+    finally:
+        k32.CloseHandle(handle)
+
+
+def process_gone(pid, started=None) -> bool:
+    """True only when this exact process (its PID and, when recorded, its creation time) has verifiably ended."""
+    if wait_pid_exit(pid, 0) is True:
+        return True
+    now = process_start(pid)
+    return bool(started and now and now != started)
+
+
+def filetime_ms(value) -> int:
+    """A process creation FILETIME as Unix milliseconds."""
+    return (int(value) - 116444736000000000) // 10000
+
+
+def process_parent(pid):
+    """Parent PID of a live process, including the Windows venv Python redirector."""
+    from ctypes import wintypes as W
+    handle = _open(pid, PROCESS_QUERY_LIMITED_INFORMATION)
+    if not handle:
+        return None
+    _, k32 = _w()
+    try:
+        query = ctypes.WinDLL("ntdll").NtQueryInformationProcess
+        query.argtypes = [W.HANDLE, W.ULONG, W.LPVOID, W.ULONG, W.LPVOID]
+        query.restype = W.LONG
+        # PROCESS_BASIC_INFORMATION is six pointer-sized slots, with padding on x64.
+        info = (ctypes.c_size_t * 6)()
+        return info[5] if query(handle, 0, ctypes.byref(info), ctypes.sizeof(info), None) == 0 else None
+    finally:
+        k32.CloseHandle(handle)
+
+
+def _inet_rows(protocol):
+    try:
+        result = subprocess.run(["netstat", "-ano", "-p", protocol], capture_output=True, text=True, timeout=5,
+                                creationflags=NO_WINDOW)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return [line.split() for line in result.stdout.splitlines() if line.strip().startswith(protocol)] if not result.returncode else []
+
+
+def lan_host(pid):
+    """The vanilla LAN listener on the requested loopback route belongs exclusively to the pinned HOST."""
+    listeners = {row[-1] for row in _inet_rows("UDP")
+                 if len(row) == 4 and row[1] in ("0.0.0.0:24642", "127.0.0.1:24642")}
+    return listeners == {str(pid)}
+
+
+def loopback_peer(pid, local_port, peer_port):
+    """Attribute the live observer stream to the farmhand process, including both ports of the connection."""
+    return any(len(row) == 5 and row[1:3] == [f"127.0.0.1:{peer_port}", f"127.0.0.1:{local_port}"]
+               and row[4] == str(pid) for row in _inet_rows("TCP"))
+
+
 def wait_pid_exit(pid, timeout_s: float):
     """Block up to timeout_s for the process to exit. True = exited (or no such pid), False = still running,
     None = cannot tell (OpenProcess failed for another reason, e.g. access denied): callers refuse on None."""
@@ -231,7 +316,7 @@ def working_set_bytes(pid) -> int | None:
             k32.CloseHandle(h)
     try:
         out = subprocess.run(["tasklist", "/FI", f"PID eq {int(pid)}", "/FO", "CSV", "/NH"], capture_output=True,
-                             text=True, timeout=20).stdout.strip()
+                             text=True, timeout=20, creationflags=NO_WINDOW).stdout.strip()
         if out.startswith('"'):
             mem = out.split('","')[-1].strip('"')
             digits = "".join(c for c in mem if c.isdigit())
@@ -246,7 +331,7 @@ def image_pids(image: str):
     callers refuse on None."""
     try:
         p = subprocess.run(["tasklist", "/FI", f"IMAGENAME eq {image}", "/FO", "CSV", "/NH"], capture_output=True,
-                           text=True, timeout=20)
+                           text=True, timeout=20, creationflags=NO_WINDOW)
     except (OSError, subprocess.SubprocessError):
         return None
     if p.returncode != 0:
@@ -266,7 +351,7 @@ def python_cmdlines() -> list | None:
           "ForEach-Object { '' + $_.ProcessId + [char]9 + $_.CommandLine }")
     try:
         p = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps], capture_output=True,
-                           text=True, timeout=60)
+                           text=True, timeout=60, creationflags=NO_WINDOW)
     except (OSError, subprocess.SubprocessError):
         return None
     if p.returncode != 0:

@@ -82,16 +82,21 @@ class HelpRelay:
                                      game_trigger_waiting=game_trigger_waiting)
         self._status_facts = StatusFactsRelay(config, self._moments, clock=clock,
                                               voice_ready=status_voice_ready,
-                                              extra_session_facts=lambda: self._session_facts.notes)
+                                              extra_session_facts=lambda: self._session_facts.notes,
+                                              on_host_left=self._session_facts.clear_for_host_left)
         # Mabar: what the HOST watches while she is not in it (arti_runtime/host_story.py). Off unless configured.
+        # Never offer the solo relay in a run a person hosts, before she joined or after she left.
         self._host_story = None
         self._host_story_ready = status_voice_ready or (lambda: True)
         if config.get("host_story_relay_file"):
-            import arti_mind
-            from arti_runtime.host_story import HostStoryRelay
-            self._host_story = HostStoryRelay(config["host_story_relay_file"], mind_base=arti_mind.mind_dir(config),
-                                              clock=clock, stopped=self._host_story_stopped)
-            self._host_story.owner_name = str(config.get("streamer_name") or "Bohan")
+            from arti_runtime.human_host import is_owner_hosted_run
+            relay_path = Path(config["host_story_relay_file"])
+            if not is_owner_hosted_run(relay_path.parent):
+                import arti_mind
+                from arti_runtime.host_story import HostStoryRelay
+                self._host_story = HostStoryRelay(config["host_story_relay_file"], mind_base=arti_mind.mind_dir(config),
+                                                  clock=clock, stopped=self._host_story_stopped)
+                self._host_story.owner_name = str(config.get("streamer_name") or "Bohan")
 
     def status_block(self):
         return self._status_facts.status_block()
@@ -137,8 +142,9 @@ class HelpRelay:
         # WATCH_STOP ends the farmhand's watcher even on normal exit. A
         # host_left sentinel also drains only that leg; native HOST presence
         # decides whether the owner is still playing.
+        from arti_runtime.human_host import is_owner_hosted_run
         run = self._host_story.path.parent
-        if self._stopped or (run / "bridge-stop-request").exists():
+        if self._stopped or is_owner_hosted_run(run) or (run / "bridge-stop-request").exists():
             return True
         paths = [run / "runtime" / "LIVE7_STOP"]
         cycle = getattr(self._channel_resolver, "cycle_dir", None)

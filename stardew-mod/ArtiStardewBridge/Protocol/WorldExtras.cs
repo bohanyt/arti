@@ -633,6 +633,9 @@ public static class WorldExtras
         return null;
     }
 
+    public static bool PlainActionHand(string held, string? toolType) =>
+        held is PadHeld.None or PadHeld.Tool && toolType is not ("MilkPail" or "Shears" or "Pan" or "Wand");
+
     static bool Failing(string guard, ExtrasGuardFacts f) => guard switch
     {
         GEvent => f.EventUp,
@@ -642,7 +645,7 @@ public static class WorldExtras
         GOwnTile => f.GrabIsOwnTile,
         // Plain tool or empty hand: no object (gift / place / eat / use), no weapon (special), no rod / slingshot,
         // and none of the tools whose A / X meaning differs (pail / shears / pan / wand).
-        GHeldPlain => f.Held is not (PadHeld.None or PadHeld.Tool) || f.HeldToolType is "MilkPail" or "Shears" or "Pan" or "Wand",
+        GHeldPlain => !PlainActionHand(f.Held, f.HeldToolType),
         GHeldPail => f.HeldToolType != "MilkPail",
         GHeldShears => f.HeldToolType != "Shears",
         GHeldPlaceable => f.Held != PadHeld.Placeable,

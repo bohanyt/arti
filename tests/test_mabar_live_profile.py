@@ -17,24 +17,43 @@ EXPECTED_PLAY = dict(
     stardew_decision_effort="medium", stardew_decision_service_tier="priority",
     stream_game_notes=True, live7_fact_line_enabled=True, stardew_page_budget_scale=2,
     stardew_game_text_delivery_enabled=True, stardew_live7_place_time_page=True, stardew_live7_goal_ladder=True,
-    stardew_live7_ship_on_the_way=True, stardew_offer_cache_enabled=False, live7_own_play_enabled=True,
-    voice_game_memory_enabled=True, stardew_live7_raw_hands=True,
+    live7_mind_scope=True,
+    stardew_live7_plan_on_page=True,
+    stardew_live7_ship_on_the_way=True, stardew_live7_mail_on_the_way=True, stardew_live7_menu_visit_bound=True,
+    stardew_live7_success_stays=True,
+    stardew_live7_press_results=True,
+    stardew_offer_cache_enabled=False, live7_own_play_enabled=True,
+    voice_game_memory_enabled=True, stardew_live7_raw_hands=True, stardew_live7_local_walks=True,
 )
-EXPECTED_BRIDGE = dict(owner_chat_as_owner=True, stream_game_notes=True, live_voice_fixes_v1=True, live_play_rules_enabled=True,
-                       mic_priority_mark=True, voice_game_memory_enabled=True,
+EXPECTED_BRIDGE = dict(owner_chat_as_owner=True, stream_game_notes=True, live_voice_fixes_v1=True, thanks_once_enabled=True, live_play_rules_enabled=True,
+                       mic_priority_mark=True, voice_game_memory_enabled=True, live7_mind_scope=True,
                        # V13 (ADR 200): one long voice thread, the lean Codex harness, timeout from measurement
                        codex_voice_lean_harness=True, voice_append_context=True, codex_context_window="auto",
                        voice_context_timeout_sec=20.0, voice_context_rollover_keeps_lines=True,
                        # V14 (ADR 238): her recall says which farm a session note is from
                        vault_farm_labels=True)
 EXPECTED_MOD = dict(CharacterCreationEnabled=True, UiPadMenusEnabled=True, GenericWorldInputEnabled=True,
-                    FestivalReflexEnabled=True, ReflexFishingEnabled=True)
+                    FestivalReflexEnabled=True, ReflexFishingEnabled=True, GameTextDeliveryEnabled=True)
+# A play setting that does nothing without its mod switch: both halves, or neither, on every path she plays.
+TWO_HALVES = dict(stardew_game_text_delivery_enabled="GameTextDeliveryEnabled", stardew_live7_raw_hands="GenericWorldInputEnabled")
 
 
 def test_the_profile_is_pinned():
     assert mabar.LIVE_PLAY == EXPECTED_PLAY
     assert mabar.LIVE_BRIDGE == EXPECTED_BRIDGE
     assert mabar.LIVE_MOD_FLAGS == EXPECTED_MOD
+
+
+@pytest.mark.parametrize("play,mod", TWO_HALVES.items())
+def test_a_play_setting_has_its_mod_half_on(play, mod):
+    assert mabar.LIVE_PLAY[play] is mabar.LIVE_MOD_FLAGS[mod] is True
+
+
+def test_free_play_and_live_stage_the_same_text_switch():
+    """`soak` derives the switch from the trial setting; the live profile must give the mod what that rule gives."""
+    from scripts.free_play import soak
+    flags = soak.trial_mod_flags({}, mabar.LIVE_PLAY)
+    assert flags.items() <= mabar.LIVE_MOD_FLAGS.items()
 
 
 def test_play_config_carries_the_profile_over_any_trial(tmp_path):
@@ -44,6 +63,24 @@ def test_play_config_carries_the_profile_over_any_trial(tmp_path):
         assert out[key] == value, key
     assert out["other"] == "kept" and out["stardew_openai_session_cap_usd"] == 2.0
     assert out["stardew_openai_session_state_file"] == str(Path(tmp_path) / "decision-api-session.json")
+
+
+def test_trial_can_turn_off_plan_on_page_for_the_control(tmp_path):
+    config = mabar.play_trial_config({'stardew_live7_plan_on_page': False}, tmp_path)
+    assert config['stardew_live7_plan_on_page'] is False
+    assert config['stardew_live7_goal_ladder'] is True
+
+
+def test_trial_can_turn_off_mind_scope_for_the_control(tmp_path):
+    config = mabar.play_trial_config({'live7_mind_scope': False}, tmp_path)
+    assert config['live7_mind_scope'] is False
+    assert config['stardew_live7_goal_ladder'] is True
+
+
+def test_trial_can_turn_off_local_walks_for_the_control(tmp_path):
+    config = mabar.play_trial_config({'stardew_live7_local_walks': False}, tmp_path)
+    assert config['stardew_live7_local_walks'] is False
+    assert config['stardew_live7_raw_hands'] is True
 
 
 def test_bridge_config_carries_the_profile(tmp_path):

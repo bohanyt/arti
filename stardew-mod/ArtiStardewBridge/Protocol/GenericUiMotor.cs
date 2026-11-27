@@ -159,6 +159,15 @@ public sealed class ProgressionClient
 
 public static class GenericUiReceipt
 {
+    public static (bool Waiting, string? Fault) SettleWorldClose(bool closedToHud, bool successor,
+        bool lockHeld, bool worldFree, long elapsedMs)
+    {
+        if (!closedToHud || successor) return (false, "world_control_unverified");
+        if (!lockHeld && worldFree) return (false, null);
+        if (elapsedMs < 4000) return (true, null);
+        return (false, lockHeld ? "mutex_release_unverified" : "world_control_unverified");
+    }
+
     /// <summary>
     /// ADR 250 review B4/S1: the press was refused before any edge reached the game, so it gets the named not-delivered
     /// receipt (<see cref="StaleComponent"/>). Stale and item-policy faults are pre-edge by construction. A missing hook or

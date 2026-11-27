@@ -21,15 +21,27 @@ def native_effect(before, after, location, items):
                 or before.get("crops") != after.get("crops"))
 
 
-def note(store, skill, arg, *, effect, reason, clock):
+def _is_press(name):
+    return name == "aksi" or name.startswith("aksi ")
+
+
+def note(store, skill, arg, *, effect, reason, clock, pose=None, target=None, keep_presses=False):
     """Count one settled row. Any native effect clears every count (the loop decayed); unknown counts nothing."""
     if effect is None:
         return
     if effect:
-        store.clear()
+        if keep_presses:
+            for key in [k for k in store if not _is_press(k)]:
+                store.pop(key, None)
+        else:
+            store.clear()
         return
     name = skill + (" " + str(arg) if arg not in (None, "") else "")
     row = store.pop(name, None) or dict(count=0, since=clock)
+    if pose is not None:
+        if row.get("pose") != pose:
+            row = dict(count=0, since=clock)
+        row.update(pose=pose, target=target)
     row.update(count=row["count"] + 1, reason=str(reason or "")[:60])
     store[name] = row
     while len(store) > MAX_KEYS:
@@ -40,15 +52,78 @@ def _clock(value):
     return "%02d:%02d" % divmod(value, 100) if type(value) is int else "?"
 
 
-def repeat_fact(store):
-    """``inventori 9x sejak 06:40 tanpa perubahan native ...``, newest repeats first, or None."""
-    rows = [(name, r) for name, r in reversed(list(store.items())) if r.get("count", 0) >= MIN_REPEATS][:2]
-    if not rows:
+def movement_effect(movement):
+    """A step's displacement is independent of nearby effects or a turn in place."""
+    from arti_runtime.raw_hands import MOVED, OBSERVED_TRANSITIONS, STILL, TURNED
+
+    if not movement:
         return None
-    text = "; ".join("%s %dx sejak %s, tas/uang/tempat/tanaman tidak berubah%s" % (
-        name, r["count"], _clock(r.get("since")), " (terakhir: %s)" % r["reason"] if r.get("reason") else "")
-        for name, r in rows)
-    return text[:FACT_CHARS]
+    if movement["kind"] in (STILL, TURNED):
+        return False
+    if movement["kind"] == MOVED or movement.get("transition") in OBSERVED_TRANSITIONS:
+        return True
+    return None
+
+
+def note_step(store, direction, movement, *, target, clock, keep_presses=False):
+    effect = movement_effect(movement)
+    if effect is None:
+        return
+    before = movement["before"]
+    if not effect and not before.get("location_id"):
+        return
+    note(store, "langkah", direction, effect=effect, reason=movement["kind"], clock=clock,
+         pose=(before.get("location_id"), tuple(before.get("pixel") or ())), target=target,
+         keep_presses=keep_presses)
+
+
+def _measured_approach(context, direction, target):
+    from arti_runtime.raw_hands import DIRS, STEPS
+    from arti_runtime.fact_names import target_name
+    from arti_stardew_goal_routes import open_paths
+    from arti_stardew_interact import warp_tiles
+    from arti_stardew_skills import _wave1_xy
+
+    here = _wave1_xy(context.get("actor_tile"))
+    targets = context.get("targets") or {}
+    row = targets.get(target)
+    tile = _wave1_xy(row.get("tile")) if isinstance(row, Mapping) else None
+    name = target_name(target, context)
+    if not name or here is None or tile is None or direction not in DIRS:
+        return None
+    dx, dy = STEPS[DIRS.index(direction)]
+    excluded = (warp_tiles(targets) | {tile, (here[0] + dx, here[1] + dy)}) - {here}
+    paths = open_paths({t: c for t, c in (context.get("nav_grid") or {}).items() if t not in excluded}, here)
+    stand = next(((tile[0] + x, tile[1] + y) for x, y in STEPS if (tile[0] + x, tile[1] + y) in paths), None)
+    if stand is not None:
+        return "jalur terbuka terukur ke petak %d,%d di sebelah %s" % (*stand, name[:60])
+    return None
+
+
+def repeat_fact(store, context=None, *, exclude_spots=None):
+    """``inventori 9x sejak 06:40 tanpa perubahan native ...``, newest repeats first, or None."""
+    context = context or {}
+    pose = (context.get("location_id"), tuple(context.get("actor_pixel") or ()))
+    facts = []
+    movement_shown = False
+    for name, row in reversed(list(store.items())):
+        if row.get("count", 0) < MIN_REPEATS:
+            continue
+        if exclude_spots and _is_press(name) and row.get("spot") in exclude_spots:
+            continue
+        head = "%s %dx sejak %s" % (name, row["count"], _clock(row.get("since")))
+        if "pose" in row:
+            if movement_shown or row["pose"] != pose:
+                continue
+            approach = _measured_approach(context, name.removeprefix("langkah "), row.get("target"))
+            facts.append(head + ", posisi tetap. " + (approach or "Belum ada pendekatan yang teramati dari sini") + ".")
+            movement_shown = True
+        else:
+            reason = " (terakhir: %s)" % row["reason"] if row.get("reason") else ""
+            facts.append(head + ", tas/uang/tempat/tanaman tidak berubah" + reason)
+        if len(facts) == 2:
+            break
+    return "; ".join(facts)[:FACT_CHARS] or None
 
 
 def bag_rows(inventory):

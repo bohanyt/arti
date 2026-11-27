@@ -47,7 +47,11 @@ public static class FestivalLeavePolicy
 {
     public const string Detail = PadContextTable.FestivalLeaveDetail;
 
-    /// <summary>Null outside a festival (the event row is unchanged); "" = she can be asked now; else the refusal.</summary>
-    public static string? State(bool festival, bool freeRoamToken, bool playerControl, bool mainEvent) =>
-        !festival ? null : mainEvent ? "main_event" : !playerControl ? "no_player_control" : !freeRoamToken ? "no_free_roam" : "";
+    public const string Seated = "seated";
+
+    /// <summary>Null outside a festival (the event row is unchanged); "" = she can be asked now; else the refusal.
+    /// <see cref="Seated"/> = free roam, but she sits on a seat of this map; festival_stand comes first.</summary>
+    public static string? State(bool festival, bool freeRoamToken, bool playerControl, bool mainEvent, bool seated = false) =>
+        !festival ? null : mainEvent ? "main_event" : !playerControl ? "no_player_control"
+        : !freeRoamToken ? seated ? Seated : "no_free_roam" : "";
 }

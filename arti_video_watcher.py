@@ -23,8 +23,8 @@ import threading
 import time
 from dataclasses import dataclass, field
 
-from arti_runtime.chat_media import MEDIA_REACTION_INSTRUCTION
-from arti_runtime import chat_media, owner_chat
+from arti_runtime.chat_media import MEDIA_REACTION_INSTRUCTION, MEDIA_REACTION_THANKED
+from arti_runtime import chat_media, owner_chat, thanks_once
 from arti_runtime.media_watch import (
     ClipReaction,
     SummaryBudget,
@@ -136,6 +136,7 @@ class VideoJob:
     clip_end: int = 0
     enqueued_at: float = field(default_factory=time.time)
     playback_end: float = 0.0  # Bridge overlay deadline, including its alert/tail.
+    thanks_token: str = ""
 
     @property
     def url(self) -> str:
@@ -182,14 +183,15 @@ def format_reaction_trigger(job: VideoJob, digest: str, title: str, *, media_wat
     saweria = donasi berbayar -> terima kasih + reaksi; streamlabs/chat = kasual.
     """
     who = job.viewer or "seseorang"
+    thanked = thanks_once.video_fact_line(job)  # then no instruction below asks for the thanks a second time
     if job.source == "saweria" and job.donation_label:
         head = (
             f"[VIDEO SELESAI DITONTON — media share DONASI {job.donation_label} "
             f"dari {who}] Judul: {title}."
         )
         tail = (
-            "Ucapkan terima kasih donasinya dengan hangat LALU reaksikan SATU "
-            "momen spesifik dari videonya kayak temen yang barusan nonton bareng "
+            ("Reaksikan SATU " if thanked else "Ucapkan terima kasih donasinya dengan hangat LALU reaksikan SATU ")
+            + "momen spesifik dari videonya kayak temen yang barusan nonton bareng "
             "— jangan ringkas isinya."
         )
     else:
@@ -199,13 +201,13 @@ def format_reaction_trigger(job: VideoJob, digest: str, title: str, *, media_wat
             "barusan nonton bareng — jangan ringkas isinya, tanpa upacara terima kasih."
         )
     if media_watch_mode and job.source == "saweria" and job.donation_label:
-        tail += " " + MEDIA_REACTION_INSTRUCTION
+        tail += " " + (MEDIA_REACTION_THANKED if thanked else MEDIA_REACTION_INSTRUCTION)
     # URL dibuang dari pesan — TTS jangan pernah mengeja "https youtu be..."
     clean_msg = _YT_URL_RE.sub("", job.message or "").strip(" -:,")
     if clean_msg:
         head += f" Pesan pengirim: {clean_msg}"
     return (
-        f"{head}\nApa yang kamu tonton:\n{digest[:900]}\n{tail} "
+        f"{head}\n{thanked}Apa yang kamu tonton:\n{digest[:900]}\n{tail} "
         "2-4 kalimat + boleh 1 pertanyaan balik. Jangan sebut sistem/transkrip/AI."
     )
 
@@ -213,9 +215,10 @@ def format_reaction_trigger(job: VideoJob, digest: str, title: str, *, media_wat
 def format_unavailable_reaction_trigger(job: VideoJob, title: str, transcript: str = "") -> str:
     """The legacy callback supplies a title. Fallback turns use clip evidence only."""
     who = job.viewer or "seseorang"
+    thanked = thanks_once.video_fact_line(job)
     if job.source == "saweria" and job.donation_label:
         sender = f"media share DONASI {job.donation_label} dari {who}"
-        thanks = " Sebut nama donatur dan jumlahnya, lalu bilang makasih."
+        thanks = "" if thanked else " Sebut nama donatur dan jumlahnya, lalu bilang makasih."
     else:
         sender = f"dikirim {who}"
         thanks = ""
@@ -223,7 +226,7 @@ def format_unavailable_reaction_trigger(job: VideoJob, title: str, transcript: s
     captions = f"\nTranskrip yang tersedia: {transcript[:900]}" if transcript else ""
     limits = TRANSCRIPT_ONLY_INSTRUCTION if transcript else "Bilang terus terang kamu belum bisa menonton klipnya."
     return (
-        f"[VIDEO — {sender}] Pesan pengirim: {message}{captions}\n"
+        f"[VIDEO — {sender}] Pesan pengirim: {message}{captions}\n{thanked}"
         f"{SUMMARY_UNAVAILABLE_INSTRUCTION} {limits}{thanks}"
     )
 
@@ -647,10 +650,11 @@ class VideoWatcher(threading.Thread):
     def _fail_voice(self, job: VideoJob) -> None:
         """Gagal total: donasi berbayar dapat pengakuan jujur; sisanya diam."""
         if job.source == "saweria" and job.donation_label:
+            thanks_line = thanks_once.video_fact_line(job, self.config)
+            thanks = "" if thanks_line else " dan tetap ucapkan terima kasih donasinya"
             self.hooks["queue_reaction"](
                 f"[VIDEO GAGAL DITONTON — media share DONASI {job.donation_label} "
-                f"dari {job.viewer}] Videonya gagal kamu tonton (koneksi/video "
-                "bermasalah). Minta maaf singkat dengan jujur dan tetap ucapkan "
-                "terima kasih donasinya. 2 kalimat.",
+                f"dari {job.viewer}] {thanks_line}Videonya gagal kamu tonton (koneksi/video "
+                f"bermasalah). Minta maaf singkat dengan jujur{thanks}. 2 kalimat.",
                 job.viewer or None,
             )

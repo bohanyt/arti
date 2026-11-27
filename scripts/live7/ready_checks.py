@@ -11,6 +11,23 @@ def sleep_waiting(readiness):
     return bool(readiness and readiness.get("check") == "sleep" and readiness.get("local_ready") is True)
 
 
+def ready_check_waiting_for_peer(readiness):
+    """Native ready check open where her own player is ready and another required player is not."""
+    if not isinstance(readiness, dict):
+        return False
+    check = readiness.get("check")
+    if not isinstance(check, str) or not check.strip():
+        return False
+    if readiness.get("local_ready") is not True or readiness.get("local_state") in ("NotReady", "unknown"):
+        return False
+    if readiness.get("all_ready") is True or readiness.get("waiting_for") == "none":
+        return False
+    ready_count, needed = readiness.get("ready_count"), readiness.get("needed")
+    if type(ready_count) is int and type(needed) is int:
+        return 0 < ready_count < needed
+    return readiness.get("waiting_for") == "other_required_players"
+
+
 def sleep_cancelled(readback):
     """Only the observed true -> false receipt reconciles a sleep cancellation."""
     return bool(readback and readback.get("check") == "sleep" and readback.get("effect") == "readiness_lost"

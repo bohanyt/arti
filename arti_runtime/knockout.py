@@ -182,6 +182,7 @@ def remember(rt, session, context, row):
             arti_mind.record_discoveries(base, MIND_GAME, scope=catalog['scope'], discoveries=[dict(
                 id='knocked_out:'+row['id'], kind='knocked_out', subject=before.get('location'),
                 text=fact(row), source='native_knockout:'+row['id'], date=str(before.get('date')))],
-                day=mind_day(session.campaign.date), day_label=str(session.campaign.date))
+                day=mind_day(session.campaign.date), day_label=str(session.campaign.date),
+                scoped=(getattr(rt, '_config', None) or {}).get('live7_mind_scope', False) is True)
         except (OSError, ValueError) as exc:
             rt._journal(dict(ev='discovery_memory_error', error=type(exc).__name__))

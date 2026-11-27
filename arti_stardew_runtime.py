@@ -15,6 +15,7 @@ from arti_runtime import wait_ledger as W
 from arti_runtime import page_budget as _page_budget
 from arti_runtime import ipc
 from arti_runtime.move_pacing import MAX_COMMAND_EXTENSION_S as _MOVE_COMMAND_EXTENSION_S, MovePacing as _MovePacing
+from arti_runtime import festival_facts as _festival_facts
 import arti_stardew_generic_world as _generic_world
 
 from arti_stardew_episode import parse_episode_plan, parse_one_tree_store_goal
@@ -37,14 +38,17 @@ from dataclasses import fields as dataclass_fields
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from arti_runtime.goal_ladder import PagePlan
 
 import arti_session_mode
 import arti_stardew_command as command
 import arti_stardew_interact as interact
 import arti_stardew_interact_b as interact_b
 from arti_stardew import DEFAULT_PORT, StardewReceiver, StardewState, StardewStateStore
-from arti_stardew_event_control import same_movement_authority
+from arti_stardew_event_control import pending_event_target, same_event_actions, same_movement_authority
 from arti_stardew_decision import (
     ActChoice,
     AskOwnerChoice,
@@ -294,7 +298,8 @@ def _decision_provider_extra_payload(play_intention: bool = False, *, messages=N
             act["properties"]["operation"] = {"type": "string", "enum": ["skill"]}
             act["properties"]["target_ref"] = {"type": "null"}
             act["properties"]["args"] = dict(type="object", additionalProperties=False,
-                properties=dict(name=dict(type="string", enum=[e["name"] for e in payload["skills"]]),
+                # One name once, though cek_pagi can hold two entries (its TV and its mailbox).
+                properties=dict(name=dict(type="string", enum=list(dict.fromkeys(e["name"] for e in payload["skills"]))),
                                 arg={"type": ["string", "null"]}, n=dict(type="integer")), required=["name"])
             schema["properties"]["choice"]["oneOf"] = choices
             # The codec accepts omitted activity; any supplied value at this
@@ -304,8 +309,8 @@ def _decision_provider_extra_payload(play_intention: bool = False, *, messages=N
             if payload.get("live7") or "unknown_ui" in payload:
                 schema["properties"]["plan"] = dict(
                     type=["array", "null"], minItems=1, maxItems=3, items=dict(type="object", additionalProperties=False,
-                        properties=dict(name=dict(type="string", enum=[e["name"] for e in payload["skills"]
-                                                                      if e["name"] != "read_boundary"]),
+                        properties=dict(name=dict(type="string", enum=list(dict.fromkeys(
+                                            e["name"] for e in payload["skills"] if e["name"] != "read_boundary"))),
                                         arg={"type": ["string", "null"]},
                                         n={"type": ["integer", "null"], "minimum": 1},
                                         repeat=dict(type="integer", minimum=1, maximum=4),
@@ -729,6 +734,11 @@ class ActionEvidenceView:
 
 
 @dataclass(frozen=True)
+class MoveTransitionEvidence(ActionEvidenceView):
+    movement_transition: str = "unconfirmed"
+
+
+@dataclass(frozen=True)
 class FinishEvidenceView:
     """Goal verdict from a new readback; the model's proposal is not evidence."""
     status: str
@@ -954,6 +964,8 @@ class GenerationRequest:
     # ADR fix115a: a rejected choice may reuse its exact page, with fresh echo/feedback.
     skill_retry_messages: list[dict[str, str]] | None = field(default=None, repr=False, compare=False)
     decision_page_budget: _page_budget.PageBudget | None = field(default=None, repr=False)
+    live7_day_plan: PagePlan | None = field(default=None, repr=False)  # private until it fits the rendered page
+    ui_inspect_layout: list | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass(frozen=True)
@@ -1246,6 +1258,7 @@ class _Continuation:
     # Skills-only in-chest transfer: copied from the existing native views, never a new store or grant.
     store_container_basis: tuple | None = field(default=None, repr=False)
     store_inventory_basis: dict | None = field(default=None, repr=False)
+    menu_open: bool = False  # successor of the skill's own, settled world press
 
 
 class _Superseded(RuntimeError):
@@ -1591,9 +1604,12 @@ class ProductionDecisionProvider:
             # request. Recomputing its page search can consume the native decision lease.
             # Exact presentation inputs key this one-request memo; motor fences stay live.
             # ADR 102 (a47: 4.8 s, three times before each provider call): a skill page takes the same memo.
-            render_key = json.dumps([request.skill_offer, request.request_nonce, request.goal_id,
+            render_inputs = [request.skill_offer, request.request_nonce, request.goal_id,
                 request.goal_revision, request.context_ref, request.reason, play, ui_bound, protected,
-                self.policy.model, _page_budget.for_request(request).telemetry()], sort_keys=True, ensure_ascii=True, separators=(",", ":"))
+                self.policy.model, _page_budget.for_request(request).telemetry()]
+            if (saved := getattr(request, 'live7_day_plan', None)) is not None:
+                render_inputs.append((saved.target_day, saved.entries))
+            render_key = json.dumps(render_inputs, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
             cached = getattr(self, "_ui_render_cache", None)
             if cached is not None and cached[0] == render_key:
                 self._skill_render_metrics = dict(getattr(self, "_ui_render_metrics", {})) if getattr(self, "_skill_trace_enabled", False) else {}
@@ -1699,6 +1715,9 @@ class ProductionDecisionProvider:
                          for key in ("tile_x", "tile_y")},
             }
         snapshot_payload = asdict(snap)
+        last_action = (snapshot_payload.get("working_memory") or {}).get("last_action")
+        if last_action is not None:
+            last_action.pop("movement_transition", None)
         if snapshot_payload['motor'].get('max_energy') is None:
             snapshot_payload['motor'].pop('max_energy', None)
         if snapshot_payload["motor"].get("facing") is None:
@@ -3816,6 +3835,12 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
 
     def _observe_location(self, goal, pin) -> None:
         """WS3a: any observed location change voids location-pinned goal state (expected or not)."""
+        if (getattr(self, "_live7_visit_open", None) or getattr(self, "_live7_visit_closing", None)) and self._live7_active():
+            from arti_runtime.place_visit_result import note_crossing
+            session = self._skill_session
+            if session.campaign is not None:
+                with self._lock:
+                    note_crossing(self, session.campaign, pin)
         current = pin.location if pin is not None else None
         if current is None:
             return
@@ -4504,8 +4529,33 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
                                   window["captured_ticks"], rec.domain_revision,
                                   hashlib.sha256(encoded).hexdigest(), bool(rec.is_complete), target_digest)
 
+    def _event_churn_normalized(self, current: DecisionContextSnapshot, before: DecisionContextSnapshot,
+                                *, event_target=None) -> DecisionContextSnapshot:
+        """Ambient festival/event churn: movement keeps authority (without nearby); actions keep identity, token,
+        sequence and (for a pending event_action) the chosen target and route cost."""
+        if current.event_movement == before.event_movement and current.event_actions == before.event_actions:
+            return current
+        for snap in (current, before):
+            if (snap.ui_key_target is not None or snap.ui_pad_target is not None
+                    or snap.container_context is not None):
+                return current
+        changes = {}
+        if (current.event_movement != before.event_movement
+                and current.event_movement is not None and before.event_movement is not None
+                and same_movement_authority(before.event_movement, current.event_movement)):
+            changes["event_movement"] = before.event_movement
+            if hasattr(self, "_cv_normalized"):
+                self._cv_normalized = list(self._cv_normalized) + ["event_movement.nearby"]
+        if (current.event_actions != before.event_actions
+                and same_event_actions(before.event_actions, current.event_actions, target=event_target)):
+            changes["event_actions"] = before.event_actions
+            if hasattr(self, "_cv_normalized"):
+                self._cv_normalized = list(self._cv_normalized) + ["event_actions.ambient"]
+        return replace(current, **changes) if changes else current
+
     def _metadata_only_progression(self, old: DecisionContextSnapshot,
-                                   new: DecisionContextSnapshot) -> DecisionContextSnapshot | None:
+                                   new: DecisionContextSnapshot,
+                                   *, event_target=None) -> DecisionContextSnapshot | None:
         """`new` rewritten onto `old`'s metadata when only non-semantic transport fields moved; else None."""
         pid = old.binding.player_id
         if pid is None or new.binding != old.binding:
@@ -4536,6 +4586,7 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
             from arti_stardew_animal_routine import moving_summary_identity
             if moving_summary_identity(new.routine_objective) == moving_summary_identity(old.routine_objective):
                 new = replace(new, routine_objective=old.routine_objective)
+        new = self._event_churn_normalized(new, old, event_target=event_target)
         return replace(new, context_ref=old.context_ref)
 
     def _gather_deadline_seconds(self) -> float:
@@ -4557,7 +4608,7 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
         return False
 
     def _continuation_valid(self, ticket: _Continuation, *, acquired: bool = False,
-                            refresh_read: bool = False) -> bool:
+                            refresh_read: bool = False, choice=None) -> bool:
         goal = self._active
         if (self._owner_voice_busy or goal and (goal.question_basis or goal.no_progress_until is not None or goal.no_progress_blocked)
                 or not self._continuation_enabled or self._status != READY
@@ -4703,6 +4754,8 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
         current = self._combat_churn_normalized(goal, current, ticket.snapshot)  # D-B6-2 (v2 pad + combat, no menu)
         current = self._menu_churn_normalized(goal, current, ticket.snapshot)  # FIXB43 W2 G4/P4
         current = self._event_dialogue_churn_normalized(goal, current, ticket)  # FIXB72 (W15b festival advance)
+        event_target = pending_event_target(ticket.snapshot.event_actions, choice)
+        current = self._event_churn_normalized(current, ticket.snapshot, event_target=event_target)
         # Observation evidence, native context and physical facts remain pinned.
         # Only transport ticks/within-day time can differ for world continuations.
         if (current.binding.status != "bound" or current.motor.status != "current"
@@ -4737,7 +4790,7 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
         kind = ticket.decision.choice.kind
         if kind == "inspect":
             req = replace(ticket.predecessor, snapshot=current, context_ref=current.context_ref)
-            evidence = self._resolve_inspect(ticket.decision, req)
+            evidence = self._resolve_inspect(ticket.decision, req, event_target=event_target)
             if evidence.status != "current":
                 # Diagnostic only (live 2026-10-06 attempt 9q): name the inspect failure.
                 self._cv_last_deny = "inspect:" + str(evidence.reason)
@@ -4754,6 +4807,10 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
         menu_step = (kind == "act" and ticket.decision.choice.operation in UI_PAD_OPS
                      and _menu_step_evidence(goal.last_action, ticket.snapshot))
         pin = current.water_context
+        if ticket.menu_open:
+            pin = self._skill_menu_open_pin(goal, ticket.predecessor)
+            if pin is None:
+                return self._cv_deny("menu_open_receipt_changed")
         if (pin is None and kind == "act" and ticket.decision.choice.operation == "world_key.move_cardinal"
                 and current.event_movement is not None
                 and same_movement_authority(current.event_movement, ticket.snapshot.event_movement)):
@@ -4802,6 +4859,8 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
                    else {"observed_change", "unchanged"})
         if menu_step:
             effects = {"observed_" + ticket.decision.choice.operation}
+        if ticket.menu_open:
+            effects = {"observed_world_delta", "observed_container_open"}
         if self._event_dialogue_advance(goal, ticket):
             effects = {"observed_event_effect"}  # FIXB72: the verified NPC talk is the last settled action
         ok = (action is not None and action.lifecycle == "completed" and action.cleanup_confirmed
@@ -4996,6 +5055,48 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
                 current = replace(current, routine_objective=before.routine_objective)
         return current
 
+    def _skill_menu_run(self, goal, name):
+        session = getattr(self, "_skill_session", None)
+        run = getattr(session, "current", None)
+        if (goal is not None and getattr(session, "mode", None) == "part_live" and session.status == "active"
+                and run is not None and run.status == "running" and run.pending is None
+                and run.goal_id == goal.goal_id and run.call.name == name):
+            return run
+        return None
+
+    def _skill_menu_open_pin(self, goal, request=None, *, view=None):
+        """Join the authenticated opener to its own post-release receiver and UI revision."""
+        action = goal.last_action
+        receipt = (action.after or {}).get("menu_handoff") if action is not None else None
+        if (not receipt or action.lifecycle != "completed" or not action.cleanup_confirmed
+                or receipt["request_id"] != action.request_id
+                or request is not None and receipt["generation_id"] != request.generation_id
+                or self._worker_stop.is_set() or self._action_cancel.is_set() or self._status != READY
+                or self._owner_voice_busy
+                or getattr(self, "_owner_play_stopped", False) or self._gather_mutation_unresolved):
+            return None
+        binding, pid = self._binding_view()
+        ctx = self._ui_key_context(pid)
+        motor = self._state.latest(pid)
+        if (binding.status != "bound" or binding.is_main_player is not False or binding.is_split_screen is not False
+                or ctx is None or ctx != MovementContext(**receipt["context"])
+                or self._state.is_stale(pid) or not self._same_motor_facts(motor, goal.last_effect_motor)
+                or goal.last_effect_motor.revisi != receipt["motor_revision"]
+                or motor.active_menu != receipt["menu"] or motor.ui_revision != ctx.ui_revision):
+            return None
+        view = self._ui_pad_view(pid) if view is None else view
+        if (view is None or (view.menu_type, view.receiver_token) != (receipt["menu"], receipt["receiver"])
+                or view.context in ("event", "gift")):
+            return None
+        from arti_stardew_generic_ui import motor_facts
+        rec, _ = self._ui_key_record(pid)
+        if rec is None or rec.facts.get("mode") != "menu" or rec.facts.get("ui_revision") != ctx.ui_revision:
+            return None
+        owner = motor_facts(rec.facts) or {}
+        if owner.get("control_taken") == "event" or owner.get("event_id"):
+            return None
+        return ctx
+
     def _schedule_continuation(self, decision: GameDecision, request: GenerationRequest) -> None:
         # Called only at settled result sites under the runtime lock.
         goal = self._active
@@ -5018,6 +5119,7 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
             _skip("question_or_no_progress")
             return
         snapshot = self._build_decision_snapshot(goal)
+        menu_open = False
         if decision.choice.kind == "lookup":
             if not self._lookup_context_matches(
                     replace(snapshot, working_memory=request.snapshot.working_memory), request.snapshot):
@@ -5029,9 +5131,11 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
                 _skip("inspect_session")
                 return
         else:
-            if (snapshot.water_context != request.snapshot.water_context
+            menu_open = (isinstance(decision.choice, ActChoice) and decision.choice.operation == "world_interact"
+                         and self._skill_menu_open_pin(goal, request) is not None)
+            if (not menu_open and (snapshot.water_context != request.snapshot.water_context
                     or snapshot.movement_context != request.snapshot.movement_context
-                    or snapshot.motor.location != request.snapshot.motor.location):
+                    or snapshot.motor.location != request.snapshot.motor.location)):
                 _skip("native_context")
                 return
             observed = (goal.last_finish.observed if decision.choice.kind == "finish" and goal.last_finish
@@ -5052,7 +5156,7 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
                     return
                 else:
                     observed = None
-            if observed is not None:
+            if observed is not None and not menu_open:
                 captured = goal.last_effect_motor
                 if (captured is None or observed.get("revisi") != captured.revisi
                         or not self._same_motor_facts(self._state.latest(snapshot.binding.player_id), captured)):
@@ -5060,7 +5164,7 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
                     return
         ticket = _Continuation(goal.goal_id, goal.revision, replace(request, continuation=None),
                                decision, snapshot, self._observation_sessions(snapshot),
-                               self._capture_motor_basis(snapshot), self._scene_capture_basis(snapshot))
+                               self._capture_motor_basis(snapshot), self._scene_capture_basis(snapshot), menu_open=menu_open)
         self._cv_last_deny = None
         if self._continuation_valid(ticket, refresh_read=True):
             self._pending_continuation = ticket
@@ -5462,6 +5566,7 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
                 self._journal({"ev": "play_decision_refused", "reason": play_reason})
                 if play_reason == "play_inspect_required":
                     _generic_world.inspect_refused(self, request, decision.choice)
+                    _festival_facts.inspect_refused(self, request, decision.choice)
                     # The act was well-formed; only a current inspect was missing. Take the existing read-only
                     # resume path (fresh inspect, then one continuation decision) instead of stalling the goal
                     # with the blocker set. Live 2026-10-06 attempts 5/6: the model acts first on the owner turn.
@@ -5506,7 +5611,7 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
                     _pid = request.snapshot.binding.player_id
                     _stale = self._state.is_stale(_pid)
                     _motor_same = self._same_motor_facts(self._state.latest(_pid), request.motor_basis)
-                    _cont_valid = self._continuation_valid(request.continuation)
+                    _cont_valid = self._continuation_valid(request.continuation, choice=decision.choice)
                     _lane_fg = (isinstance(self._provider, ProductionDecisionProvider)
                                 and self._provider.lane_owners["foreground"] is not None)
                     if _cancel or _stale or not _motor_same or not _cont_valid or _lane_fg:
@@ -5520,6 +5625,7 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
                         # generic press planned on it is forgotten (the same explicit hook as play_inspect_required),
                         # so the step decides from the current offer instead of waiting for a readback of nothing.
                         _generic_world.inspect_refused(self, request, decision.choice)
+                        _festival_facts.inspect_refused(self, request, decision.choice)
                         return OwnerTurnResult(admitted=True, skip_reply_tags=True,
                                                discarded=True, reason="continuation_context_changed")
                 if self._action_busy or self._worker_stop.is_set():
@@ -7423,6 +7529,7 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
         call_state: dict[str, object] = {}
         call_thread: threading.Thread | None = None
         house_route_inputs = None
+        mail_run = None
         binding_refused = False  # PART_A34: native pre-arm BindingMismatch receipt (see below)
         food_refused = False  # A7: eat-only pad gate rejected before ARM; no input ran
         exit_inbox_refused = False  # GAP7B: eligibility refused before any ladder press
@@ -7918,12 +8025,33 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
                                      after.get("location_id") if evidence.world_effect_status == interact.EFFECT_LOCATION else None)
         elif interact_kind in command.GENERIC_WORLD_KINDS and submitted and before is not None and pin is not None:
             from arti_stardew_generic_world import receipt
-            delta = receipt(result.mentah or {}, args) if result and evidence.lifecycle == "completed" else None
+            from arti_runtime.local_walks import enabled as _local_walks_enabled
+            delta = (receipt(result.mentah or {}, args, ignore_quest_time=_local_walks_enabled(self._config))
+                     if result and evidence.lifecycle == "completed" else None)
             evidence = replace(evidence, after=delta,
                 observed_changes=tuple(c["path"] for c in delta["changes"]) if delta else (),
                 world_effect_status=("observed_world_delta" if delta["changes"] else "unchanged") if delta else "uncertain")
             cleanup = cleanup and bool(result and (result.mentah or {}).get("cleanup_confirmed") is True)
-            _generic_world.remember_readback(self, request, args, delta, cleanup)
+            mailbox = request.snapshot.world_interaction_target or {}
+            if (mailbox.get("kind") == "mailbox" and request.snapshot.event_movement is None
+                    and interact_kind == "generic_action"
+                    and all(type(mailbox.get(k)) is int and mailbox[k] == args[k] for k in ("tile_x", "tile_y"))):
+                mail_run = self._skill_menu_run(goal, "cek_pagi")
+            if mail_run is not None and "mail_unread_before" in mail_run.state:
+                opened = _generic_world.opened_menu(replace(evidence, cleanup_confirmed=cleanup))
+                if observed and opened and opened["type"] == "LetterViewerMenu":
+                    try:
+                        post = self._move_readback(request, before, folder=pin.folder, context=action_context,
+                                                  expected_menu=(opened["type"], opened["receiver"]))
+                    except (OSError, ValueError, TypeError, command.KesalahanPerintah):
+                        post = None
+                    if post is not None:
+                        handoff = _menu_open_receipt(request, action_context, evidence, post,
+                                                     opened["type"], opened["receiver"])
+                        evidence = replace(evidence, after=dict(delta, menu_handoff=handoff))
+            _generic_world.remember_readback(self, request, args,
+                                             dict(delta, request_id=evidence.request_id) if delta is not None else None,
+                                             cleanup)
             self._journal(dict(ev="generic_world_readback", request_id=evidence.request_id, button=interact_kind,
                                delta=delta, cleanup=cleanup))
         elif extras_kind is not None and submitted and before is not None and pin is not None:
@@ -8028,6 +8156,13 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
             if after is not None and world_interact:
                 after["container_open"] = dict(receiver=envelope["result_receiver_token"],
                     source=args["source_fact_id"], target=args["target_token"])
+                if self._skill_menu_run(goal, "simpan_ke_chest") is not None:
+                    rec, _ = self._ui_key_record(action_context.player_id)
+                    if rec is not None and rec.facts.get("context_generation") == envelope["result_context_generation"]:
+                        post = dict(after, context_generation=envelope["result_context_generation"],
+                                    ui_revision=rec.facts.get("ui_revision"), ui_domain_revision=rec.domain_revision)
+                        after["menu_handoff"] = _menu_open_receipt(request, action_context, evidence, post,
+                            "ItemGrabMenu", envelope["result_receiver_token"])
             cleanup = cleanup and envelope.get("cleanup_confirmed") is True
             evidence = replace(evidence,after=after,
                 world_effect_status="observed_container_open" if after is not None else "uncertain")
@@ -8152,6 +8287,10 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
             self._animal_record_action(goal, evidence)
             if not superseded:
                 goal.last_action = evidence
+                if (mail_run is not None and self._skill_menu_run(goal, "cek_pagi") is mail_run
+                        and "mail_unread_before" in mail_run.state):
+                    mail_run.state["mail_handoff_required"] = True
+                    mail_run.state["mail_handoff"] = (evidence.after or {}).get("menu_handoff")
             if not hold and self._inflight_generation == request.generation_id:
                 self._inflight_generation = None
             self._water_action_pin = None
@@ -8169,7 +8308,9 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
             self._journal_action_result(request.goal_id, evidence, result)
             if not superseded and not hold:
                 self._schedule_continuation(decision, request)
-        if (not hold and not superseded and evidence.cleanup_confirmed and evidence.lifecycle == "completed"
+            menu_scheduled = bool((evidence.after or {}).get("menu_handoff") and self._pending_continuation is not None)
+        if (not hold and not superseded and not menu_scheduled
+                and evidence.cleanup_confirmed and evidence.lifecycle == "completed"
                 and (evidence.world_effect_status in {"observed_world_delta", "observed_selection", "observed_container_open",
                                                       "observed_paired_transfer", "observed_container_exit", "unchanged",
                                                       "observed_fish_caught", "observed_monster_killed",
@@ -8300,7 +8441,10 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
                 self._status = OFF
             if not superseded:
                 self._schedule_continuation(decision, request)
+            menu_scheduled = bool((getattr(evidence, "after", None) or {}).get("menu_handoff")
+                                  and self._pending_continuation is not None)
         if (leased and not superseded and evidence is not None and evidence.cleanup_confirmed
+                and not menu_scheduled
                 and evidence.lifecycle == "completed"
                 and evidence.world_effect_status in {"observed_selection", "observed_container_open",
                                                      "observed_paired_transfer", "observed_container_exit", "unchanged"}):
@@ -8596,8 +8740,9 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
                 break
             try:
                 following, stop = self._store_chain_next(step_decision, step, goal, result, op=op)
+                opened = op == "world_interact" and (getattr(result.action_evidence, "after", None) or {}).get("menu_handoff")
                 for _ in range(2):  # PM-1 fix4 #2: an open chest republishes ui.context; re-read only, no input
-                    if stop != "store_capture_changed":
+                    if stop != "store_capture_changed" and not (opened and stop == "transfer_not_offered"):
                         break
                     W.call('poll', 67, time.sleep, 0.05)
                     following, stop = self._store_chain_next(step_decision, step, goal, result, op=op)
@@ -8612,6 +8757,12 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
             evidence = result.action_evidence
             if not (evidence is not None and evidence.lifecycle == "not_taken" and evidence.request_id is None):
                 settled = (step_decision, step, result)
+        full_chest = None
+        if (goal is not None and steps == ["world_interact"]
+                and stop == "transfer_not_offered" and result.applied):
+            with self._lock:
+                if self._active is goal:
+                    full_chest = self._read_chest_full(goal, step, result, self._skill_menu_run(goal, "simpan_ke_chest"))
         # D33 (live soak3/B5W1a): a chain that ends before the deposit is stored closes the chest now.
         close = None
         try:
@@ -8623,6 +8774,16 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
                            "error": type(exc).__name__})
         with self._lock:
             self._part_a_store_chain_stopped(goal, stop, close)
+            if (goal is not None and self._active is goal and steps == ["world_interact"]
+                    and stop in ("transfer_not_offered", "native_context_changed", "effect_motor_changed") and result.applied):
+                run = self._skill_menu_run(goal, "simpan_ke_chest")
+                if run is not None and not self._action_cancel.is_set() and not self._worker_stop.is_set():
+                    run.state.pop("store_menu_handoff", None)
+                    if stop == "transfer_not_offered" and full_chest is not None:
+                        self._note_chest_full(full_chest)
+                        run.pending = ("fail", "chest_full")
+                    else:
+                        run.pending = ("fail", "transfer_not_offered" if stop == "transfer_not_offered" else "goods_menu_changed")
         last_decision, last_request, last_result = settled
         trailing = result if result is not last_result else None
         with self._lock:  # diagnostic: operations and stop code only, never values
@@ -8704,6 +8865,8 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
                     # a count goal reads UNAVAILABLE (no world window); one_tree stays INVENTORY_SATISFIED.
                     return None, "gather_" + str(progress.status).lower()
                 if not snapshot.transfer_targets:
+                    if op == "world_interact" and self._skill_store_menu_handoff(goal, request):
+                        return None, "chosen_bag_sitting_pending"
                     return None, "transfer_not_offered"
                 # The model-chosen path's own fill: only a single observed owner-capped target is filled.
                 unfilled = replace(decision, choice=ActChoice("container_transfer", None, {}, ()))
@@ -8786,6 +8949,100 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
             goal.last_play_attempt = (json.dumps([operation, args], sort_keys=True), motor_basis)
             goal.last_play_published = False
             return (following_decision, following, operation), None
+
+    def _skill_store_menu_handoff(self, goal, request):
+        """Use the existing named-stack executor when this chest only offers pad controls."""
+        run = self._skill_menu_run(goal, "simpan_ke_chest")
+        if run is None or self._skill_menu_open_pin(goal, request) is None:
+            return False
+        from arti_runtime.bag_sitting import active_selection
+        from arti_stardew_generic_ui import controls
+        view = self._live7_unknown_ui_view(self._skill_session, publishing=True)
+        pin = self._skill_menu_open_pin(goal, request, view=view) if view is not None else None
+        if (view is None or not view.generic or (view.menu_container or {}).get("kind") != "chest"
+                or pin is None
+                or not active_selection(run, view, self._live7_transfer_actions(view) | controls(view),
+                                        single_store=True)):
+            return False
+        run.state["store_menu_handoff"] = (goal.last_action.request_id, (view.receiver_token, self._store_identity(pin)))
+        return True
+
+    def _read_chest_full(self, goal, request, result, run):
+        """The observation may never cost the chest its close: any doubt reads as no fact."""
+        try:
+            return self._open_chest_full_fact(goal, request, result, run)
+        except Exception as exc:  # noqa: BLE001 -- the chain's own close and settlement follow this read
+            self._journal({"ev": "chest_full_read_error", "error": type(exc).__name__})
+            return None
+
+    def _note_chest_full(self, fact):
+        note = getattr(self, "_live7_chest_full", None)
+        try:
+            if note is not None:
+                note(fact)
+        except Exception as exc:  # noqa: BLE001 -- a memory row may never cost the run its outcome
+            self._journal({"ev": "chest_full_note_error", "error": type(exc).__name__})
+
+    def _open_chest_full_fact(self, goal, request, result, run):
+        """Fact for a fresh, open, owned chest whose published slots are all taken and none holds this item."""
+        if (goal is None or self._active is not goal or run is None
+                or goal.gather_uncertain or self._gather_mutation_unresolved):
+            return None
+        binding, pid = self._binding_view()
+        if (binding.status != "bound" or pid is None
+                or request is not None and binding != request.snapshot.binding):
+            return None
+        pin = self._water_context(pid, container=True)
+        motor = self._state.latest(pid)
+        if (pin is None or motor is None or self._state.is_stale(pid)
+                or motor.location != pin.location
+                or request is not None and (motor.location != request.snapshot.motor.location
+                                            or motor.tile != request.snapshot.motor.tile)):
+            return None
+        evidence = getattr(result, "action_evidence", None) if result is not None else goal.last_action
+        if evidence is not None:
+            last, captured = goal.last_action, goal.last_effect_motor
+            if (last != evidence or last.after is None or captured is None
+                    or last.after.get("revisi") != captured.revisi
+                    or not self._same_motor_facts(motor, captured)):
+                return None
+        view = self._container_view(pin)
+        if view is None or view.get("cursor") is not None:
+            return None
+        ref = view["source_fact_id"]
+        if goal.store_container != (view["container_token"], ref):
+            return None
+        pinned = getattr(goal, "store_chest_pin", None)
+        if pinned is not None and pinned.get("ref") and pinned.get("ref") != ref:
+            return None
+        after = (goal.last_action.after or {}) if goal.last_action is not None else {}
+        opened = after.get("container_open") if isinstance(after.get("container_open"), Mapping) else {}
+        if opened.get("source") and opened.get("source") != ref:
+            return None
+        if opened.get("receiver") and opened.get("receiver") != view["receiver_token"]:
+            return None
+        handoff = after.get("menu_handoff") if isinstance(after.get("menu_handoff"), Mapping) else {}
+        if handoff.get("receiver") and handoff.get("receiver") != view["receiver_token"]:
+            return None
+        if getattr(goal, "store_receiver", None) is not None and goal.store_receiver[0] != view["receiver_token"]:
+            return None
+        progress = getattr(goal, "gather_progress", None)
+        qid = progress.qualified_item_id if progress is not None else run.call.arg
+        quality = progress.quality if progress is not None else getattr(run.call, "quality", None)
+        from arti_runtime.chest_memory import is_full_for_item, parse_ref
+        if parse_ref(ref) is None:
+            return None
+        counts = is_full_for_item(view.get("container_slots"), qid, quality)
+        if counts is None:
+            return None
+        session = getattr(self, "_skill_session", None)
+        campaign = getattr(session, "campaign", None)
+        date = list(campaign.date) if campaign is not None and getattr(campaign, "date", None) else self._date_tuple(motor)
+        if not isinstance(date, (list, tuple)) or len(date) != 3:
+            return None
+        return dict(ref=ref, taken=counts[0], total=counts[1], date=list(date),
+                    clock=getattr(motor, "time_of_day", None), location=motor.location,
+                    slots=view.get("container_slots"))
 
     def _gather_tool_target(self, goal, equipped_tool) -> str | None:
         progress = goal.gather_progress if goal is not None else None
@@ -8922,7 +9179,9 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
             result = campaign_travel
         result = self._debris_route_entries(result)
         from arti_stardew_generic_world import ordinary
-        for target in ordinary(self, pin):
+        ordinary_rows = ordinary(self, pin)
+        scene_pickups = {t["ref"] for t in ordinary_rows if t.get("kind") == "scene_pick_up"}
+        for target in ordinary_rows:
             if target.get("status") not in ("openable", "available"):
                 continue
             stands = target.get("stands", ())
@@ -8972,10 +9231,14 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
                 override = -1  # the active rock leg cannot fall out of the eight-entry catalog
             if t.get("kind") in ("ladder_up", "ladder_down", "shaft"):
                 override = 0  # ADR 165/196: native ladders survive a catalogue full of nearby stones.
-            if str(t["ref"]).startswith("map-action:"):
+            if (str(t["ref"]).startswith(_generic_world.MAP_PRESS_PREFIXES)
+                    or t["ref"] in scene_pickups
+                    or (str(t["ref"]).startswith("obj:") and isinstance(facts.get(t["ref"]), Mapping)
+                        and facts[t["ref"]].get("grabbable") is True
+                        and not str(t["ref"]).endswith(_economy.STORE_CHEST_SUFFIXES))):
                 run = getattr(getattr(self, "_skill_session", None), "current", None)
                 if self._run_owns_goal(run, self._active) and run.call.name == "aksi" and run.call.arg == t["ref"]:
-                    override = -2  # the one named map action keeps its approach during this skill
+                    override = -2  # the one named map action or scene pickup keeps its approach during this skill
             if override is None and t.get("kind") in (_economy.KIND_SHOP_COUNTER, _economy.KIND_SHIPPING_BIN):
                 override = 0  # fix D-B2-1: the sell / buy objective's own counter first (D-B5b-3: the ship bin)
             if override is None and t.get("kind") == _STORE_CHEST_PIN_KIND:
@@ -9239,6 +9502,19 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
     def _aksi_chest_ref(self, goal, target_ref) -> bool:
         return target_ref is not None and (self._aksi_chest(goal) or (None,))[0] == target_ref
 
+    def _aksi_pickup_target(self, goal, ref, tile=None) -> bool:
+        """Active aksi call targeting this scene_pick_up obj: ref (never chests or another object)."""
+        run = getattr(getattr(self, "_skill_session", None), "current", None)
+        call = getattr(run, "call", None)
+        if (not str(ref or "").startswith("obj:") or str(ref).endswith(_economy.STORE_CHEST_SUFFIXES)
+                or not self._run_owns_goal(run, goal) or getattr(call, "name", None) != "aksi"
+                or call.arg != ref or (tile is not None and call.tile != tuple(tile))):
+            return False
+        req = getattr(self, "_logical_request", None)
+        rows = getattr(getattr(req, "snapshot", None), "ordinary_interactions", ()) if req is not None else ()
+        row = next((r for r in rows if r.get("ref") == ref), None)
+        return row is None or row.get("kind") == "scene_pick_up"
+
     @staticmethod
     def _flush_family(goal, ref) -> bool:
         """Targets that get the one bounded flush press besides the store chest: doors under a navigation
@@ -9494,14 +9770,16 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
         family = self._animal_flush_due(goal, target.target_ref) if target is not None else False
         if family is None:
             family = self._flush_family(goal, target.target_ref)
-        if (target is not None and str(target.target_ref).startswith(("xt:bin:", "map-action:"))
-                and not family):
-            # ADR 210: direct ACTION on the observed bin owns the same bounded
-            # grab-pose flush as shipping. No other bin/goal inherits it.
-            run = getattr(getattr(self, "_skill_session", None), "current", None)
-            call = getattr(run, "call", None)
-            family = (self._run_owns_goal(run, goal) and getattr(call, "name", None) == "aksi"
-                      and call.arg == target.target_ref and call.tile == tuple(target.target_tile))
+        if target is not None and not family:
+            if str(target.target_ref).startswith(("xt:bin:", *_generic_world.MAP_PRESS_PREFIXES)):
+                # Direct ACTION on the observed bin owns the same bounded
+                # grab-pose flush as shipping. No other bin/goal inherits it.
+                run = getattr(getattr(self, "_skill_session", None), "current", None)
+                call = getattr(run, "call", None)
+                family = (self._run_owns_goal(run, goal) and getattr(call, "name", None) == "aksi"
+                          and call.arg == target.target_ref and call.tile == tuple(target.target_tile))
+            else:
+                family = self._aksi_pickup_target(goal, target.target_ref, target.target_tile)
         if (target is None or target.reach_kind != "ADJACENT_INTERACTION"
                 or not family
                 or pixel is None or tile is None or facing not in (0, 1, 2, 3)
@@ -9913,13 +10191,19 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
                 self._approach_reach_reobserve(goal, current.target_ref)
                 raise ValueError("approach_reach_changed")
             if motor.facing == facing:
-                tile_action = str(current.target_ref).startswith("map-action:") and any(
+                code_press = _generic_world.code_press_ref(current.target_ref)
+                tile_action = (
+                    str(current.target_ref).startswith(_generic_world.MAP_PRESS_PREFIXES)
+                    or self._aksi_pickup_target(goal, current.target_ref, current.target_tile)
+                ) and any(
                     t["kind"] == "generic_action" and (t["tile_x"], t["tile_y"]) == current.target_tile
+                    and (not code_press or t["source_fact_id"] == current.target_ref)
                     for t in request.snapshot.generic_world_targets)
-                if tile_action or request.snapshot.world_interaction_target is not None or not self._interaction_flush_due(
+                other_interact = not code_press and request.snapshot.world_interaction_target is not None
+                if tile_action or other_interact or not self._interaction_flush_due(
                         goal, current, motor.tile, motor.pixel, facing):
                     if (goal.chest_flush_key == (current.target_ref, tuple(motor.tile))
-                            and request.snapshot.world_interaction_target is None):
+                            and not other_interact):
                         self._journal({"ev": "chest_flush_step", "generation_id": request.generation_id,
                                        "outcome": "not_repeated"})
                     return None, None
@@ -10409,35 +10693,45 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
         # D6 (live B2W6a): a step can cross a warp (the readback then shows CanMove false in the old
         # location, or fails). Wait for the farmhand round trip and classify it as a location change.
         warped = None
+        warp_failure = []
         if (request.snapshot.event_movement is None and submitted and before is not None and cleanup and goal is not None
-                and (after is None or (after.get("can_player_move") is False
-                                       and after.get("location") == before.get("location")))):
+                and (after is None or after.get("can_player_move") is False
+                     or after.get("location") != before.get("location"))):
             try:
-                warped = self._warp_after_move_readback(request, before, folder)
+                warped = self._warp_after_move_readback(request, before, folder, failure=warp_failure)
             except Exception:  # noqa: BLE001 — never bypass the bookkeeping below
                 warped = None
+        if warp_failure:
+            effect = "uncertain"
+            evidence = MoveTransitionEvidence(**asdict(replace(evidence, world_effect_status=effect)),
+                                              movement_transition=warp_failure[-1])
         if warped is not None:
             native_reason = evidence.reason
-            after, changes, effect = warped, ("location",), interact.EFFECT_LOCATION
-            evidence = ActionEvidenceView(evidence.lifecycle, "location_changed_during_move", evidence.request_id,
-                                          evidence.outcome, before, after, effect, cleanup, changes)
             old_location = request.snapshot.movement_context.location if request.snapshot.movement_context else None
+            native = getattr(result, "mentah", None) or {}
+            result_identity = dict(session_id=pin.command_session_id, request_id=evidence.request_id,
+                                   runtime_instance_id=pin.runtime_instance_id, player_id=pin.player_id,
+                                   screen_id=pin.screen_id)
+            foreign = any(native.get(k, value) != value for k, value in result_identity.items())
+            # CompleteInterrupted omits runtime/player/screen. The fresh arrival context binds them.
+            bound_result = (not foreign and native.get("accepted") is True and native.get("op") == command.OP_INPUT_ONCE
+                            and native.get("session_id") == pin.command_session_id
+                            and evidence.request_id and native.get("request_id") == evidence.request_id)
             with self._lock:
                 expected = interact.move_location_change_expected(goal.interact_objective, old_location, warped["location_id"])
                 route_objective = self._debris_route_exit_objective(goal, pin, warped["location_id"])
-                if expected or route_objective is not None:
+                declared = expected or route_objective is not None
+                # The actor's fresh arrival is established independently of the command envelope.
+                # A foreign envelope cannot attach that arrival to this press or reconcile the lifecycle.
+                after, changes, effect = warped, ("location",), interact.EFFECT_LOCATION
+                transition = "foreign" if foreign else "declared" if declared and bound_result else "incidental"
+                evidence = replace(evidence, reason="location_changed_during_move", after=after,
+                                   world_effect_status=effect, observed_changes=changes)
+                evidence = MoveTransitionEvidence(**asdict(evidence), movement_transition=transition)
+                if declared and bound_result:
                     self._expected_location = warped["location_id"]
-                if ((expected or route_objective is not None) and evidence.lifecycle == "interrupted"
+                if (declared and bound_result and evidence.lifecycle == "interrupted"
                         and native_reason == "PRECONSUMER_HISTORY_DIVERGENCE:REQUEST_BINDING_INVALID"
-                        and result is not None and (result.mentah or {}).get("accepted") is True
-                        and (result.mentah or {}).get("op") == command.OP_INPUT_ONCE
-                        and (result.mentah or {}).get("session_id") == pin.command_session_id
-                        and (result.mentah or {}).get("request_id") == evidence.request_id
-                        # Native CompleteInterrupted omits these three; the warp readback above already
-                        # bound runtime/session/player/screen through fresh ui.context. Any emitted value
-                        # must still match the pin, as in the RELEASED_BEFORE_LATCH reconcile.
-                        and all((result.mentah or {}).get(k, getattr(pin, k)) == getattr(pin, k)
-                                for k in ("runtime_instance_id", "player_id", "screen_id"))
                         and self._active is goal and self._request_current(request)
                         and not self._action_cancel.is_set() and not self._worker_stop.is_set()
                         and not self._gather_mutation_unresolved and not goal.gather_uncertain):
@@ -10448,11 +10742,12 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
                     self._journal(dict(ev="move_reconciled", request_id=evidence.request_id,
                                        reason="planned_exit_observed", native_lifecycle="interrupted",
                                        native_reason=native_reason))
-                if route_objective is not None and evidence.lifecycle == "completed":
+                if bound_result and route_objective is not None and evidence.lifecycle == "completed":
                     goal.interact_objective = route_objective
                     self._debris_route_exit_observed(goal)
                 goal.approach_progress = dict(status="UNAVAILABLE", reason="location_changed")
-            self._interaction_effect(goal, interact.KIND_WARP, evidence, old_location, warped["location_id"])
+            self._interaction_effect(goal if declared and bound_result and evidence.lifecycle == "completed" else None,
+                                     interact.KIND_WARP, evidence, old_location, warped["location_id"])
         skill_move_reconciled = False
         if (not approach and submitted and cleanup and warped is None and not arm_refusal_reconciled
                 and result is not None and evidence.lifecycle == "interrupted"):
@@ -10618,6 +10913,12 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
             self._animal_record_action(goal, evidence)
             if not superseded:
                 goal.last_action = evidence
+                if isinstance(evidence, MoveTransitionEvidence) and not self._worker_stop.is_set():
+                    run = self._skill_move_run(goal)
+                    if run is not None and run.call.name == "langkah":
+                        # Report the observation even when the binding guard holds the run for recovery.
+                        from arti_runtime.raw_hands import step_readback
+                        run.state["step_movement"] = step_readback(evidence)
             if not hold and self._inflight_generation == request.generation_id:
                 self._inflight_generation = None
             self._action_pin = None
@@ -10636,7 +10937,8 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
         if (approach and not superseded and not hold and evidence.lifecycle == "completed"
                 and (goal.approach_progress or {}).get("reason") == "approach_no_effect_reobserve"):
             self._resume_after_pause(reason="approach_no_effect_reobserve")
-        if (warped is not None and not superseded and not hold and evidence.lifecycle == "completed"
+        if (getattr(evidence, "movement_transition", None) in ("declared", "incidental")
+                and not superseded and not hold and evidence.lifecycle == "completed"
                 and evidence.cleanup_confirmed):
             # The native context moved with the warp: fresh facts first (same path as a door warp).
             self._resume_after_pause(reason="location_changed")
@@ -10660,7 +10962,7 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
             action_evidence=evidence)
 
     @W.span('settle_readback', 42, runtime=True)
-    def _warp_after_move_readback(self, request: GenerationRequest, before: dict, folder: Path) -> dict | None:
+    def _warp_after_move_readback(self, request: GenerationRequest, before: dict, folder: Path, *, failure) -> dict | None:
         """D6: after a move / approach step, a warp in progress (CanMove false, not yet free) is followed to its
         destination; None when the actor is free again in the same location or nothing changes in time."""
         pin = request.snapshot.water_context or request.snapshot.movement_context
@@ -10673,7 +10975,7 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
             except (OSError, ValueError, command.KesalahanPerintah):
                 session = None
             if session is not None and session.location_id and session.location_id != pin.location:
-                return self._location_change_readback(request, before, session.location_id, folder)
+                return self._location_change_readback(request, before, session.location_id, folder, move_failure=failure)
             motor = self._state.latest(pin.player_id)
             if (motor is not None and motor.location == before.get("location") and motor.can_player_move is True
                     and motor.revisi > before.get("revisi", 0)):
@@ -10683,7 +10985,7 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
 
     @W.span('settle_readback', 43, runtime=True)
     def _location_change_readback(self, request: GenerationRequest, before: dict, expected: str,
-                                  folder: Path, *, event_up: bool = False) -> dict | None:
+                                  folder: Path, *, event_up: bool = False, move_failure=None) -> dict | None:
         """WS3a: bounded wait for the post-warp frame in the expected location (token compare).
 
         Requires ui.context (complete, authoritative, fresh) and session.json in the expected location,
@@ -10694,6 +10996,7 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
             return None
         deadline = self._game_now() + interact.WARP_READBACK_SECONDS
         last_branch = "pending"
+        session = None
         while self._game_now() < deadline and not self._worker_stop.is_set():
             binding, pid = self._binding_view()
             rec = self._obs.get(pin.player_id, "ui.context")
@@ -10704,8 +11007,8 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
                 session = None
             for branch, failed in (
                     ("binding_changed", binding != request.snapshot.binding or pid != pin.player_id),
-                    ("ui_context_missing", rec is None or not rec.is_complete or not rec.authoritative
-                        or not 0 <= time.monotonic() - rec.received_monotonic <= 2),
+                    ("ui_context_missing", rec is None or not rec.is_complete or not rec.authoritative),
+                    ("ui_context_stale", rec is not None and not 0 <= time.monotonic() - rec.received_monotonic <= 2),
                     ("ui_context_identity", rec is not None and (rec.facts.get("runtime_instance_id") != pin.runtime_instance_id
                         or rec.facts.get("session_id") != pin.command_session_id
                         or rec.facts.get("player_id") != pin.player_id or rec.facts.get("screen_id") != pin.screen_id)),
@@ -10716,8 +11019,17 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
                     ("player_not_free", not event_up and rec is not None and rec.facts.get("is_player_free") is not True),
                     ("session_location", session is None or session.location_id != expected
                         or session.session_id != pin.command_session_id),
+                    ("warp_identity", move_failure is not None and (
+                        rec is not None and (rec.session_id != pin.observation_session_id
+                        or rec.player_id != pin.player_id or rec.screen_id != pin.screen_id)
+                        or session is not None and (session.mentah.get("runtime_instance_id") != pin.runtime_instance_id
+                        or session.player_id != pin.player_id or session.screen_id != pin.screen_id)
+                        or motor is not None and (motor.player_id != pin.player_id or motor.screen_id != pin.screen_id))),
                     ("motor_stale", motor is None or self._state.is_stale(pin.player_id)
-                        or (not event_up and motor.is_player_free is not True) or motor.revisi <= before.get("revisi", 0)),
+                        or motor.revisi <= before.get("revisi", 0)
+                        # The motor name and the command's location token can use different vocabularies.
+                        or move_failure is not None and motor.location == before.get("location")),
+                    ("motor_not_free", not event_up and motor is not None and motor.is_player_free is not True),
                     ("date_changed", motor is not None and self._date_tuple(motor) != self._date_tuple(request.motor_basis))):
                 if failed:
                     last_branch = branch
@@ -10731,6 +11043,11 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
             W.call('poll', 60, time.sleep, 0.1)
         self._journal({"ev": "move_readback_unavailable", "generation_id": request.generation_id,
                        "branch": "location_change:" + last_branch, "witness": False})
+        if move_failure is not None and not self._worker_stop.is_set():
+            foreign = last_branch in ("binding_changed", "ui_context_identity", "warp_identity") or (
+                session is not None and session.session_id != pin.command_session_id)
+            stale = last_branch in ("ui_context_stale", "ui_context_generation", "motor_stale", "date_changed")
+            move_failure.append("foreign" if foreign else "stale" if stale else "unconfirmed")
         return None
 
     def _observed_pose_fact(self, request: GenerationRequest, folder: Path) -> dict | None:
@@ -10875,6 +11192,8 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
         after = evidence.after or {}
         entry = {"ev": "interaction_effect", "kind": kind, "outcome": evidence.outcome,
                  "world_effect_status": evidence.world_effect_status}
+        if getattr(evidence, "movement_transition", None) == "foreign":
+            entry["movement_transition"] = "foreign"
         if after_location:
             entry["result_location_id"] = after_location
         if after.get("event_up"):
@@ -10898,7 +11217,7 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
     def _move_readback(self, request: GenerationRequest, before: dict,
                        *, folder: Path | None = None, context: MovementContext | None = None,
                        expected_receiver: tuple | None = None, expected_exit: bool = False,
-                       approach_witness=None) -> dict | None:
+                       approach_witness=None, expected_menu: tuple | None = None) -> dict | None:
         pin = context or request.snapshot.movement_context
         assert pin is not None
         def unavailable(branch: str) -> None:
@@ -10926,8 +11245,9 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
         binding, pid = self._binding_view()
         rec = self._obs.get(pin.player_id, "ui.context")
         expected_generation = pin.context_generation
-        if expected_receiver is not None:
-            receiver, generation, source = expected_receiver
+        if expected_receiver is not None or expected_menu is not None:
+            receiver, generation, source = (expected_receiver if expected_menu is None else
+                (expected_menu[1], pin.context_generation + 1, None))
             # Branch names below are diagnostic only (live 2026-10-07 attempt 10z43: a background
             # chest open read back uncertain with no trace); the checks are unchanged.
             if type(generation) is not int or generation!=pin.context_generation+1:
@@ -10946,6 +11266,20 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
                         or rec.domain_revision<=before["exit_ui_revision"]):return unavailable("exit_receiver_present")
             else:
                 def opened(record):
+                    if expected_menu is not None:
+                        if (record is None or record.stale or record.requires_resync
+                                or record.facts.get("mode") != "menu"
+                                or record.facts.get("context_generation") != generation):
+                            return False
+                        from arti_stardew_generic_ui import motor_facts
+                        from arti_stardew_ui_pad import baca_ui_pad
+                        owner = motor_facts(record.facts) or {}
+                        if owner.get("control_taken") == "event" or owner.get("event_id"):
+                            return False
+                        view = baca_ui_pad(record.facts, age_s=time.monotonic() - record.received_monotonic,
+                                           authoritative=record.authoritative, complete=record.is_complete)
+                        return (view is not None and view.context not in ("gift", "event")
+                                and (view.menu_type, view.receiver_token) == expected_menu)
                     container = record.facts.get("container",{}) if record is not None else {}
                     return (isinstance(receiver,str) and receiver and len(receiver)<=128
                             and container.get("available") is True and container.get("receiver_token")==receiver
@@ -10971,6 +11305,9 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
                     return unavailable("receiver_ui_context_stale")
                 if list(post.tile)!=before["tile"] or post.facing!=before["facing"]:
                     return unavailable("receiver_actor_moved")
+                if expected_menu is not None and (post.active_menu != expected_menu[0]
+                        or type(post.ui_revision) is not int or post.ui_revision <= pin.ui_revision):
+                    return unavailable("receiver_motor_menu")
             expected_generation = generation
         try:
             current = self._commands.baca_sesi(folder if folder is not None else self._action_pin[0],
@@ -11006,7 +11343,11 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
         with self._lock:
             if self._request_current(request) and self._active is not None:
                 self._active.last_effect_motor = post
-        return _move_motor_facts(post)
+        facts = _move_motor_facts(post)
+        if expected_menu is not None:
+            facts.update(context_generation=expected_generation, ui_revision=post.ui_revision,
+                         ui_domain_revision=rec.domain_revision)
+        return facts
 
     @staticmethod
     def _date_tuple(motor):
@@ -11366,7 +11707,7 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
 
     @W.span('settle_readback', 47, runtime=True)
     def _resolve_inspect(
-        self, decision: GameDecision, request: GenerationRequest
+        self, decision: GameDecision, request: GenerationRequest, *, event_target=None
     ) -> InspectEvidenceView:
         choice = decision.choice
         if not isinstance(choice, InspectChoice):
@@ -11439,7 +11780,7 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
             # metadata progression (motor revision/clock, scene revision with equal facts, a
             # bobbing drop). Normalise that the way the continuation gates do; a real change
             # is still a torn capture.
-            after = self._metadata_only_progression(current, after) or after
+            after = self._metadata_only_progression(current, after, event_target=event_target) or after
         if after != current:
             # PM-1 fix5 (attempt 5 J:2550): a read-only inspect is not torn by a republish whose only change is
             # an observation's domain_revision (every derived snapshot field equal); any other change still is.
@@ -11450,6 +11791,8 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
                   and replace(after.ui_context, domain_revision=current.ui_context.domain_revision) == current.ui_context
                   else after.ui_context)
             after = replace(after, observations=views, ui_context=ui, context_ref=current.context_ref)
+        if after != current:
+            after = self._event_churn_normalized(after, current, event_target=event_target)
         if after != current:
             return _inspect_fail(source, "mismatch", "mismatch", ctx, player_id, binding.screen_id,
                 diagnostic=dict(branch="capture_changed", before=_inspect_snapshot_basis(current),
@@ -11733,7 +12076,8 @@ class StardewGoalRuntime(HostPauseRuntimeMixin, UiKeyRuntimeMixin, ToolWorkRunti
                             native_record = self._obs.get(event["player_id"], "ui.context")
                             if scope := record_scope(native_record):
                                 self._live7_native_story_scope = scope
-                            for row in remember(base, native_record):
+                            for row in remember(base, native_record,
+                                                mind_scoped=(getattr(self, "_config", None) or {}).get("live7_mind_scope", False) is True):
                                 self._journal(row)
                 if applied.accepted and (event.get("payload") or {}).get("domain") == "ui.text":
                     identity = self._state.identitas(event.get("player_id"))
@@ -11882,6 +12226,16 @@ def _extras_effect_applied(kind: str | None, world_effect_status: str | None) ->
     (shaft / bus / minecart; ladder_down is a location kind and never reaches this branch)."""
     return (world_effect_status == _extras.FINISH
             or (world_effect_status == interact.EFFECT_LOCATION and kind in _EXTRAS_TRAVEL_KINDS))
+
+
+def _menu_open_receipt(request, context, evidence, post, menu, receiver):
+    if not evidence.request_id or any(type(post.get(k)) is not int for k in (
+            "context_generation", "ui_revision", "ui_domain_revision", "revisi")):
+        return None
+    return dict(request_id=evidence.request_id, generation_id=request.generation_id, menu=menu, receiver=receiver,
+                context=asdict(replace(context, context_generation=post["context_generation"],
+                                       ui_revision=post["ui_revision"])),
+                motor_revision=post["revisi"], ui_domain_revision=post["ui_domain_revision"])
 
 
 def _menu_step_evidence(action, snapshot) -> bool:
@@ -12446,8 +12800,11 @@ def _motor_facts_without_revision(facts: Mapping[str, object]) -> dict[str, obje
 
 def _move_motor_facts(snap: Any) -> dict[str, object]:
     facts = _motor_inspect_facts(snap)
-    return {key: facts[key] for key in ("player_id", "screen_id", "revisi", "location",
+    pose = {key: facts[key] for key in ("player_id", "screen_id", "revisi", "location",
             "tile", "pixel", "facing", "is_player_free", "can_player_move")}
+    if location_id := getattr(snap, "location_id", None):
+        pose["location_id"] = location_id
+    return pose
 
 
 def _motor_inspect_facts(snap: Any) -> dict[str, object]:

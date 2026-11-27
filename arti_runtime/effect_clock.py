@@ -34,7 +34,13 @@ EFFECT_ROWS = {"tool_work_effect": "tile_effect", "extras_effect": "tile_effect"
 # `observed_generic_readback` on WorldUnchanged, a step into a wall `observed_movement`. Their real changes (tile,
 # items, money, a menu) are read from the game by `observe` and the action rows; the finish row adds no change.
 ANSWER_ONLY = frozenset({"observed_generic_readback", "observed_movement", "observed_facing", "observed_equipped_item",
-                         "observed_menu_open"})
+                         "observed_menu_open", "observed_turn_only", "observed_no_movement"})
+
+
+def foreign_arrival(row):
+    if row.get("ev") == "interaction_effect" and row.get("movement_transition") == "foreign":
+        return row.get("result_location_id")
+    return None
 
 
 def effect_of(row) -> str | None:
@@ -44,16 +50,22 @@ def effect_of(row) -> str | None:
     ev = row.get("ev")
     if ev == "action_result":
         action = row.get("action") if isinstance(row.get("action"), Mapping) else {}
+        if action.get("movement_transition") == "foreign":
+            return None
         changes = sorted(set(action.get("observed_changes") or ()) - QUIET_CHANGES)
         if action.get("world_effect_status") == "observed_change" and changes:
             return "act:" + changes[0]
         return None
     if ev == "part_live_row":
-        if (row.get("verified") is True and row.get("outcome_class") == "VERIFIED"
-                and row.get("reason") not in ANSWER_ONLY):
-            return "verified:" + str(row.get("skill"))
+        if row.get("verified") is True and row.get("outcome_class") == "VERIFIED":
+            if row.get("reason") == "observed_movement" and row.get("step_tile_changed") is True:
+                return "tile"
+            if row.get("reason") not in ANSWER_ONLY:
+                return "verified:" + str(row.get("skill"))
         return None
     if ev in EFFECT_ROWS:
+        if foreign_arrival(row):
+            return None
         status = row.get("world_effect_status")
         if status is not None and "change" not in str(status):
             return None
@@ -67,10 +79,12 @@ def effect_of(row) -> str | None:
     return None
 
 
-def _world_diff(before, after):
+def _world_diff(before, after, *, crossing_without_credit=False):
     if not isinstance(before, Mapping) or not isinstance(after, Mapping):
         return None
     for key, cause in _WORLD:
+        if crossing_without_credit and key in ("location", "tile", "crops", "world"):
+            continue
         if key in before and key in after and after[key] is not None and before[key] != after[key]:
             return cause
     return None
@@ -101,6 +115,7 @@ class EffectClock:
     wait_seen: object = None
     ladder_origin: float = 0.0
     ladder_honoured: float = 0.0
+    foreign_destination: str | None = None
 
     def age(self, now) -> float:
         return max(0.0, now - self.since)
@@ -161,20 +176,28 @@ class EffectClock:
     def observe(self, now, *, evidence=None, menu=None, menu_known=True, date=None, program=False):
         """One boundary's game reading. Returns what reset the clock, or None. The first reading is a baseline."""
         cause = None
+        uncredited = False
         if date is not None:
             if self.date is not None and tuple(date) != tuple(self.date):
                 cause = "day"
             self.date = tuple(date)
         if evidence is not None:
+            uncredited = (self.foreign_destination is not None
+                          and evidence.get("location") == self.foreign_destination)
+            if uncredited or (self.evidence and evidence.get("location") is not None
+                              and self.evidence.get("location") != evidence["location"]):
+                self.foreign_destination = None
             if cause is None and self.evidence is not None:
-                cause = _world_diff(self.evidence, evidence)
+                cause = _world_diff(self.evidence, evidence, crossing_without_credit=uncredited)
+                if uncredited:
+                    self.serial += 1
             self.evidence = {k: (v if v is not None or self.evidence is None else self.evidence.get(k))
                              for k, v in evidence.items()}
         if cause is not None and not program:
             self.reset(now, cause)
         elif cause is not None:
             self.serial += 1  # her world moved under a rung: a later reopened menu is a new reading
-        menu_cause = self._menu(now, menu, program) if menu_known else None
+        menu_cause = self._menu(now, menu, program or uncredited) if menu_known else None
         return cause if cause is not None and not program else menu_cause
 
     def _menu(self, now, menu, program):
@@ -239,6 +262,7 @@ def replay(rows, *, bounds=(60, 120, 300)):
     """
     t = since = None
     menu = date = place = None
+    foreign_destination = None
     serial, menu_world, counted = 0, {}, False
     stretches, passed = [], {b: [] for b in bounds}
     open_stretch = {}
@@ -265,17 +289,25 @@ def replay(rows, *, bounds=(60, 120, 300)):
         cause = None
         if row.get("ev") == "native_vitals":
             game = row.get("game") if isinstance(row.get("game"), Mapping) else {}
-            if place is not None and game.get("location") != place:
+            location = game.get("location_id") or game.get("location")
+            uncredited = foreign_destination is not None and location == foreign_destination
+            if uncredited:
+                foreign_destination = None
+                serial += 1
+            elif place is not None and location != place:
+                foreign_destination = None
                 cause = "map"
             elif date is not None and game.get("date") != date:
                 cause = "day"
-            place, date = game.get("location"), game.get("date")
+            place, date = location, game.get("date")
             if cause:
                 serial += 1
             now_menu = row.get("active_menu")
             if now_menu != menu and "active_menu" in row:
                 before, menu = menu, now_menu
-                if now_menu is not None and menu_world.get(now_menu) != serial:
+                if uncredited:
+                    counted = False
+                elif now_menu is not None and menu_world.get(now_menu) != serial:
                     menu_world[now_menu], counted = serial, True
                     cause = cause or "menu_open:" + str(now_menu)
                 elif now_menu is None and before is not None and counted:
@@ -284,6 +316,8 @@ def replay(rows, *, bounds=(60, 120, 300)):
                 else:
                     counted = False
         else:
+            if destination := foreign_arrival(row):
+                foreign_destination = destination
             cause = effect_of(row)
             if cause and not cause.startswith("her_press"):
                 serial += 1

@@ -1155,7 +1155,7 @@ class UiKeyRuntimeMixin:
         return self._store_close(goal, origin="chain_end_failsafe", failsafe=True, chain_stop=stop)
 
     def _store_close(self, goal, *, origin: str, failsafe: bool, chain_stop: str | None = None,
-                     post_finish: bool = False) -> dict | None:
+                     post_finish: bool = False, receiver_scope: tuple | None = None) -> dict | None:
         """One leased container_exit of this goal's store chest; returns the journaled record or None."""
         from arti_stardew_runtime import READY
         with self._lock:
@@ -1165,6 +1165,9 @@ class UiKeyRuntimeMixin:
             binding, pid = self._binding_view()
             ctx = self._water_context(pid, container=True)
             args = self._store_close_target(goal, ctx, failsafe=failsafe) if ctx is not None else None
+            if args is not None and receiver_scope is not None and (
+                    args["receiver_token"], self._store_identity(ctx)) != receiver_scope:
+                return None  # a handoff cannot close a different opening of the same chest
             available = args is not None and self._water_snapshot_available(binding, ctx, container_exit=True)
             if not available:
                 if ctx is not None or not failsafe:

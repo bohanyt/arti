@@ -7,6 +7,17 @@ from arti_runtime.native_rows import native_rows
 LIMIT = 8
 WORDS = {"press": "ditekan", "pick_up": "dipungut", "break": "dipecah dengan alat",
          "talk": "diajak bicara", "walk_through": "dilewati"}
+MAP_PRESS_PREFIXES = ("map-action:", "map-code:")
+CODE_PRESS_SCAN_RADIUS = 12  # CodeActionCells.ScanRadius in the native publisher.
+
+
+def code_press_ref(ref):
+    return isinstance(ref, str) and ref.startswith("map-code:")
+
+
+def code_press_in_scan(tile, here):
+    return (isinstance(here, (list, tuple)) and len(here) == 2 and all(type(n) is int for n in here)
+            and max(abs(tile[0] - here[0]), abs(tile[1] - here[1])) <= CODE_PRESS_SCAN_RADIUS)
 
 
 def observed(context):
@@ -24,21 +35,27 @@ def observed(context):
         if not isinstance(row, (list, tuple)) or len(row) != 5:
             continue
         ref, x, y, classes, group = row
-        if (not isinstance(ref, str) or re.fullmatch(r"map-action:[0-9a-f]{20}", ref) is None
+        if (not isinstance(ref, str) or re.fullmatch(r"map-(?:action|code):[0-9a-f]{20}", ref) is None
                 or not all(type(n) is int and 0 <= n <= 4096 for n in (x, y))):
             continue
         allowed = tuple(dict.fromkeys(c for c in native_rows(classes) if isinstance(c, str) and c in WORDS))
+        if code_press_ref(ref):
+            if (not has_scene or scene.get("ordinary_world") is not True or allowed != ("press",)
+                    or isinstance((context.get("mines_ui") or {}).get("ui_event"), Mapping)
+                    or "actor_tile" in context and not code_press_in_scan((x, y), context["actor_tile"])):
+                continue
         if allowed:
             out[ref] = dict(tile=(x, y), classes=allowed, group=group if isinstance(group, str) else None, cell=True)
     if has_scene and scene.get("ordinary_world") is not False and context.get("describe_affordances"):
         from arti_stardew_native_targets import xy
         targets = context.get("scene_affordance_targets", context.get("targets")) or {}
+        excluded = set(context.get("excluded_scene_pickups") or ()).union(context.get("route_refusals", ()))
         for ref, fact in targets.items():
             if not isinstance(fact, Mapping) or fact.get("kind") != "object" or not isinstance(ref, str):
                 continue
             tile = xy(fact.get("tile"))
             classes = tuple(c for c, key in (("pick_up", "grabbable"), ("break", "tool_breakable"))
-                            if fact.get(key) is True)
+                            if fact.get(key) is True and (c != "pick_up" or ref not in excluded))
             if tile is not None and classes:
                 out[ref] = dict(tile=tile, classes=classes, group=None, cell=False)
     omitted = scene.get("omitted") if has_scene else None

@@ -370,6 +370,29 @@ def catch_observed(objective):
     return dict(effect="caught", item=(objective.fish or {}).get("item"), destination=destination)
 
 
+def released_catch(goal, action, before, inventory):
+    """A terminal catch from this cast, checked against the released bag if it opened a menu."""
+    from arti_runtime.action_outcomes import get
+
+    objective = getattr(goal, "fishing", None)
+    finish = getattr(goal, "last_finish", None)
+    verdict = finish_verdict(objective)
+    observed = get(finish, "observed") or {}
+    request = get(action, "request_id")
+    if (get(action, "lifecycle") != "completed" or observed.get("effect") != "caught"
+            or getattr(goal, "progress_marker", None) != "terminal" or not verdict or verdict[0] != "achieved"
+            or verdict != (get(finish, "status"), get(finish, "reason"))
+            or objective.goal_id != goal.goal_id or not request
+            or request != objective.caught_request_id or request != observed.get("request_id")):
+        return None
+    if observed.get("destination") == "menu":
+        item = (objective.fish or {}).get("item")
+        if not item or before is None or inventory.get(item, 0) <= before.get(item, 0):
+            return None
+        return FINISH_REASON, dict(observed, destination="inventory")
+    return verdict[1], observed
+
+
 def catch_speech(objective):
     fish = objective.fish or {}
     if objective.last_detail == "festival_score+1":

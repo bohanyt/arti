@@ -21,6 +21,8 @@ import os
 import threading
 from pathlib import Path
 
+from arti_runtime import ipc
+
 TAIL = 64  # bytes before the old end that must still be there for an append-only extension
 _CACHE: dict = {}
 _LOCK = threading.Lock()
@@ -46,12 +48,19 @@ def _parse(data: bytes, by_id: dict, *, first: bool) -> None:
             by_id[row["id"]] = row
 
 
-def rows(path) -> list[dict]:
-    """``arti_state.read_jsonl(path)``'s rows, read once per file revision (see the module text)."""
+def rows(path, *, strict=False) -> list[dict]:
+    """``arti_state.read_jsonl(path)``'s rows, read once per file revision (see the module text).
+
+    A missing file is empty. A file that cannot be read is empty too, unless ``strict``: a caller that writes the
+    file whole from these rows must get the error, as from ``read_jsonl``, and never an empty record."""
     path = Path(path)
     try:
         stat = path.stat()
+    except FileNotFoundError:
+        return []
     except OSError:
+        if strict:
+            raise
         return []
     if not path.is_file():
         return []
@@ -62,20 +71,21 @@ def rows(path) -> list[dict]:
         if same_file and (stat.st_size, stat.st_mtime_ns) == (entry["size"], entry["mtime"]):
             return list(entry["rows"])
         try:
-            with path.open("rb") as stream:
+            with ipc.open_shared(path, "rb") as stream:  # shares delete: a reader never blocks an atomic replace
                 if same_file and entry["consumed"] <= stat.st_size and entry["consumed"] >= len(entry["tail"]):
                     stream.seek(entry["consumed"] - len(entry["tail"]))
                     if stream.read(len(entry["tail"])) == entry["tail"]:
                         added = stream.read()
                         end = added.rfind(b"\n") + 1
-                        by_id = dict(entry["by_id"])
-                        _parse(added[:end], by_id, first=False)
-                        consumed = entry["consumed"] + end
-                        tail = (entry["tail"] + added[:end])[-TAIL:]
-                        return _keep(key, stat, by_id, consumed, tail)
+                        if end == len(added):  # a last line without its newline is read by the whole parse below
+                            by_id = dict(entry["by_id"])
+                            _parse(added, by_id, first=False)
+                            return _keep(key, stat, by_id, entry["consumed"] + end, (entry["tail"] + added)[-TAIL:])
                 stream.seek(0)
                 data = stream.read()
         except OSError:
+            if strict:
+                raise
             return []
         end = data.rfind(b"\n") + 1
         by_id = {}

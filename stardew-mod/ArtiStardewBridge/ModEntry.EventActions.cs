@@ -53,20 +53,26 @@ public sealed partial class ModEntry
     private bool EventActionsReady => this.UiG3On && this.PadPathConfigured && this.config.WorldInteractKindsEnabled
         && this.config.WorldInteractionInputEnabled && this.config.BackgroundToolUiEnabled
         && this.config.MenuStepCommandInboxEnabled && this.config.WorldPressEnabled
-        && this.WorldInteractionBackgroundReady && NativeEventControl.Token() is not null
-        && Game1.player is { UsingTool: false, ActiveObject: null } p && !p.IsSitting() && !p.isRidingHorse();
+        && this.WorldInteractionBackgroundReady && (NativeEventControl.Token() ?? NativeEventControl.SeatedToken()) is not null
+        && Game1.player is { UsingTool: false, ActiveObject: null } p && !p.isRidingHorse();
 
     // Session readiness is potential capability, never an executable target.
     // Do not flood the map in the per-frame session publisher. Publication and
     // arm recompute reachability; the final native capture still authorizes A.
-    private bool EventApproachReady => this.EventActionsReady && Game1.CurrentEvent is { } ev
+    private bool EventApproachReady => this.EventActionsReady && !Game1.player.IsSitting() && Game1.CurrentEvent is { } ev
         && (!ev.eventSwitched || this.config.UiPadMenusEnabled);
 
     private (WorldInteractionTarget? Target, BgActionTarget? Action) CaptureEventAction(Point tile, bool route = false, bool inspectOnly = false)
     {
+        // While she sits on a seat of this festival map, the one control is festival_stand on her faced tile.
         if (!this.EventActionsReady || Game1.CurrentEvent is not Event ev || Game1.player is not Farmer player
-            || player.currentLocation is not GameLocation loc || NativeEventControl.Token() is not { } eventPin)
+            || player.currentLocation is not GameLocation loc
+            || (!player.IsSitting() ? NativeEventControl.Token() : route || inspectOnly || player.GetGrabTile() != tile.ToVector2()
+                ? null : NativeEventControl.SeatedToken()) is not { } eventPin)
             return (null, null);
+        bool standing = player.IsSitting();
+        // The seat tile she sits on (MapSeat raw position); for every other kind the captured tile itself.
+        Point seatTile = standing ? player.mapChairSitPosition.Value.ToPoint() : tile;
         string? kind = null, shopId = null, rawAction = null;
         string descriptor = "";
         object targetObject = ev;
@@ -75,8 +81,9 @@ public sealed partial class ModEntry
         MapSeat? seat = null;
         Vector2? seatPosition = null;
         Vector2 seatStart = player.Position;
+        List<(int X, int Y)> standTiles = new(); // every raw seat tile of the seat she stands up from
         var rect = new Rectangle(tile.X * 64, tile.Y * 64, 64, 64);
-        if (!ev.isFestival && !this.config.UiPadMenusEnabled)
+        if (!ev.isFestival && !this.config.UiPadMenusEnabled && !standing)
         {
             if (!EventControlAction.TargetTile(ev.playerControlSequenceID, tile.X, tile.Y)
                 || ev.playerControlTargetTile != tile) return (null, null);
@@ -93,12 +100,14 @@ public sealed partial class ModEntry
                 hostActor = this.Helper.Reflection.GetField<NPC>(ev, "festivalHost").GetValue();
             }
             catch { return (null, null); }
-            if (loc.objects.ContainsKey(tile.ToVector2()) || temporary?.objects.ContainsKey(tile.ToVector2()) == true
+            // Seated, GameLocation.checkAction (1.6.15 :7639-7658) stands her up on any A before objects,
+            // actors or Event.checkAction; only pets and buildings come first, and a festival map has neither.
+            if (!standing && (loc.objects.ContainsKey(tile.ToVector2()) || temporary?.objects.ContainsKey(tile.ToVector2()) == true
                 || ev.id == "festival_winter8" && loc.getTileIndexAt(tile.X, tile.Y, "Buildings", "fest") is 1009 or 1010 or 1012 or 1013
                 || loc.farmers.Any(f => !ReferenceEquals(f, player)
-                    && f.GetBoundingBox().Intersects(rect))) return (null, null);
-            string? action = loc.doesTileHaveProperty(tile.X, tile.Y, "Action", "Buildings");
-            if (this.config.UiPadMenusEnabled && !ev.isFestival && ev.playerControlTargetTile == tile
+                    && f.GetBoundingBox().Intersects(rect)))) return (null, null);
+            string? action = standing ? null : loc.doesTileHaveProperty(tile.X, tile.Y, "Action", "Buildings");
+            if (!standing && this.config.UiPadMenusEnabled && !ev.isFestival && ev.playerControlTargetTile == tile
                 && (tile.X > 0 || tile.Y > 0))
             {
                 kind = EventControlAction.Interact;
@@ -135,7 +144,7 @@ public sealed partial class ModEntry
             }
             else
             {
-                NPC[] actors = ev.actors.Where(a => a.GetBoundingBox().Intersects(rect)
+                NPC[] actors = standing ? Array.Empty<NPC>() : ev.actors.Where(a => a.GetBoundingBox().Intersects(rect)
                     || a.TilePoint.X == tile.X && (a.TilePoint.Y == tile.Y || a.TilePoint.Y == tile.Y + 1)).ToArray();
                 if (actors.Length != 0)
                 {
@@ -147,7 +156,7 @@ public sealed partial class ModEntry
                         || ReferenceEquals(actors[0], hostActor) || actors[0].Name == "Lewis")) return (null, null);
                     npc = actors[0]; targetObject = npc; kind = EventControlAction.Npc;
                 }
-                else if (ev.id == "festival_spring13" && ev.eventSwitched && ev.playerControlSequenceID == "eggHunt"
+                else if (!standing && ev.id == "festival_spring13" && ev.eventSwitched && ev.playerControlSequenceID == "eggHunt"
                     && ev.festivalTimer > 0)
                 {
                     Prop[] props = ev.festivalProps.Where(p => p.isColliding(rect)).ToArray();
@@ -156,17 +165,19 @@ public sealed partial class ModEntry
                 }
                 else if (ev.isFestival && !ev.eventSwitched)
                 {
-                    var seats = loc.mapSeats.Where(s => s.OccupiesTile(tile.X, tile.Y)).ToArray();
+                    var seats = standing ? player.sittingFurniture is MapSeat mine && loc.mapSeats.Contains(mine)
+                            && mine.IsSittingHere(player) ? new[] { mine } : Array.Empty<MapSeat>()
+                        : loc.mapSeats.Where(s => s.OccupiesTile(tile.X, tile.Y)).ToArray();
                     if (seats.Length != 1 || seats[0].IsBlocked(loc)) return (null, null);
-                    targetObject = seats[0]; kind = EventControlAction.Seat;
+                    targetObject = seats[0]; kind = standing ? EventControlAction.Stand : EventControlAction.Seat;
                     seat = seats[0];
                     var rawSeats = seat.GetSeatPositions(ignore_offsets: true);
                     var endSeats = seat.GetSeatPositions();
                     if (rawSeats.Count == 0 || rawSeats.Count > 64 || endSeats.Count != rawSeats.Count) return (null, null);
-                    int[] indices = rawSeats.Select((v,i) => (v,i)).Where(v => v.v == tile.ToVector2()).Select(v => v.i).ToArray();
+                    int[] indices = rawSeats.Select((v,i) => (v,i)).Where(v => v.v == seatTile.ToVector2()).Select(v => v.i).ToArray();
                     if (indices.Length != 1) return (null, null);
                     int seatIndex = indices[0];
-                    if (!inspectOnly && (seat.sittingFarmers.Values.Contains(seatIndex)
+                    if (!inspectOnly && !standing && (seat.sittingFarmers.Values.Contains(seatIndex)
                         || loc.IsTemporary && loc.farmers.Any(f => !ReferenceEquals(f, player) && f.IsSitting()
                             && Math.Abs(f.mapChairSitPosition.Value.X - rawSeats[seatIndex].X) < 1e-5
                             && Math.Abs(f.mapChairSitPosition.Value.Y - rawSeats[seatIndex].Y) < 1e-5))) return (null, null);
@@ -174,7 +185,8 @@ public sealed partial class ModEntry
                         seatIndex, raw = rawSeats.Select(v => new[] { v.X, v.Y }),
                         end = endSeats.Select(v => new[] { v.X, v.Y }) }));
                     // Metadata may name a bench; executable A must select this exact vacant seat.
-                    if (!inspectOnly && !route)
+                    if (standing) foreach (Vector2 rawTile in rawSeats) standTiles.Add(((int)rawTile.X, (int)rawTile.Y));
+                    else if (!inspectOnly && !route)
                     {
                         seatPosition = PredictFestivalSeat(seat, player, loc, tile);
                         if (seatPosition is null) return (null, null);
@@ -198,7 +210,7 @@ public sealed partial class ModEntry
                 location = exitPin.Location is null ? null : this.eventObjects.GetValue(exitPin.Location,
                     _ => new EventObjectId("ei" + ++this.nextEventObjectId)).Value },
             actor = new[] { player.TilePoint.X, player.TilePoint.Y }, player.FacingDirection,
-            seatStart = kind == EventControlAction.Seat ? new[] { seatStart.X, seatStart.Y } : null,
+            seatStart = kind is EventControlAction.Seat or EventControlAction.Stand ? new[] { seatStart.X, seatStart.Y } : null,
             seatEnd = seatPosition is { } end ? new[] { end.X * 64, end.Y * 64 } : null }));
         var target = new WorldInteractionTarget(token, source, tile.X, tile.Y, player.TilePoint.X, player.TilePoint.Y,
             player.FacingDirection, kind);
@@ -240,7 +252,7 @@ public sealed partial class ModEntry
             var rawSeats = seat.GetSeatPositions(ignore_offsets: true);
             var endSeats = seat.GetSeatPositions();
             if (rawSeats.Count == 0 || rawSeats.Count > 64 || endSeats.Count != rawSeats.Count) return false;
-            int[] indices = rawSeats.Select((v,i) => (v,i)).Where(v => v.v == tile.ToVector2()).Select(v => v.i).ToArray();
+            int[] indices = rawSeats.Select((v,i) => (v,i)).Where(v => v.v == seatTile.ToVector2()).Select(v => v.i).ToArray();
             return indices.Length == 1 && descriptor == UiKeyTargetToken.Hash(System.Text.Json.JsonSerializer.Serialize(new {
                 seatIndex = indices[0], raw = rawSeats.Select(v => new[] { v.X, v.Y }), end = endSeats.Select(v => new[] { v.X, v.Y }) }));
         }
@@ -298,20 +310,22 @@ public sealed partial class ModEntry
             bool strict = ev.CurrentCommand == command && ev.playerControlSequenceID == sequence
                 && ev.playerControlSequence && NativeEventControl.EffectiveRaw(ev) == raw;
             return strict && (after ? Game1.activeClickableMenu is null || Receiver(Game1.activeClickableMenu)
-                : NativeEventControl.Token() == eventPin
+                : (kind == EventControlAction.Stand ? NativeEventControl.SeatedToken() : NativeEventControl.Token()) == eventPin
                     && (kind is not (EventControlAction.Egg or EventControlAction.EggRoute) || player.festivalScore == baseline.Score));
         }
         bool Present() => Scope(false) && player.ActiveObject is null && !player.UsingTool
             && (route || player.GetGrabTile() == tile.ToVector2())
             && this.CaptureEventAction(tile, route).Target == target;
-        FestivalSeatMotion? seatMotion = seatPosition is { } at
-            ? new(seatStart.X, seatStart.Y, at.X * 64, at.Y * 64) : null;
-        bool SeatBinding() => seat is not null && seatPosition is { } at && Scope(true)
+        FestivalSeatMotion? seatMotion = kind == EventControlAction.Stand ? FestivalSeatMotion.Stand(seatStart.X, seatStart.Y, standTiles)
+            : seatPosition is { } at ? new(seatStart.X, seatStart.Y, at.X * 64, at.Y * 64) : null;
+        // Stand: the same seat while the native lerp runs, then off it; the token comes back at the settle.
+        bool SeatBinding() => seat is not null && (seatPosition is not null || kind == EventControlAction.Stand) && Scope(true)
             && loc.mapSeats.Contains(seat) && !seat.IsBlocked(loc)
-            && ReferenceEquals(player.sittingFurniture, seat) && seat.IsSittingHere(player)
-            && seat.GetSittingPosition(player) == at
-            && seat.GetSittingPosition(player, ignore_offsets: true) == tile.ToVector2()
-            && player.mapChairSitPosition.Value == tile.ToVector2();
+            && (kind == EventControlAction.Stand && !player.IsSitting() ? player.sittingFurniture is null
+                : ReferenceEquals(player.sittingFurniture, seat) && seat.IsSittingHere(player)
+                    && (seatPosition is not { } at || seat.GetSittingPosition(player) == at)
+                    && seat.GetSittingPosition(player, ignore_offsets: true) == seatTile.ToVector2()
+                    && player.mapChairSitPosition.Value == seatTile.ToVector2());
         BgActionEffectFacts Sample()
         {
             EventActionFacts now = Read();
@@ -323,8 +337,9 @@ public sealed partial class ModEntry
                 ? observedEffect : now with { ScopeValid = false };
             if (kind != EventControlAction.Target || sequence != "haleyBeach2" || observedEffect is null)
                 effect = now with { ScopeValid = Scope(false) || Scope(true) };
-            if (kind == EventControlAction.Seat && now.Sitting)
-                effect = effect with { ScopeValid = SeatBinding() && seatMotion?.Settled == true };
+            if (kind == EventControlAction.Seat && now.Sitting || kind == EventControlAction.Stand && !now.Sitting)
+                effect = effect with { ScopeValid = SeatBinding() && seatMotion?.Settled == true
+                    && (kind != EventControlAction.Stand || NativeEventControl.Token() == eventPin) };
             return SampleInteractEffect(() => egg is null || ev.festivalProps.Contains(egg), "")
                 with { Event = effect, ExpectedReceiver = Receiver(Game1.activeClickableMenu) };
         }
@@ -334,7 +349,8 @@ public sealed partial class ModEntry
             SampleSeatMotion = seatMotion is null ? null : () => new FestivalSeatMotionFacts(
                 SeatBinding(), player.IsSitting(), player.CanMove, player.freezePause,
                 player.movementDirections.Count, player.Position.X, player.Position.Y),
-            PoseMayChangeAfterPress = kind == EventControlAction.Seat || kind == EventControlAction.Target && sequence == "haleyBeach2" };
+            PoseMayChangeAfterPress = kind is EventControlAction.Seat or EventControlAction.Stand
+                || kind == EventControlAction.Target && sequence == "haleyBeach2" };
         return (target, pinned);
     }
 
@@ -393,7 +409,7 @@ public sealed partial class ModEntry
         }
         catch { }
         snapshot["event_actions"] = new Dictionary<string, object> {
-            ["event_token"] = NativeEventControl.Token()!, ["sequence"] = ev.playerControlSequenceID,
+            ["event_token"] = (NativeEventControl.Token() ?? NativeEventControl.SeatedToken())!, ["sequence"] = ev.playerControlSequenceID,
             ["target_tile"] = new[] { ev.playerControlTargetTile.X, ev.playerControlTargetTile.Y },
             ["festival_id"] = ev.id, ["main_event_running"] = ev.eventSwitched,
             ["timer_positive"] = ev.festivalTimer > 0, ["timer_ms"] = ev.festivalTimer,
@@ -408,7 +424,14 @@ public sealed partial class ModEntry
                     new Rectangle(c.Tile.X*64,c.Tile.Y*64,64,64)) || a.TilePoint.X == c.Tile.X
                     && (a.TilePoint.Y == c.Tile.Y || a.TilePoint.Y == c.Tile.Y + 1))?.Name ?? "festival NPC") }),
         };
-        if (this.config.UiPadMenusEnabled)
+        if (Game1.player.IsSitting())
+        {
+            // Seated, festival_stand is the one published control; who and what she sees waits until she stands.
+            var actions = (Dictionary<string, object>)snapshot["event_actions"];
+            actions["seated"] = true;
+            actions["people"] = new Dictionary<string, string>(StringComparer.Ordinal);
+        }
+        else if (this.config.UiPadMenusEnabled)
         {
             var actions = (Dictionary<string, object>)snapshot["event_actions"];
             var people = new Dictionary<string, string>(StringComparer.Ordinal);
@@ -429,24 +452,31 @@ public sealed partial class ModEntry
             actions["people"] = people;
             seenOrder.Sort();
             var seenPeople = new List<object[]>();
+            string? facedNpcId = faced.Target is { Kind: EventControlAction.Npc } facedNpc
+                ? EventApproachPlan.ActorKey(facedNpc.SourceFactId) : null;
             foreach (var key in seenOrder)
             {
                 if (seenPeople.Count >= EventControlAction.MaxEventSeen) break;
                 object[] row = seenRows[key.I];
-                // `talk`: the game's own checks take a talk with this actor at its tile or the tile above it
-                // now (the same capture a route binds); the route and A are still admitted natively.
-                bool talk = false;
+                string actorId = (string)row[0];
+                // `talk` requires a valid talk capture with at least one walkable stand now,
+                // or the person already in reach; the route and A are still admitted natively.
+                bool talk = facedNpcId == actorId;
                 for (int dy = 0; dy <= 1 && !talk; dy++)
-                    talk = this.CaptureEventAction(new Point(key.X, key.Y - dy), route: true, inspectOnly: true).Target is { } heard
-                        && heard.Kind == EventControlAction.NpcRoute && heard.SourceFactId.Split(':') is { Length: >= 4 } part
-                        && part[2] == (string)row[0];
+                {
+                    Point cell = new(key.X, key.Y - dy);
+                    if (this.CaptureEventAction(cell, route: true, inspectOnly: true).Target is { Kind: EventControlAction.NpcRoute } heard
+                        && EventApproachPlan.ActorKey(heard.SourceFactId) == actorId
+                        && EventApproachPlan.HasWalkableStand(this, Game1.currentLocation, ev, Game1.player, cell))
+                        talk = true;
+                }
                 row[3] = talk;
                 seenPeople.Add(row);
             }
             // What answers a press: this event map's Action cells (one sliced scan per map, kept across plans),
             // each rechecked now and described by the capture a route would bind (its kind and exact source).
-            EventApproachPlan? scan = this.eventApproachPlan is { CellsDone: true } visibleScan && ReferenceEquals(visibleScan.Event, ev)
-                ? visibleScan : this.eventApproachRefresh is { CellsDone: true } refreshScan && ReferenceEquals(refreshScan.Event, ev) ? refreshScan : null;
+            EventApproachPlan? scan = EventApproachPlan.SeenCellScan(
+                this.eventApproachPlan, this.eventApproachRefresh, EventApproachPlan.GetCellScan(this), ev, Game1.currentLocation);
             var cellOrder = new List<(int D, int Y, int X, int I)>();
             if (scan?.Cells is { } cells && ReferenceEquals(scan.Location, Game1.currentLocation))
                 for (int i = 0; i < cells.Count; i++)
@@ -536,16 +566,21 @@ public sealed partial class ModEntry
     private EventApproachPlan? eventApproachRefresh;
     private sealed class EventApproachPlan
     {
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<ModEntry, EventApproachPlan> cellScans = new();
+        public static EventApproachPlan? GetCellScan(ModEntry mod) => cellScans.TryGetValue(mod, out var s) ? s : null;
+        public static void SetCellScan(ModEntry mod, EventApproachPlan? scan)
+        {
+            cellScans.Remove(mod);
+            if (scan is not null) cellScans.Add(mod, scan);
+        }
         public Event Event = null!;
         public GameLocation Location = null!;
         public Farmer Player = null!;
         public Point Actor;
         public int Facing, Width, Height;
+        public bool Main;
         public string Pin = "";
         public CommandInboxIdentity Identity;
-        public bool LeaseHeld;
-        public string LeaseOwner = "";
-        public long LeaseGeneration, LeaseFence;
         public IEnumerator<int> Work = null!;
         public bool Done;
         public long ValidatedTick = long.MinValue, CompletedTick;
@@ -558,11 +593,105 @@ public sealed partial class ModEntry
         /// is not inherited, so the next refresh rescans and an Action cell the event added in place is seen.</summary>
         public long CellsScannedMs;
 
+        public static bool UsableCells(EventApproachPlan? scan, Event ev, GameLocation loc, long nowMs) =>
+            scan is { CellsDone: true, Cells: not null } && ReferenceEquals(scan.Event, ev)
+            && ReferenceEquals(scan.Location, loc) && scan.CellsMain == ev.eventSwitched
+            && nowMs - scan.CellsScannedMs <= EventControlAction.CellScanMaxAgeMs;
+
+        public static EventApproachPlan? ActiveCellScan(EventApproachPlan? primary, EventApproachPlan? secondary,
+            EventApproachPlan? cached, Event ev, GameLocation loc)
+        {
+            long now = Environment.TickCount64;
+            if (UsableCells(primary, ev, loc, now)) return primary;
+            if (UsableCells(secondary, ev, loc, now)) return secondary;
+            if (UsableCells(cached, ev, loc, now)) return cached;
+            return null;
+        }
+
+        /// <summary>What she sees: the scan of a current plan whatever its age (a refresh replaces it; each cell is rechecked
+        /// now), else a scan kept across plans while it is fresh.</summary>
+        public static EventApproachPlan? SeenCellScan(EventApproachPlan? primary, EventApproachPlan? secondary,
+            EventApproachPlan? cached, Event ev, GameLocation loc)
+        {
+            if (primary is { CellsDone: true, Cells: not null } && ReferenceEquals(primary.Event, ev)
+                && ReferenceEquals(primary.Location, loc)) return primary;
+            if (secondary is { CellsDone: true, Cells: not null } && ReferenceEquals(secondary.Event, ev)
+                && ReferenceEquals(secondary.Location, loc)) return secondary;
+            return UsableCells(cached, ev, loc, Environment.TickCount64) ? cached : null;
+        }
+
+        public static string ActorKey(string sourceFactId)
+        {
+            string[] parts = sourceFactId.Split(':');
+            return parts.Length >= 4 ? parts[2] : sourceFactId;
+        }
+
+        public static bool HasWalkableStand(ModEntry mod, GameLocation loc, Event ev, Farmer player, Point cell)
+        {
+            foreach (var pose in EventEggPoses(cell))
+                if (mod.EventRouteCell(loc, ev, player, pose.Stand.X, pose.Stand.Y)) return true;
+            return false;
+        }
+
+        private static int CompareOffer(EventApproachCandidate a, EventApproachCandidate b)
+        {
+            int cmp = a.Path.Count.CompareTo(b.Path.Count);
+            return cmp != 0 ? cmp : StringComparer.Ordinal.Compare(a.Target.SourceFactId, b.Target.SourceFactId);
+        }
+
+        // Keep all people routes up to MaxEventPeopleRoutes; shops, seats and things share the remainder
+        // of MaxEventRoutes without widening the wire cap. Order inside each kind stays shortest-path then source id.
+        public static List<EventApproachCandidate> MergeOffers(List<EventApproachCandidate> offers,
+            EventApproachCandidate added, bool padMenus)
+        {
+            offers.Add(added);
+            offers.Sort(CompareOffer);
+            var perKind = new Dictionary<string, int>(StringComparer.Ordinal);
+            var seen = new HashSet<string>(StringComparer.Ordinal);
+            if (!padMenus)
+            {
+                var plain = new List<EventApproachCandidate>(EventControlAction.MaxOffers);
+                foreach (var c in offers)
+                {
+                    if (!seen.Add(c.Target.SourceFactId)) continue;
+                    int n = perKind.GetValueOrDefault(c.Target.Kind);
+                    if (n >= 2) continue;
+                    perKind[c.Target.Kind] = n + 1;
+                    plain.Add(c);
+                    if (plain.Count >= EventControlAction.MaxOffers) break;
+                }
+                return plain;
+            }
+            var people = new List<EventApproachCandidate>(EventControlAction.MaxEventPeopleRoutes);
+            var others = new List<EventApproachCandidate>(EventControlAction.MaxEventRoutes);
+            foreach (var c in offers)
+            {
+                if (c.Target.Kind == EventControlAction.NpcRoute)
+                {
+                    if (people.Count < EventControlAction.MaxEventPeopleRoutes && seen.Add("p:" + ActorKey(c.Target.SourceFactId)))
+                        people.Add(c);
+                    continue;
+                }
+                if (!seen.Add("o:" + c.Target.SourceFactId)) continue;
+                int n = perKind.GetValueOrDefault(c.Target.Kind);
+                if (n >= EventControlAction.MaxEventKindRoutes) continue;
+                perKind[c.Target.Kind] = n + 1;
+                others.Add(c);
+            }
+            var merged = new List<EventApproachCandidate>(EventControlAction.MaxEventRoutes);
+            merged.AddRange(people);
+            int room = EventControlAction.MaxEventRoutes - merged.Count;
+            for (int i = 0; i < others.Count && i < room; i++) merged.Add(others[i]);
+            return merged;
+        }
+
         public static EventApproachCandidate? ReadSelected(ModEntry mod, WorldInteractionTarget target)
         {
             // Route authority binds the published destination and current player pose.
             // The faced tile is captured only once the route reaches its final stand.
-            if (mod.eventApproachPlan is not { Done: true } plan || !mod.EventApproachPlanValid(plan)
+            // A release under way admits nothing (the plan is kept across it, not its authority).
+            if (mod.actionOwner.ReleaseRequested || mod.actionOwner.IsReleasing
+                || mod.eventApproachPlan is not { Done: true } plan || !mod.EventApproachPlanValid(plan)
                 || Game1.ticks < plan.ValidatedTick || Game1.ticks - plan.ValidatedTick > 1
                 || mod.eventApproachWorkLastTick >= EventApproachWorkPerTick) return null;
             foreach (var published in plan.Published)
@@ -581,20 +710,15 @@ public sealed partial class ModEntry
                 && mod.CaptureEventAction(c.Tile, route: true).Target == target);
     }
     private bool EventApproachPlanValid(EventApproachPlan p) => this.EventApproachReady
-        && !this.actionOwner.StopLatched && !this.actionOwner.ReleaseRequested
-        && !this.actionOwner.RecordFaulted && !this.actionOwner.IsReleasing
+        && !this.actionOwner.StopLatched && !this.actionOwner.RecordFaulted
         && ReferenceEquals(Game1.CurrentEvent,p.Event) && ReferenceEquals(Game1.currentLocation,p.Location)
         && ReferenceEquals(Game1.player,p.Player) && p.Player.TilePoint == p.Actor && p.Player.FacingDirection == p.Facing
         && p.Location.Map.Layers[0].LayerWidth == p.Width && p.Location.Map.Layers[0].LayerHeight == p.Height
+        && p.Event.eventSwitched == p.Main
         && NativeEventControl.Token() == p.Pin && this.CurrentCommandIdentity() == p.Identity
-        // Reachability is actor/session authority, not input ownership. An idle
-        // offer survives clean ACQUIRE; admission and every consumer still need
-        // the request's live owner. Release/STOP/reacquire must retire old plans.
-        && this.actionOwner.FencedGeneration == p.LeaseFence
-        && (p.LeaseHeld
-            ? this.ReflexLeaseHeld && this.actionOwner.OwnerId == p.LeaseOwner
-                && this.actionOwner.Generation == p.LeaseGeneration
-            : !this.actionOwner.IsArmed || this.ReflexLeaseHeld)
+        // Reachability belongs to her pose and event state, not the lease generation.
+        // Admission still checks the live lease, generation, path and target at press time. Time alone withdraws
+        // no plan: a refresh rescans old cells in the background and replaces it when it is done.
         && p.Event.actors.Count <= 128 && p.Location.mapSeats.Count <= 128 && p.Location.farmers.Count <= 16
         && p.Event.festivalProps.Count <= 128;
 
@@ -622,31 +746,35 @@ public sealed partial class ModEntry
         this.eventApproachPlanningTick = Game1.ticks;
         this.eventApproachWorkLastTick = this.eventApproachNativeChecksLastTick = 0;
         if (this.eggRun is not null) return; // admission validation owns the shared slice
-        EventApproachPlan? cellSource = this.eventApproachPlan; // ADR 240: a finished cell scan outlives its plan
+        if (this.eventApproachPlan is { CellsDone: true } doneCells) EventApproachPlan.SetCellScan(this, doneCells);
+        if (this.eventApproachRefresh is { CellsDone: true } doneRefresh) EventApproachPlan.SetCellScan(this, doneRefresh);
         if (this.eventApproachPlan is { } old && !this.EventApproachPlanValid(old))
         {
             old.Work.Dispose(); this.eventApproachPlan = null;
             this.eventApproachRefresh?.Work.Dispose(); this.eventApproachRefresh = null;
         }
+        if (EventApproachPlan.GetCellScan(this) is { } cached && (Game1.CurrentEvent is not { } curEv
+            || !EventApproachPlan.UsableCells(cached, curEv, Game1.currentLocation, Environment.TickCount64)))
+            EventApproachPlan.SetCellScan(this, null);
         if (!this.EventApproachReady || Game1.CurrentEvent is not { } ev
-            || this.actionOwner.StopLatched || this.actionOwner.ReleaseRequested) return;
+            || this.actionOwner.StopLatched || this.actionOwner.ReleaseRequested || this.actionOwner.IsReleasing) return;
         if (this.eventApproachPlan is null || this.eventApproachPlan.Done
             && Game1.ticks - this.eventApproachPlan.CompletedTick > 180 && this.eventApproachRefresh is null)
         {
             var loc = Game1.currentLocation;
             var layer = loc.Map.Layers[0];
+            if (EventApproachPlan.GetCellScan(this) is { } sized && (sized.Width != layer.LayerWidth || sized.Height != layer.LayerHeight))
+                EventApproachPlan.SetCellScan(this, null);
             if (layer.LayerWidth <= 0 || layer.LayerHeight <= 0
                 || (long)layer.LayerWidth * layer.LayerHeight > FestivalMapSearch.MaxCells
                 || ev.actors.Count > 128 || loc.mapSeats.Count > 128 || loc.farmers.Count > 16 || ev.festivalProps.Count > 128) return;
             var p = new EventApproachPlan { Event=ev, Location=loc, Player=Game1.player,
                 Actor=Game1.player.TilePoint, Facing=Game1.player.FacingDirection,
-                Width=layer.LayerWidth, Height=layer.LayerHeight, Pin=NativeEventControl.Token()!,
-                Identity=this.CurrentCommandIdentity(), LeaseHeld=this.ReflexLeaseHeld,
-                LeaseOwner=this.actionOwner.OwnerId, LeaseGeneration=this.actionOwner.Generation,
-                LeaseFence=this.actionOwner.FencedGeneration };
-            if (cellSource is { CellsDone: true } scanned && ReferenceEquals(scanned.Event, ev) && ReferenceEquals(scanned.Location, loc)
-                && scanned.Width == p.Width && scanned.Height == p.Height && scanned.CellsMain == ev.eventSwitched
-                && Environment.TickCount64 - scanned.CellsScannedMs <= EventControlAction.CellScanMaxAgeMs) // review R5 S7
+                Width=layer.LayerWidth, Height=layer.LayerHeight, Main=ev.eventSwitched,
+                Pin=NativeEventControl.Token()!, Identity=this.CurrentCommandIdentity() };
+            EventApproachPlan? scanned = EventApproachPlan.ActiveCellScan(
+                this.eventApproachPlan, this.eventApproachRefresh, EventApproachPlan.GetCellScan(this), ev, loc);
+            if (scanned is not null && scanned.Width == p.Width && scanned.Height == p.Height)
             { p.Cells = scanned.Cells; p.CellsDone = true; p.CellsMain = scanned.CellsMain; p.CellsScannedMs = scanned.CellsScannedMs; }
             p.Work = this.BuildEventApproaches(p).GetEnumerator();
             if (this.eventApproachPlan is null) this.eventApproachPlan = p;
@@ -722,6 +850,7 @@ public sealed partial class ModEntry
                         yield return 0;
                     }
                 p.Cells = found; p.CellsMain = ev.eventSwitched; p.CellsDone = true; p.CellsScannedMs = Environment.TickCount64;
+                EventApproachPlan.SetCellScan(this, p);
             }
         }
         var search = new FestivalMapSearch(p.Width,p.Height,(p.Actor.X,p.Actor.Y));
@@ -756,15 +885,7 @@ public sealed partial class ModEntry
             }
             this.eventApproachNativeChecksLastTick++;
             if (best is null || this.CaptureEventAction(tile,route:true).Target!=offered) { yield return 0; continue; }
-            p.Offers.Add(best);
-            p.Offers=p.Offers.GroupBy(c=>c.Target.Kind).SelectMany(g=>g.OrderBy(c=>c.Path.Count)
-                .ThenBy(c=>c.Target.SourceFactId,StringComparer.Ordinal)
-                .DistinctBy(c => this.config.UiPadMenusEnabled && g.Key == EventControlAction.NpcRoute
-                    ? c.Target.SourceFactId.Split(':')[2] : c.Target.SourceFactId)
-                .Take(!this.config.UiPadMenusEnabled ? 2 : g.Key == EventControlAction.NpcRoute
-                    ? EventControlAction.MaxEventPeopleRoutes : EventControlAction.MaxEventKindRoutes))
-                .OrderBy(c=>c.Path.Count).ThenBy(c=>c.Target.SourceFactId,StringComparer.Ordinal)
-                .Take(this.config.UiPadMenusEnabled ? EventControlAction.MaxEventRoutes : EventControlAction.MaxOffers).ToList();
+            p.Offers = EventApproachPlan.MergeOffers(p.Offers, best, this.config.UiPadMenusEnabled);
             yield return 0;
         }
     }

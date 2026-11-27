@@ -130,6 +130,7 @@ public sealed partial class ModEntry
     /// <summary>Components of the snap owner, labelled from fields only (item in slot, response text, tab label...).</summary>
     static List<UiPadComponent> ReadUiPadComponents(IClickableMenu owner, GameMenu? gameMenu, bool extras = false)
     {
+        if (NativeJunimoUi.Unreadable(owner)) return new();
         var slotItems = new Dictionary<ClickableComponent, Item?>(ReferenceEqualityComparer.Instance);
         foreach (FieldInfo field in UiPadFields(owner.GetType()))
         {
@@ -276,7 +277,7 @@ public sealed partial class ModEntry
             || (economy && (t == typeof(ShopMenu) || t == typeof(CraftingPage)))
             // WS-G6 (decomp-checked pure): IClickableMenu.readyToClose (true) / MuseumMenu.readyToClose (fields only).
             || t == typeof(MineElevatorMenu) || t == typeof(MuseumMenu);
-        return pure ? top.readyToClose() : null;
+        return pure || NativeJunimoUi.Unreadable(top) ? top.readyToClose() : null;
     }
 
     /// <summary>One read of the active menu. Field reads and pure getters only (no hover, no populate, no write).</summary>
@@ -308,6 +309,7 @@ public sealed partial class ModEntry
             : (top as MenuWithInventory)?.heldItem;
         string? text = top switch
         {
+            JunimoNoteMenu { scrambledText: true } => NativeJunimoUi.UnreadableText,
             DialogueBox box => box.getCurrentString(),
             LetterViewerMenu letter when letter.mailMessage is { } pages && letter.page >= 0 && letter.page < pages.Count => pages[letter.page],
             _ => null,

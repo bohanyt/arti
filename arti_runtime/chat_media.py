@@ -12,6 +12,10 @@ MEDIA_REACTION_INSTRUCTION = (
     "Sebut nama donaturnya persis seperti tertulis dan jumlahnya, bilang makasih, "
     "lalu reaksi ke satu hal dari isi videonya (pakai ringkasan di atas)."
 )
+MEDIA_REACTION_THANKED = (  # she has thanked this person already
+    "Sebut nama donaturnya persis seperti tertulis, "
+    "lalu reaksi ke satu hal dari isi videonya (pakai ringkasan di atas)."
+)
 
 
 class PendingChat(str):

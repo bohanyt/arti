@@ -33,7 +33,7 @@ public sealed partial class ModEntry
     /// </summary>
     bool ShopCounterEnabled => this.config.EconomyMenusEnabled && this.config.WorldInteractKindsEnabled && this.PadPathConfigured;
 
-    const int ExtrasTargetRadius = 12;
+    const int ExtrasTargetRadius = CodeActionCells.ScanRadius;
     /// <summary>FIXB15 review (D-B13-4): pets / horses / farm animals move; they are published over the nav-grid window.</summary>
     const int ExtrasCharacterRadius = 24;
     /// <summary>FIXB17 D-B5-0: the level's up-ladder is published anywhere in the nav window (the exit leg routes to it).</summary>

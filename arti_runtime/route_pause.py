@@ -16,14 +16,15 @@ from collections.abc import Iterable, Mapping
 
 ROUTE_PAUSE_REASON = "route_paused_new_map"   # old journals (ADR 155); still read
 ROUTE_PAUSE_PEOPLE = "route_paused_people_here"  # live ending (ADR 195): same pause, not a failed walk
+ROUTE_PAUSE_MAIL = "route_paused_mailbox"  # the flagged mailbox beside her door, its own reason
 PAUSE_NAMES = 4          # villager names on the pause fact; a cut says how many more
 CARRIED_SHOWN = 3        # today goals on the age line (the today cap is 3)
 CARRIED_TEXT = 60        # chars of her goal text on the age line
 
 
 def pause_reason(reason) -> bool:
-    """Live people-page pause, or the old journal reason for the same pause."""
-    return reason in (ROUTE_PAUSE_REASON, ROUTE_PAUSE_PEOPLE)
+    """Live people-page or mailbox pause, or the old journal reason for the same pause."""
+    return reason in (ROUTE_PAUSE_REASON, ROUTE_PAUSE_PEOPLE, ROUTE_PAUSE_MAIL)
 
 
 def scene_on_map(scene: Mapping | None, location) -> dict:
@@ -47,6 +48,9 @@ def new_villagers(scene: Mapping | None) -> list[dict]:
 
 def pause_line(pause: Mapping, place: str | None, offered: bool) -> str:
     """The page fact for a paused route: where she was going, who is here, whether continuing is offered."""
+    if pause.get("mail"):
+        from arti_runtime.mail_pause import pause_line as mail_line  # the flagged mailbox beside her door
+        return mail_line(pause, place, offered)
     if pause.get("box"):
         from arti_runtime.ship_pause import pause_line as box_line  # ADR 228 part D: the box on the way home
         return box_line(pause, place, offered)

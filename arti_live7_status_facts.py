@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from arti_runtime import ipc
 from dataclasses import dataclass, replace
+from datetime import datetime
 import hashlib
 import json
 import os
@@ -70,7 +71,9 @@ def _clock_text(hhmm):
 
 
 def _date_text(date):
-    if (isinstance(date, list) and len(date) == 3 and type(date[0]) is int and isinstance(date[1], str)
+    if isinstance(date, dict):
+        date = [date.get("year"), date.get("season"), date.get("day")]
+    if (isinstance(date, (list, tuple)) and len(date) == 3 and type(date[0]) is int and isinstance(date[1], str)
             and type(date[2]) is int):
         return f"{_detail(date[1], 12)} {date[2]} tahun {date[0]}"
     return ""
@@ -118,6 +121,7 @@ _MENU_NAMES = {"shop": "menu toko", "shipping": "menu kirim", "store": "menu pet
 _BY_CHOICE = {"purchase_refused_by_choice": "kamu sendiri yang membatalkan pembelian, bukan toko yang menolak",
               "tv_left_by_choice": "kamu sendiri yang meninggalkan TV"}
 _REASON_WORDS = (("terminal_cleanup_unconfirmed:ui_choice_timeout", "menu ditutup otomatis saat waktunya habis, bukan oleh pilihanmu"),
+                 ("recovery_unverified", "hasil akhirnya belum bisa dipastikan setelah pemulihan"),
                  ("curfew", "waktunya pulang, kegiatan ini berhenti"), ("no_effect_progress", "tidak ada kemajuan teramati"),
                  ("stalled", "macet, tidak ada kemajuan teramati"), ("partial:mines_low_hp_exit", "keluar tambang karena HP rendah"),
                  ("partial:mines_contact_exhausted_exit", "keluar tambang setelah batas upaya mendekati monster"),
@@ -134,7 +138,8 @@ _REASON_WORDS = (("terminal_cleanup_unconfirmed:ui_choice_timeout", "menu ditutu
                  ("partial:observed_mines_progress", "kemajuan tambang teramati, belum selesai"),
                  # ADR 155: not a failed trip; the same destination continues it
                  ("route_paused_new_map", "perjalanan berhenti di peta baru yang ada warganya; tujuannya bisa dilanjutkan"),
-                 ("route_paused_people_here", "perjalanan berhenti di peta baru yang ada warganya; tujuannya bisa dilanjutkan"))
+                 ("route_paused_people_here", "perjalanan berhenti dulu karena ada yang terlihat di jalan; tujuannya bisa dilanjutkan"),
+                 ("route_paused_mailbox", "perjalanan berhenti di dekat kotak suratmu yang bertanda surat; tujuannya bisa dilanjutkan"))
 
 
 def reason_words(reason):
@@ -268,7 +273,8 @@ def _outcome_text(row, known=None):
         elif isinstance(observed.get("effect"), str):
             extra = f" ({_detail(observed['effect'], 24)})"
         elif observed.get("objective") == "enter_location" and isinstance(evidence.get("cleanup"), dict):
-            extra = f" (sampai di {_place_text(evidence['cleanup'].get('location'))})"
+            arrival = (evidence.get("arrived_native") or {}).get("location") or evidence["cleanup"].get("location")
+            extra = f" (sampai di {_place_text(arrival)})"
     else:
         reason = _stop_reason(row) if row.get("outcome_class") == "SAFETY_STOP" else (
             reason_words(row.get("reason")) or _detail(row.get("reason"), 60))
@@ -622,7 +628,33 @@ def parse_event(row, source="cycle", *, peer_sleep=None, owner=None):
     host_names = [_detail(p.get("name"), 64) for p in players
                   if isinstance(p, dict) and p.get("role") == "host farmer" and p.get("self") is False]
     host = "petani HOST" + (" (" + host_names[0] + ")" if len(host_names) == 1 and host_names[0] else "")
-    if (ev in {"operator_stop", "observed_stop", "cycle_stopped"}
+    if ev == "host_left":
+        # host_left is its own plain event, never an incident asking anyone to check anything.
+        who = _detail(owner, 64) if owner else "host"
+        observed = str(row.get("observed") or "").strip().casefold()
+        what = (f"{who} keluar dari sesi Stardew"
+                if observed in {"process_gone", "host_left", "quit"}
+                else f"koneksi ke sesi Stardew {who} berakhir")
+        at = row.get("at")
+        when = ""
+        if type(at) in (int, float):
+            try:
+                when = " pada " + datetime.fromtimestamp(at).strftime("%H:%M")
+            except (OSError, OverflowError, ValueError):
+                when = ""
+        last_saved = _date_text(row.get("last_saved_date"))
+        if row.get("day_saved") is True:
+            save_text = (f"Hari terakhir ({last_saved}) sudah tersimpan (save terverifikasi)."
+                         if last_saved else "Hari terakhir sudah tersimpan (save terverifikasi).")
+        elif last_saved:
+            save_text = f"Hari yang sedang berjalan belum tersimpan (save terverifikasi terakhir: {last_saved})."
+        else:
+            save_text = "Hari terakhir belum tersimpan (belum ada save terverifikasi)."
+        group, priority, resolved = "stop", 1, True
+        fact = f"{what}{when}. {save_text} Sesi Stardew berakhir; tidak ada yang dimulai ulang otomatis."
+    elif ev in {"live7_stop_file_created", "live7_stop_file"} and row.get("source") == "host_left":
+        return None
+    elif (ev in {"operator_stop", "observed_stop", "cycle_stopped"}
             or ev in {"live7_stop_file_created", "live7_stop_file"}
             and row.get("source") in {"operator_stop", "observed_stop"}):
         group, priority, resolved, ev = "stop", 2, True, "planned_stop"
@@ -751,11 +783,30 @@ def cycle_stop_present(cycle_dir) -> bool:
         return False
 
 
+def _operator_stop_present(cycle_dir) -> bool:
+    """True when an operator or non-host_left stop file is present on this cycle/run."""
+    if cycle_dir is None:
+        return False
+    from arti_stardew_stop import read_stop
+    cycle = Path(cycle_dir)
+    try:
+        if (cycle / "OPERATOR_STOP").exists():
+            return True
+        for path in (cycle / "LIVE7_STOP", cycle.parent.parent / "LIVE7_STOP"):
+            raw, stop = read_stop(path)
+            if raw is not None and not (isinstance(stop, dict) and stop.get("writer") == "supervisor.host_left"):
+                return True
+    except (OSError, ValueError):
+        return True
+    return False
+
+
 class StatusFactsRelay:
-    def __init__(self, config, moments, *, clock, voice_ready=None, extra_session_facts=None):
+    def __init__(self, config, moments, *, clock, voice_ready=None, extra_session_facts=None, on_host_left=None):
         self.config, self._moments, self._clock = config, moments, clock
         self._voice_ready = voice_ready or (lambda: True)
         self._extra_session_facts = extra_session_facts or (lambda: ())
+        self._on_host_left = on_host_left
         self._session_over = False
         self._lock = threading.RLock()
         self._cycle = None
@@ -775,8 +826,11 @@ class StatusFactsRelay:
         self._connection_cause = ""
         self._stop_present = False
         self._stopped = False
+        self._host_left_active = False
+        self._operator_stopped = False
         self._ownership = {}  # smoke 10-24 rows 14/22: own money + own planted crops, facts only
         self._activity = ActivityFacts()  # sat hotfix 10-24: location/time/skill/results/screen, aged, stale dropped
+        self._peer_sleep, self._native_ts, self._owner_hosted, self._solo_run = None, None, False, False
         self._pause_until = 0.0
         self._self_key, self._self_lines = None, []
         self._publish()  # session facts (mabar) are known before the first game row
@@ -832,8 +886,21 @@ class StatusFactsRelay:
                 "jangan ngarang soal sesi lama." % fails)
 
     def _publish(self):
+        if self._host_left_active:
+            stop_fact = self._active.get("stop")
+            self._snapshot = (
+                "\n[STARDEW STATUS] " + stop_fact
+                + " Pakai fakta ini apa adanya; jangan mengarang kondisi game.\n"
+                if stop_fact else ""
+            )
+            return
         facts = [self._active[k] for k in ("stop", "connection", "game_pause", "host_wait") if k in self._active]
-        activity = self._activity.render(self._clock(), travel_intent=bool(self.config.get("live_play_rules_enabled")))
+        now = self._clock()
+        activity = self._activity.render(now, travel_intent=bool(self.config.get("live_play_rules_enabled")))
+        from arti_runtime.human_host import peer_sight_fact
+        peer_sight = ("" if self._stop_present or self._session_over or "stop" in self._active or self._solo_run else
+                      peer_sight_fact(self._peer_sleep, now=now, max_age=NATIVE_PIN_SEC, owner_hosted=self._owner_hosted,
+                                      native_fresh=self._native_ts is not None and 0 <= now - self._native_ts <= NATIVE_PIN_SEC))
         owned = [self._ownership[k] for k in ("money", "crops") if k in self._ownership]
         owned.extend(self._gifts.values())
         # Mabar: plain session facts the operator states (e.g. new co-op farm with the owner), never a script.
@@ -851,12 +918,13 @@ class StatusFactsRelay:
         if own:
             owned = owned + ["Dirimu, dibaca dari profil native game (yang tidak tercatat di sini belum diketahui): "
                              + " ".join(own)]
-        if not facts and not owned and not activity:
+        if not facts and not owned and not activity and not peer_sight:
             self._snapshot = ""
             return
         # One line: trim_system_prompt_for_llm reserves exactly this line outside every cut.
         from arti_runtime.coop_session import owner_name
-        self._snapshot = ("\n[STARDEW STATUS] " + LIVE7_AGENCY_FACT + " " + " ".join(facts + ([activity] if activity else []) + owned)
+        body = facts + ([activity] if activity else []) + ([peer_sight] if peer_sight else []) + owned
+        self._snapshot = ("\n[STARDEW STATUS] " + LIVE7_AGENCY_FACT + " " + " ".join(body)
                           + " Fakta ini tentang karakter ARTI sendiri (sebut 'aku'), bukan " + owner_name(self.config) + " atau penonton."
                           + " Pakai fakta ini apa adanya; jangan mengarang apa pun di luar fakta ini"
                           + " (lokasi, jam, energi, HP, gerakan, isi teks layar). Yang tidak tercatat di sini, bilang belum tahu."
@@ -934,11 +1002,25 @@ class StatusFactsRelay:
             self._publish()
 
     def _accept(self, event, now, *, notify=True):
+        on_left = None
         with self._lock:
             if event.event_id in self._seen:
                 return
             self._seen.add(event.event_id)
-            if event.kind == "planned_stop":
+            if event.kind == "host_left":
+                # Clear ownership, gifts, pause facts, activity and co-op block at once.
+                self._host_left_active = True
+                self._active.clear()
+                self._pending.clear()
+                self._ownership.clear()
+                self._gifts.clear()
+                self._activity = ActivityFacts()
+                self._peer_sleep = self._native_ts = None
+                self._pause_until = 0.0
+                self._connection_cause, self._diagnostic = "", None
+                self._trial = None
+                on_left = self._on_host_left
+            elif event.kind == "planned_stop":
                 self._active.clear()
                 self._pending.clear()
                 self._connection_cause, self._diagnostic = "", None
@@ -955,16 +1037,17 @@ class StatusFactsRelay:
                 if event.resolved:
                     self._connection_cause = ""
             previous = self._active.get(event.group)
-            # A planned STOP resolves an incident, but the session remains
+            # A planned STOP or host_left resolves an incident, but the session remains
             # stopped. Keep that neutral fact for ordinary voice questions
             # until STOP clears or a new cycle replaces this one.
-            if event.resolved and event.kind != "planned_stop":
+            keep_resolved = event.kind in ("planned_stop", "host_left")
+            if event.resolved and not keep_resolved:
                 self._active.pop(event.group, None)
             else:
                 self._active[event.group] = event.fact
             # Coalesce supervisor mirrors/reminders, and retire obsolete speech
             # when resolution arrives before the model gets a voice gap.
-            if previous == event.fact or (event.resolved and previous is None and event.kind != "planned_stop"):
+            if previous == event.fact or (event.resolved and previous is None and not keep_resolved):
                 return
             self._pending.pop(event.group, None)
             if notify and not (event.group == "host_wait" and event.resolved):
@@ -974,6 +1057,8 @@ class StatusFactsRelay:
                         if event.group == "host_wait" else 0.0)
                 self._pending[event.group] = _Pending(event, now + RETRY_TTL_SEC + wait, next_try=now + wait)
             self._publish()
+        if callable(on_left):
+            on_left()
 
     def _read(self, path, *, initial_tail=False):
         tail = self._tails.setdefault(path, _Tail())
@@ -984,8 +1069,11 @@ class StatusFactsRelay:
             return
         # Worker-only I/O; the voice path continues reading an immutable snapshot.
         import arti_mind
+        from arti_runtime import mind_scope
         from arti_runtime.time_grounding import current_state, speech_facts
-        current = arti_mind.read_now(arti_mind.mind_dir(self.config)) or {}
+        current = (mind_scope.read_now_for_config(self.config, now=now, cycle_dir=cycle_dir)
+                   if mind_scope.enabled(self.config)
+                   else arti_mind.read_now(arti_mind.mind_dir(self.config))) or {}
         native = speech_facts(current) if current.get("game") == "stardew" else {}
         self.attention_native = native
         if self.config.get("attention_desk_enabled"):
@@ -993,6 +1081,9 @@ class StatusFactsRelay:
         peer_sleep = (native.get("peer_sleep") or {}).get("value")
         cycle = Path(cycle_dir)
         if cycle != self._cycle:
+            from arti_runtime.human_host import is_owner_hosted_run, is_solo_run
+            owner_hosted = is_owner_hosted_run(cycle.parent.parent)
+            solo_run = is_solo_run(cycle.parent.parent) or self.config.get("stardew_host_controller") == "harness"
             with self._lock:
                 self._cycle = cycle
                 self._tails, self._seen, self._active, self._pending = {}, set(), {}, {}
@@ -1002,7 +1093,10 @@ class StatusFactsRelay:
                 self._diagnostic_anchor = None
                 self._ownership = {}
                 self._activity = ActivityFacts()
+                self._peer_sleep, self._native_ts, self._owner_hosted, self._solo_run = None, None, owner_hosted, solo_run
                 self._pause_until = 0.0
+                self._host_left_active = False
+                self._operator_stopped = False
                 self._publish()
         rows = self._read(cycle / "cycle_events.jsonl")
         for row in rows:
@@ -1072,11 +1166,20 @@ class StatusFactsRelay:
             at = row.get("at")
             recent = type(at) in (int, float) and 0 <= now - at <= RETRY_TTL_SEC
             self._accept(event, now, notify=recent)
-        if current.get("game") == "stardew":
+        nf = current.get("native_facts") if isinstance(current.get("native_facts"), dict) else {}
+        cm = nf.get("current_menu") if isinstance(nf.get("current_menu"), dict) else {}
+        on_title = cm.get("value") == "TitleMenu" and (cm.get("observed_ts") is None or (type(cm.get("observed_ts")) in (int, float) and 0 <= now - cm["observed_ts"] <= NATIVE_PIN_SEC))
+        if current.get("game") == "stardew" and not self._host_left_active and not on_title:
             # After this poll's journal rows: the newest stamp wins, whichever side wrote it. Freshness is
             # wall time, as for the peer facts above and speech_facts; the relay clock only ages the line.
             self._activity.note_native(current_state(current))
-            self._activity.note_bag(((current.get("native_facts") or {}).get("own_state") or {}).get("inventory"))
+            self._activity.note_bag(((nf.get("own_state") or {}).get("inventory")))
+            self._peer_sleep = nf.get("peer_sleep") if isinstance(nf.get("peer_sleep"), dict) else None
+            cur_state = current_state(current, now=now, max_age=NATIVE_PIN_SEC)
+            self._native_ts = max((float(s) for s in (cur_state.get("observed_ts") if cur_state.get("basis") == "latest_observation" else None,
+                                                      (self._peer_sleep or {}).get("observed_ts")) if type(s) in (int, float) and 0 <= now - s <= NATIVE_PIN_SEC), default=None)
+        else:
+            self._peer_sleep = self._native_ts = None
         if self._pause_until and now > self._pause_until:
             with self._lock:
                 self._active.pop("game_pause", None)
@@ -1086,17 +1189,33 @@ class StatusFactsRelay:
         # Keep tailing the selected cycle after the resolver loses its active
         # status at SAFETY_STOP. A new active cycle explicitly replaces it.
         present = cycle_stop_present(cycle)
+        self._operator_stopped = _operator_stop_present(cycle)
         if self._stop_present and not present and "stop" in self._active:
-            self._accept(StatusEvent(f"{cycle}:cleared:{now}", "stop", 0,
-                "penanda berhenti darurat Stardew sudah dilepas; kondisi game belum dipastikan.", True), now)
+            if self._host_left_active:
+                with self._lock:
+                    self._active.pop("stop", None)
+                    self._pending.pop("stop", None)
+                    self._host_left_active = False
+                    self._publish()
+            else:
+                self._accept(StatusEvent(f"{cycle}:cleared:{now}", "stop", 0,
+                    "penanda berhenti darurat Stardew sudah dilepas; kondisi game belum dipastikan.", True), now)
         self._stop_present = present
+
+    def _host_left_deliverable(self):
+        pending = self._pending.get("stop")
+        return (not self._stopped and self._host_left_active and not self._operator_stopped
+                and pending is not None and pending.event.kind == "host_left")
 
     def is_current(self, text):
         with self._lock:
             pending = self._pending.get(text._group)
-            return (not self._stopped and not self._stop_present and not self._session_over
-                    and self.config.get("live7_status_facts_enabled", True)
-                    and pending is not None and pending.text is text and self._clock() < pending.expires)
+            if (self._stopped or not self.config.get("live7_status_facts_enabled", True)
+                    or pending is None or pending.text is not text or self._clock() >= pending.expires):
+                return False
+            if self._host_left_deliverable() and pending.event.kind == "host_left":
+                return True
+            return not self._stop_present and not self._session_over
 
     def mark_voiced(self, text):
         with self._lock:
@@ -1115,10 +1234,17 @@ class StatusFactsRelay:
         self._poll(cycle_dir, now)
         self._session_over = bool(session_over or self._stop_present)
         if self._session_over:
-            with self._lock:
-                self._pending.clear()
-                self._publish()
             self._read_in_game.pending.clear()
+            with self._lock:
+                if self._host_left_deliverable():
+                    pending = self._pending["stop"]
+                    self._pending = {"stop": pending} if now < pending.expires else {}
+                else:
+                    self._pending.clear()
+                self._publish()
+                deliver_host_left = self._host_left_deliverable()
+            if deliver_host_left:
+                return self.deliver(enqueue, now=now, help_open=help_open, high_priority_only=False)
             return False
         if self.config.get("attention_desk_enabled"):
             self._read_in_game.deliver(enqueue)
@@ -1133,8 +1259,10 @@ class StatusFactsRelay:
 
     def deliver(self, enqueue, *, now, help_open=False, high_priority_only=False):
         """Memory-only delivery pass; optional moments go before low-priority facts."""
-        if (self._stopped or self._stop_present or self._session_over
-                or not self.config.get("live7_status_facts_enabled", True)):
+        with self._lock:
+            host_left_only = self._host_left_deliverable()
+        if (self._stopped or not self.config.get("live7_status_facts_enabled", True)
+                or ((self._stop_present or self._session_over) and not host_left_only)):
             return False
         with self._lock:
             pending = min(self._pending.values(), key=lambda p: p.event.priority, default=None)

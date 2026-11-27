@@ -100,6 +100,8 @@ public sealed partial class ModEntry
                 return facts with { LetterQuest = ReadLetterQuest(letter, Game1.player) }; // W1 gap B4 (ModEntry.QuestCapture.cs)
             case JunimoNoteMenu junimo:
             {
+                if (junimo.scrambledText)
+                    return facts with { JunimoScrambled = true, JunimoCanClick = JunimoNoteMenu.canClick };
                 Item? held = junimo.heldItem;
                 Bundle? page = junimo.currentPageBundle;
                 var accepting = new List<int>();

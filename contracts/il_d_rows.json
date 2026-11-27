@@ -434,25 +434,25 @@
           "line": 2841
         },
         {
-          "key": "write|System.Void ArtiStardewBridge.ModEntry/<>c::<.ctor>b__919_3(StardewValley.InputState)|stsfld|StardewValley.InputState StardewValley.Game1::input",
+          "key": "write|System.Void ArtiStardewBridge.ModEntry/<>c::<.ctor>b__920_3(StardewValley.InputState)|stsfld|StardewValley.InputState StardewValley.Game1::input",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/ModEntry.UiMotor.cs",
           "line": 114
         },
         {
-          "key": "write|System.Void ArtiStardewBridge.ModEntry/<>c::<.ctor>b__919_5(System.ValueTuple`3<Microsoft.Xna.Framework.Input.MouseState,Microsoft.Xna.Framework.Input.KeyboardState,Microsoft.Xna.Framework.Input.GamePadState>)|stsfld|Microsoft.Xna.Framework.Input.GamePadState StardewValley.Game1::oldPadState",
+          "key": "write|System.Void ArtiStardewBridge.ModEntry/<>c::<.ctor>b__920_5(System.ValueTuple`3<Microsoft.Xna.Framework.Input.MouseState,Microsoft.Xna.Framework.Input.KeyboardState,Microsoft.Xna.Framework.Input.GamePadState>)|stsfld|Microsoft.Xna.Framework.Input.GamePadState StardewValley.Game1::oldPadState",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/ModEntry.UiMotor.cs",
           "line": 120
         },
         {
-          "key": "write|System.Void ArtiStardewBridge.ModEntry/<>c::<.ctor>b__919_5(System.ValueTuple`3<Microsoft.Xna.Framework.Input.MouseState,Microsoft.Xna.Framework.Input.KeyboardState,Microsoft.Xna.Framework.Input.GamePadState>)|stsfld|Microsoft.Xna.Framework.Input.KeyboardState StardewValley.Game1::oldKBState",
+          "key": "write|System.Void ArtiStardewBridge.ModEntry/<>c::<.ctor>b__920_5(System.ValueTuple`3<Microsoft.Xna.Framework.Input.MouseState,Microsoft.Xna.Framework.Input.KeyboardState,Microsoft.Xna.Framework.Input.GamePadState>)|stsfld|Microsoft.Xna.Framework.Input.KeyboardState StardewValley.Game1::oldKBState",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/ModEntry.UiMotor.cs",
           "line": 115
         },
         {
-          "key": "write|System.Void ArtiStardewBridge.ModEntry/<>c::<.ctor>b__919_5(System.ValueTuple`3<Microsoft.Xna.Framework.Input.MouseState,Microsoft.Xna.Framework.Input.KeyboardState,Microsoft.Xna.Framework.Input.GamePadState>)|stsfld|Microsoft.Xna.Framework.Input.MouseState StardewValley.Game1::oldMouseState",
+          "key": "write|System.Void ArtiStardewBridge.ModEntry/<>c::<.ctor>b__920_5(System.ValueTuple`3<Microsoft.Xna.Framework.Input.MouseState,Microsoft.Xna.Framework.Input.KeyboardState,Microsoft.Xna.Framework.Input.GamePadState>)|stsfld|Microsoft.Xna.Framework.Input.MouseState StardewValley.Game1::oldMouseState",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/ModEntry.UiMotor.cs",
           "line": 115
@@ -790,13 +790,13 @@
       "reachability": "legacy UI compatibility",
       "sites": [
         {
-          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass810_2::<ReadUiPadComponents>b__4(ArtiStardewBridge.Protocol.UiPadComponent)|callvirt|System.Boolean StardewValley.Menus.IClickableMenu::IsAutomaticSnapValid(System.Int32,StardewValley.Menus.ClickableComponent,StardewValley.Menus.ClickableComponent)",
+          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass811_2::<ReadUiPadComponents>b__4(ArtiStardewBridge.Protocol.UiPadComponent)|callvirt|System.Boolean StardewValley.Menus.IClickableMenu::IsAutomaticSnapValid(System.Int32,StardewValley.Menus.ClickableComponent,StardewValley.Menus.ClickableComponent)",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/ModEntry.Ui.cs",
           "line": 219
         },
         {
-          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass810_5::<ReadUiPadComponents>b__8(ArtiStardewBridge.Protocol.UiPadComponent)|callvirt|System.Boolean StardewValley.Menus.IClickableMenu::IsAutomaticSnapValid(System.Int32,StardewValley.Menus.ClickableComponent,StardewValley.Menus.ClickableComponent)",
+          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass811_5::<ReadUiPadComponents>b__8(ArtiStardewBridge.Protocol.UiPadComponent)|callvirt|System.Boolean StardewValley.Menus.IClickableMenu::IsAutomaticSnapValid(System.Int32,StardewValley.Menus.ClickableComponent,StardewValley.Menus.ClickableComponent)",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/ModEntry.Ui.cs",
           "line": 229
@@ -1367,7 +1367,7 @@
     },
     {
       "id": "D23",
-      "source": "ModEntry.Economy.cs:365; ModEntry.EventActions.cs:140; ModEntry.EventActions.cs:219; ModEntry.EventActions.cs:286; ModEntry.Extras.cs:1139; ModEntry.Extras.cs:310; ModEntry.Extras.cs:342; ModEntry.Extras.cs:760; ModEntry.Extras.cs:774; ModEntry.GenericUi.cs:145; ModEntry.Gift.cs:35; ModEntry.GoalRoutes.cs:33; ModEntry.InteractB.cs:170; ModEntry.InteractB.cs:203; ModEntry.InteractB.cs:387; NativeB3Offers.cs:32; NativeB3Offers.cs:40; NativeB3Offers.cs:91; NativeGoalRouteWeather.cs:11; NativeWorldKnowledge.cs (read-only world catalog); NativeQuestFacts.cs:70",
+      "source": "ModEntry.Economy.cs:365; ModEntry.EventActions.cs:140; ModEntry.EventActions.cs:251; ModEntry.EventActions.cs:323; ModEntry.Extras.cs:1139; ModEntry.Extras.cs:310; ModEntry.Extras.cs:342; ModEntry.Extras.cs:760; ModEntry.Extras.cs:774; ModEntry.GenericUi.cs:145; ModEntry.Gift.cs:35; ModEntry.GoalRoutes.cs:33; ModEntry.InteractB.cs:170; ModEntry.InteractB.cs:203; ModEntry.InteractB.cs:387; NativeB3Offers.cs:32; NativeB3Offers.cs:40; NativeB3Offers.cs:91; NativeGoalRouteWeather.cs:11; NativeWorldKnowledge.cs (read-only world catalog); NativeQuestFacts.cs:70",
       "write": "lazy game lookups and condition evaluation",
       "replacement": "pinned pure facts, with unsupported queries remaining unknown",
       "delete_phase": "R4",
@@ -1381,16 +1381,16 @@
           "line": 203
         },
         {
-          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass385_0::<CaptureEventAction>g__SeatBinding|13()|callvirt|System.Boolean StardewValley.MapSeat::IsBlocked(StardewValley.GameLocation)",
+          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass385_0::<CaptureEventAction>g__SeatBinding|11()|callvirt|System.Boolean StardewValley.MapSeat::IsBlocked(StardewValley.GameLocation)",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs",
-          "line": 286
+          "line": 323
         },
         {
-          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass385_0::<CaptureEventAction>g__SeatGeometryValid|6()|callvirt|System.Boolean StardewValley.MapSeat::IsBlocked(StardewValley.GameLocation)",
+          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass385_0::<CaptureEventAction>g__SeatGeometryValid|4()|callvirt|System.Boolean StardewValley.MapSeat::IsBlocked(StardewValley.GameLocation)",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs",
-          "line": 219
+          "line": 251
         },
         {
           "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass468_1::<ShopOwnerInArea>b__1(StardewValley.NPC)|callvirt|System.Boolean StardewValley.GameData.Shops.ShopOwnerData::IsValid(System.String)",
@@ -1505,7 +1505,7 @@
     },
     {
       "id": "D24",
-      "source": "GenericUiInspection.cs:20; ModEntry.GenericUi.cs:342; ModEntry.GenericUi.cs:343; ModEntry.GenericUi.cs:344; ModEntry.GenericUi.cs:349; ModEntry.UiMotor.cs:337; NativeB1Offers.cs:114; NativeB1Offers.cs:134; ReadyCheckObservation.cs:17",
+      "source": "GenericUiInspection.cs:20; ModEntry.GenericUi.cs:342; ModEntry.GenericUi.cs:343; ModEntry.GenericUi.cs:344; ModEntry.GenericUi.cs:349; ModEntry.UiMotor.cs:337; NativeB1Offers.cs:108; NativeB1Offers.cs:131; ReadyCheckObservation.cs:17",
       "write": "remaining legacy feature callbacks",
       "replacement": "generic controls/native input consumption",
       "delete_phase": "R4",
@@ -1525,16 +1525,16 @@
           "line": 17
         },
         {
-          "key": "reflection|System.Collections.Generic.List`1<System.ValueTuple`2<System.Int32,Microsoft.Xna.Framework.Point>> ArtiStardewBridge.NativeB1Offers::NoteTiles(StardewValley.Locations.CommunityCenter,StardewValley.Farmer)|callvirt|System.Object System.Reflection.MethodBase::Invoke(System.Object,System.Object[])",
+          "key": "reflection|System.Collections.Generic.List`1<System.ValueTuple`2<System.Int32,Microsoft.Xna.Framework.Point>> ArtiStardewBridge.NativeB1Offers::PresentNoteTiles(StardewValley.Locations.CommunityCenter)|callvirt|System.Object System.Reflection.MethodBase::Invoke(System.Object,System.Object[])",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/NativeB1Offers.cs",
-          "line": 134
+          "line": 131
         },
         {
-          "key": "reflection|System.Nullable`1<System.Int32> ArtiStardewBridge.NativeB1Offers::ResolveNote(StardewValley.GameLocation,StardewValley.Farmer,Microsoft.Xna.Framework.Point,Microsoft.Xna.Framework.Vector2)|callvirt|System.Object System.Reflection.MethodBase::Invoke(System.Object,System.Object[])",
+          "key": "reflection|System.Nullable`1<System.Int32> ArtiStardewBridge.NativeB1Offers::PresentNote(StardewValley.Locations.CommunityCenter,Microsoft.Xna.Framework.Point,Microsoft.Xna.Framework.Vector2)|callvirt|System.Object System.Reflection.MethodBase::Invoke(System.Object,System.Object[])",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/NativeB1Offers.cs",
-          "line": 114
+          "line": 108
         },
         {
           "key": "write|System.Void ArtiStardewBridge.ModEntry/UiPadGamePort/<>c__DisplayClass3_1::<ApplyGeneric>b__1()|callvirt|System.Void StardewValley.KeyboardDispatcher::set_Subscriber(StardewValley.IKeyboardSubscriber)",
@@ -1826,7 +1826,7 @@
     },
     {
       "id": "D29",
-      "source": "stardew-mod/ArtiStardewBridge/BackgroundControlInputHooks.cs:2876; stardew-mod/ArtiStardewBridge/BackgroundControlInputHooks.cs:2877; stardew-mod/ArtiStardewBridge/BackgroundControlInputHooks.cs:1444; stardew-mod/ArtiStardewBridge/BackgroundControlInputHooks.cs:1445; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:424; stardew-mod/ArtiStardewBridge/ModEntry.Interact.cs:249; stardew-mod/ArtiStardewBridge/FestivalDialogueWitness.cs:61; stardew-mod/ArtiStardewBridge/ModEntry.GenericUi.cs:103; stardew-mod/ArtiStardewBridge/ModEntry.B3Capture.cs:69; stardew-mod/ArtiStardewBridge/ModEntry.B3Capture.cs:101; stardew-mod/ArtiStardewBridge/ModEntry.Interact.cs:90; stardew-mod/ArtiStardewBridge/ModEntry.Interact.cs:58; stardew-mod/ArtiStardewBridge/ModEntry.Interact.cs:129; stardew-mod/ArtiStardewBridge/ModEntry.B1Capture.cs:31; stardew-mod/ArtiStardewBridge/ModEntry.InteractCapture.cs:88; stardew-mod/ArtiStardewBridge/ModEntry.NativeEvidence.cs:51; stardew-mod/ArtiStardewBridge/ModEntry.Gift.cs:66; stardew-mod/ArtiStardewBridge/ModEntry.QuestCapture.cs:72; stardew-mod/ArtiStardewBridge/ModEntry.InteractCapture.cs:40; stardew-mod/ArtiStardewBridge/BackgroundControlInputHooks.cs:2796; stardew-mod/ArtiStardewBridge/BackgroundControlInputHooks.cs:1395; stardew-mod/ArtiStardewBridge/BackgroundControlInputHooks.cs:1386; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:203; stardew-mod/ArtiStardewBridge/ModEntry.B3Capture.cs:79; stardew-mod/ArtiStardewBridge/ModEntry.AnimalCapture.cs:55; stardew-mod/ArtiStardewBridge/BackgroundControlInputHooks.cs:1335; stardew-mod/ArtiStardewBridge/BackgroundToolTileProbe.cs:120; stardew-mod/ArtiStardewBridge/BackgroundToolTileProbe.cs:109; stardew-mod/ArtiStardewBridge/BackgroundToolTileProbe.cs:138; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:95; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:60; stardew-mod/ArtiStardewBridge/ModEntry.ReceiverObserver.cs:101; stardew-mod/ArtiStardewBridge/ModEntry.CursorItem.cs:12; stardew-mod/ArtiStardewBridge/ModEntry.CursorItem.cs:105; stardew-mod/ArtiStardewBridge/ModEntry.Economy.cs:90; stardew-mod/ArtiStardewBridge/ModEntry.Economy.cs:150; stardew-mod/ArtiStardewBridge/ModEntry.Economy.cs:143; stardew-mod/ArtiStardewBridge/ModEntry.Economy.cs:126; stardew-mod/ArtiStardewBridge/ModEntry.NativeEvidence.cs:109; stardew-mod/ArtiStardewBridge/ModEntry.NativeEvidence.cs:94; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:63; stardew-mod/ArtiStardewBridge/ModEntry.CharCustom.cs:185; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:311; stardew-mod/ArtiStardewBridge/ModEntry.FishingCapture.cs:43; stardew-mod/ArtiStardewBridge/ModEntry.VendorFacts.cs:68; stardew-mod/ArtiStardewBridge/ModEntry.VendorFacts.cs:64; stardew-mod/ArtiStardewBridge/ModEntry.VendorFacts.cs:69; stardew-mod/ArtiStardewBridge/ModEntry.GenericWorld.cs:115; stardew-mod/ArtiStardewBridge/ModEntry.GenericWorld.cs:95; stardew-mod/ArtiStardewBridge/Observation/InventorySnapshotCapture.cs:101; stardew-mod/ArtiStardewBridge/Observation/InventorySnapshotCapture.cs:56; stardew-mod/ArtiStardewBridge/Observation/InventorySnapshotCapture.cs:53; stardew-mod/ArtiStardewBridge/Observation/SceneSnapshotCapture.cs:115; stardew-mod/ArtiStardewBridge/Observation/SceneSnapshotCapture.cs:44; stardew-mod/ArtiStardewBridge/Observation/SceneSnapshotCapture.cs:80; stardew-mod/ArtiStardewBridge/Observation/SceneSnapshotCapture.cs:43; stardew-mod/ArtiStardewBridge/ModEntry.PlayerControl.cs:15; stardew-mod/ArtiStardewBridge/ModEntry.cs:3765; stardew-mod/ArtiStardewBridge/ModEntry.cs:3801; stardew-mod/ArtiStardewBridge/NativePurchaseAnimals.cs:96; stardew-mod/ArtiStardewBridge/NativePurchaseAnimals.cs:99; stardew-mod/ArtiStardewBridge/NativePurchaseAnimals.cs:55; stardew-mod/ArtiStardewBridge/NativePurchaseAnimals.cs:64; stardew-mod/ArtiStardewBridge/ModEntry.cs:665; stardew-mod/ArtiStardewBridge/Observation/SceneSnapshotCapture.cs:579; stardew-mod/ArtiStardewBridge/Observation/SceneSnapshotCapture.cs:580; stardew-mod/ArtiStardewBridge/Observation/SceneSnapshotCapture.cs:525; stardew-mod/ArtiStardewBridge/Observation/SceneSnapshotCapture.cs:534; stardew-mod/ArtiStardewBridge/Observation/SceneSnapshotCapture.cs:392; stardew-mod/ArtiStardewBridge/Observation/SceneSnapshotCapture.cs:388; stardew-mod/ArtiStardewBridge/ModEntry.cs:682; stardew-mod/ArtiStardewBridge/ModEntry.cs:684; stardew-mod/ArtiStardewBridge/ModEntry.cs:955; stardew-mod/ArtiStardewBridge/ModEntry.UiG3.cs:77; stardew-mod/ArtiStardewBridge/ModEntry.GenericUi.cs:240; stardew-mod/ArtiStardewBridge/ModEntry.GenericUi.cs:230; stardew-mod/ArtiStardewBridge/ModEntry.UiG3.cs:100; stardew-mod/ArtiStardewBridge/ModEntry.UiG3.cs:310; stardew-mod/ArtiStardewBridge/ModEntry.cs:4348; stardew-mod/ArtiStardewBridge/ModEntry.NativeDispatch.cs:133; stardew-mod/ArtiStardewBridge/ModEntry.NativeDispatch.cs:179; stardew-mod/ArtiStardewBridge/Actions/WaterOnceController.cs:129; stardew-mod/ArtiStardewBridge/Actions/WaterOnceController.cs:136; stardew-mod/ArtiStardewBridge/Actions/WaterOnceController.cs:123; stardew-mod/ArtiStardewBridge/BackgroundToolTileProbe.cs:93; stardew-mod/ArtiStardewBridge/FestivalDialogueWitness.cs:91; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:393; stardew-mod/ArtiStardewBridge/ModEntry.B3Context.cs:69; stardew-mod/ArtiStardewBridge/ModEntry.cs:3862; stardew-mod/ArtiStardewBridge/ModEntry.cs:3963; stardew-mod/ArtiStardewBridge/ModEntry.cs:4091; stardew-mod/ArtiStardewBridge/ModEntry.AnimalCapture.cs:20; stardew-mod/ArtiStardewBridge/ModEntry.Economy.cs:486; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:120; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:239; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:227; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:376; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:399; stardew-mod/ArtiStardewBridge/ModEntry.AnimalShopCapture.cs:19; stardew-mod/ArtiStardewBridge/ModEntry.B1Capture.cs:42; stardew-mod/ArtiStardewBridge/ModEntry.B1Capture.cs:83; stardew-mod/ArtiStardewBridge/ModEntry.B1Capture.cs:95; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:760; stardew-mod/ArtiStardewBridge/ModEntry.B3Capture.cs:134; stardew-mod/ArtiStardewBridge/ModEntry.B3Capture.cs:140; stardew-mod/ArtiStardewBridge/ModEntry.GenericWorld.cs:46; stardew-mod/ArtiStardewBridge/ModEntry.Gift.cs:57; stardew-mod/ArtiStardewBridge/ModEntry.Interact.cs:98; stardew-mod/ArtiStardewBridge/ModEntry.Interact.cs:151; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:90; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:189; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:367; stardew-mod/ArtiStardewBridge/ModEntry.InteractCapture.cs:30; stardew-mod/ArtiStardewBridge/ModEntry.InteractCapture.cs:101; stardew-mod/ArtiStardewBridge/ModEntry.AnimalCapture.cs:40; stardew-mod/ArtiStardewBridge/ModEntry.QuestCapture.cs:62; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:568; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:326; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:386; stardew-mod/ArtiStardewBridge/ModEntry.NativeEvidence.cs:99; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:458; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:913; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:873; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:198; stardew-mod/ArtiStardewBridge/ModEntry.EventStaging.cs:80; stardew-mod/ArtiStardewBridge/ModEntry.AnimalHouseRoutes.cs:151; stardew-mod/ArtiStardewBridge/ModEntry.AnimalHouseRoutes.cs:130; stardew-mod/ArtiStardewBridge/ModEntry.Interact.cs:44; stardew-mod/ArtiStardewBridge/ModEntry.GenericWorld.cs:30; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:830; stardew-mod/ArtiStardewBridge/ModEntry.FestivalReflex.cs:211; stardew-mod/ArtiStardewBridge/ModEntry.FestivalReflex.cs:210; stardew-mod/ArtiStardewBridge/ModEntry.AnimalHouseRoutes.cs:427; stardew-mod/ArtiStardewBridge/ModEntry.AnimalHouseRoutes.cs:426; stardew-mod/ArtiStardewBridge/ModEntry.AnimalHouseRoutes.cs:70; stardew-mod/ArtiStardewBridge/NativeB1Offers.cs:101; stardew-mod/ArtiStardewBridge/NativeB3Offers.cs:34; stardew-mod/ArtiStardewBridge/ReflexProbe.cs:693; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:316; stardew-mod/ArtiStardewBridge/ModEntry.GenericUi.cs:149; stardew-mod/ArtiStardewBridge/ModEntry.GenericUi.cs:235; stardew-mod/ArtiStardewBridge/ModEntry.FestivalReflex.cs:409; stardew-mod/ArtiStardewBridge/ModEntry.GenericWorld.cs:40; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:316; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:311; stardew-mod/ArtiStardewBridge/ModEntry.FestivalReflex.cs:341; stardew-mod/ArtiStardewBridge/NativePersonaFacts.cs:19; stardew-mod/ArtiStardewBridge/ModEntry.GenericUi.cs:145; stardew-mod/ArtiStardewBridge/ModEntry.VendorFacts.cs:15; stardew-mod/ArtiStardewBridge/ReflexProbe.cs:692; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:463; stardew-mod/ArtiStardewBridge/Observation/InventorySnapshotCapture.cs:137; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:358; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:349; stardew-mod/ArtiStardewBridge/ModEntry.Reflex.cs:46; stardew-mod/ArtiStardewBridge/ModEntry.Reflex.cs:43; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:642; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:635; stardew-mod/ArtiStardewBridge/ModEntry.AnimalHouseRoutes.cs:102; stardew-mod/ArtiStardewBridge/ModEntry.AnimalHouseRoutes.cs:83; stardew-mod/ArtiStardewBridge/ModEntry.Ui.cs:180; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:407; stardew-mod/ArtiStardewBridge/ModEntry.NativeEvidence.cs:86; stardew-mod/ArtiStardewBridge/ModEntry.ExtrasUi.cs:77; stardew-mod/ArtiStardewBridge/ModEntry.B1Capture.cs:62; stardew-mod/ArtiStardewBridge/ModEntry.B1Capture.cs:89; stardew-mod/ArtiStardewBridge/ModEntry.B3Capture.cs:24; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:162; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:155; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:170; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:177; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:512; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:532; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:255; stardew-mod/ArtiStardewBridge/ModEntry.Gift.cs:54; stardew-mod/ArtiStardewBridge/ModEntry.Gift.cs:35; stardew-mod/ArtiStardewBridge/ModEntry.AnimalCapture.cs:49; stardew-mod/ArtiStardewBridge/ModEntry.AnimalCapture.cs:44; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:308; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:58; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:82; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:73; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:337; stardew-mod/ArtiStardewBridge/ModEntry.QuestCapture.cs:59; stardew-mod/ArtiStardewBridge/ModEntry.QuestCapture.cs:37; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:672; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:687; stardew-mod/ArtiStardewBridge/BackgroundToolTileProbe.cs:28; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:107; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:105; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:340; stardew-mod/ArtiStardewBridge/NativeRouteCell.cs:58; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:403; stardew-mod/ArtiStardewBridge/GamepadProbe.cs:480; stardew-mod/ArtiStardewBridge/GamepadProbe.cs:457; stardew-mod/ArtiStardewBridge/GamepadProbe.cs:470; stardew-mod/ArtiStardewBridge/Observation/SceneSnapshotCapture.cs:297; stardew-mod/ArtiStardewBridge/Observation/SceneSnapshotCapture.cs:269; stardew-mod/ArtiStardewBridge/Observation/SceneSnapshotCapture.cs:262; stardew-mod/ArtiStardewBridge/Observation/SceneSnapshotCapture.cs:264; stardew-mod/ArtiStardewBridge/Observation/SceneSnapshotCapture.cs:304; stardew-mod/ArtiStardewBridge/ReflexProbe.cs:699; stardew-mod/ArtiStardewBridge/ReflexProbe.cs:628; stardew-mod/ArtiStardewBridge/ReflexProbe.cs:710; stardew-mod/ArtiStardewBridge/ReflexProbe.cs:659; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:387; stardew-mod/ArtiStardewBridge/ReflexProbe.cs:698; stardew-mod/ArtiStardewBridge/ModEntry.AnimalHouseRoutes.cs:34; stardew-mod/ArtiStardewBridge/ModEntry.AnimalHouseRoutes.cs:33; stardew-mod/ArtiStardewBridge/ReflexProbe.cs:711; stardew-mod/ArtiStardewBridge/ReflexProbe.cs:712; stardew-mod/ArtiStardewBridge/ReflexProbe.cs:713; stardew-mod/ArtiStardewBridge/Actions/WaterOnceController.cs:107; stardew-mod/ArtiStardewBridge/Actions/WaterOnceController.cs:104; stardew-mod/ArtiStardewBridge/BackgroundPadRuntime.cs:255; stardew-mod/ArtiStardewBridge/ModEntry.FestivalReflex.cs:363; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:325; stardew-mod/ArtiStardewBridge/ModEntry.Reflex.cs:191; stardew-mod/ArtiStardewBridge/ModEntry.cs:1980; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:214; stardew-mod/ArtiStardewBridge/ModEntry.GenericWorld.cs:69; stardew-mod/ArtiStardewBridge/ModEntry.Gift.cs:19; stardew-mod/ArtiStardewBridge/ModEntry.Interact.cs:39; stardew-mod/ArtiStardewBridge/ModEntry.Interact.cs:35; stardew-mod/ArtiStardewBridge/ModEntry.InteractCapture.cs:22; stardew-mod/ArtiStardewBridge/ModEntry.Pad.cs:78; stardew-mod/ArtiStardewBridge/ModEntry.QuestContext.cs:38; stardew-mod/ArtiStardewBridge/ModEntry.EventStaging.cs:65; stardew-mod/ArtiStardewBridge/ModEntry.Ui.cs:118; stardew-mod/ArtiStardewBridge/BackgroundEventControl.cs:35; stardew-mod/ArtiStardewBridge/NativeFestivalFishing.cs:17; stardew-mod/ArtiStardewBridge/ModEntry.cs:4274; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:391; stardew-mod/ArtiStardewBridge/ModEntry.Interact.cs:212; stardew-mod/ArtiStardewBridge/ModEntry.Interact.cs:200; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:174; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:76; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:66; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:340; stardew-mod/ArtiStardewBridge/ModEntry.GenericUi.cs:158; stardew-mod/ArtiStardewBridge/ModEntry.Occurrences.cs:63; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:1236; stardew-mod/ArtiStardewBridge/ModEntry.GenericWorld.cs:32; stardew-mod/ArtiStardewBridge/ModEntry.GenericWorld.cs:27; stardew-mod/ArtiStardewBridge/ModEntry.cs:4081; stardew-mod/ArtiStardewBridge/ModEntry.cs:4070; stardew-mod/ArtiStardewBridge/ModEntry.FishingCapture.cs:21; stardew-mod/ArtiStardewBridge/ModEntry.FishingCapture.cs:17; stardew-mod/ArtiStardewBridge/Actions/WaterOnceController.cs:162; stardew-mod/ArtiStardewBridge/BackgroundControlInputHooks.cs:2540; stardew-mod/ArtiStardewBridge/BackgroundControlInputHooks.cs:2541; stardew-mod/ArtiStardewBridge/ModEntry.GenericUi.cs:68; stardew-mod/ArtiStardewBridge/ModEntry.Economy.cs:222; stardew-mod/ArtiStardewBridge/ModEntry.cs:751; stardew-mod/ArtiStardewBridge/ModEntry.AnimalHouseRoutes.cs:448; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:682; stardew-mod/ArtiStardewBridge/ModEntry.AnimalHouseRoutes.cs:275; stardew-mod/ArtiStardewBridge/ModEntry.AnimalHouseRoutes.cs:267; stardew-mod/ArtiStardewBridge/ModEntry.AnimalRoutine.cs:65; stardew-mod/ArtiStardewBridge/ModEntry.AnimalRoutine.cs:98; stardew-mod/ArtiStardewBridge/ModEntry.AnimalRoutine.cs:86; stardew-mod/ArtiStardewBridge/ModEntry.B3Context.cs:88; stardew-mod/ArtiStardewBridge/ModEntry.B3Context.cs:71; stardew-mod/ArtiStardewBridge/ModEntry.B3Context.cs:30; stardew-mod/ArtiStardewBridge/ModEntry.B3Context.cs:53; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:257; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:244; stardew-mod/ArtiStardewBridge/ModEntry.cs:3672; stardew-mod/ArtiStardewBridge/ModEntry.cs:3694; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:260; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:1035; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:1027; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:1068; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:1078; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:1069; stardew-mod/ArtiStardewBridge/ModEntry.GoalRoutes.cs:22; stardew-mod/ArtiStardewBridge/ModEntry.GoalRoutes.cs:17; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:873; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:863; stardew-mod/ArtiStardewBridge/ModEntry.GenericWorld.cs:37; stardew-mod/ArtiStardewBridge/ModEntry.Economy.cs:295; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:722; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:739; stardew-mod/ArtiStardewBridge/ModEntry.UiKey.cs:184; stardew-mod/ArtiStardewBridge/ModEntry.VendorFacts.cs:42; stardew-mod/ArtiStardewBridge/ModEntry.Economy.cs:447; stardew-mod/ArtiStardewBridge/ModEntry.cs:3931; stardew-mod/ArtiStardewBridge/ModEntry.cs:2352; stardew-mod/ArtiStardewBridge/ModEntry.cs:2254; stardew-mod/ArtiStardewBridge/ModEntry.PlayerControl.cs:63; stardew-mod/ArtiStardewBridge/ModEntry.cs:3462; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:366; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:360; stardew-mod/ArtiStardewBridge/ModEntry.cs:1178; stardew-mod/ArtiStardewBridge/ModEntry.cs:1204; stardew-mod/ArtiStardewBridge/ModEntry.cs:456; stardew-mod/ArtiStardewBridge/ModEntry.FestivalReflex.cs:230; stardew-mod/ArtiStardewBridge/ModEntry.FestivalReflex.cs:229; stardew-mod/ArtiStardewBridge/ModEntry.FestivalReflex.cs:162; stardew-mod/ArtiStardewBridge/ModEntry.FestivalReflex.cs:161; stardew-mod/ArtiStardewBridge/ModEntry.cs:1353; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:515; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:511; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:765; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:810; stardew-mod/ArtiStardewBridge/ModEntry.FestivalReflex.cs:184; stardew-mod/ArtiStardewBridge/ModEntry.FestivalReflex.cs:192; stardew-mod/ArtiStardewBridge/ModEntry.AnimalHouseRoutes.cs:319; stardew-mod/ArtiStardewBridge/ModEntry.AnimalHouseRoutes.cs:353; stardew-mod/ArtiStardewBridge/NativePurchaseAnimals.cs:44; stardew-mod/ArtiStardewBridge/Observation/SceneSnapshotCapture.cs:239; stardew-mod/ArtiStardewBridge/ReflexProbe.cs:360; stardew-mod/ArtiStardewBridge/ReflexProbe.cs:484; stardew-mod/ArtiStardewBridge/ReflexProbe.cs:474; stardew-mod/ArtiStardewBridge/ReflexProbe.cs:556; stardew-mod/ArtiStardewBridge/NativeCraftingFacts.cs:52; stardew-mod/ArtiStardewBridge/NativeCraftingFacts.cs:88; stardew-mod/ArtiStardewBridge/ModEntry.AnimalShopCapture.cs:0; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:0; stardew-mod/ArtiStardewBridge/NativeCalendarFacts.cs:0; stardew-mod/ArtiStardewBridge/NativeProgressFacts.cs:0; stardew-mod/ArtiStardewBridge/NativeRestFacts.cs:39; stardew-mod/ArtiStardewBridge/NativeBundleKnowledge.cs:0; stardew-mod/ArtiStardewBridge/ModEntry.ExtrasUi.cs:207; stardew-mod/ArtiStardewBridge/NativeProgressFacts.cs:286; stardew-mod/ArtiStardewBridge/NativeWorldKnowledge.cs:375; stardew-mod/ArtiStardewBridge/NativeWorldKnowledge.cs:378; stardew-mod/ArtiStardewBridge/BackgroundControlInputHooks.cs:2183; stardew-mod/ArtiStardewBridge/BackgroundControlInputHooks.cs:2300; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:258; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:260; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:262",
+      "source": "stardew-mod/ArtiStardewBridge/BackgroundControlInputHooks.cs:2876; stardew-mod/ArtiStardewBridge/BackgroundControlInputHooks.cs:2877; stardew-mod/ArtiStardewBridge/BackgroundControlInputHooks.cs:1444; stardew-mod/ArtiStardewBridge/BackgroundControlInputHooks.cs:1445; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:424; stardew-mod/ArtiStardewBridge/ModEntry.Interact.cs:249; stardew-mod/ArtiStardewBridge/FestivalDialogueWitness.cs:61; stardew-mod/ArtiStardewBridge/ModEntry.GenericUi.cs:103; stardew-mod/ArtiStardewBridge/ModEntry.B3Capture.cs:69; stardew-mod/ArtiStardewBridge/ModEntry.B3Capture.cs:101; stardew-mod/ArtiStardewBridge/ModEntry.Interact.cs:90; stardew-mod/ArtiStardewBridge/ModEntry.Interact.cs:58; stardew-mod/ArtiStardewBridge/ModEntry.Interact.cs:129; stardew-mod/ArtiStardewBridge/ModEntry.B1Capture.cs:31; stardew-mod/ArtiStardewBridge/ModEntry.InteractCapture.cs:88; stardew-mod/ArtiStardewBridge/ModEntry.NativeEvidence.cs:51; stardew-mod/ArtiStardewBridge/ModEntry.Gift.cs:66; stardew-mod/ArtiStardewBridge/ModEntry.QuestCapture.cs:72; stardew-mod/ArtiStardewBridge/ModEntry.InteractCapture.cs:40; stardew-mod/ArtiStardewBridge/BackgroundControlInputHooks.cs:2796; stardew-mod/ArtiStardewBridge/BackgroundControlInputHooks.cs:1395; stardew-mod/ArtiStardewBridge/BackgroundControlInputHooks.cs:1386; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:203; stardew-mod/ArtiStardewBridge/ModEntry.B3Capture.cs:79; stardew-mod/ArtiStardewBridge/ModEntry.AnimalCapture.cs:55; stardew-mod/ArtiStardewBridge/BackgroundControlInputHooks.cs:1335; stardew-mod/ArtiStardewBridge/BackgroundToolTileProbe.cs:120; stardew-mod/ArtiStardewBridge/BackgroundToolTileProbe.cs:109; stardew-mod/ArtiStardewBridge/BackgroundToolTileProbe.cs:138; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:95; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:60; stardew-mod/ArtiStardewBridge/ModEntry.ReceiverObserver.cs:101; stardew-mod/ArtiStardewBridge/ModEntry.CursorItem.cs:12; stardew-mod/ArtiStardewBridge/ModEntry.CursorItem.cs:105; stardew-mod/ArtiStardewBridge/ModEntry.Economy.cs:90; stardew-mod/ArtiStardewBridge/ModEntry.Economy.cs:150; stardew-mod/ArtiStardewBridge/ModEntry.Economy.cs:143; stardew-mod/ArtiStardewBridge/ModEntry.Economy.cs:126; stardew-mod/ArtiStardewBridge/ModEntry.NativeEvidence.cs:109; stardew-mod/ArtiStardewBridge/ModEntry.NativeEvidence.cs:94; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:63; stardew-mod/ArtiStardewBridge/ModEntry.CharCustom.cs:185; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:311; stardew-mod/ArtiStardewBridge/ModEntry.FishingCapture.cs:43; stardew-mod/ArtiStardewBridge/ModEntry.VendorFacts.cs:68; stardew-mod/ArtiStardewBridge/ModEntry.VendorFacts.cs:64; stardew-mod/ArtiStardewBridge/ModEntry.VendorFacts.cs:69; stardew-mod/ArtiStardewBridge/ModEntry.GenericWorld.cs:115; stardew-mod/ArtiStardewBridge/ModEntry.GenericWorld.cs:95; stardew-mod/ArtiStardewBridge/Observation/InventorySnapshotCapture.cs:101; stardew-mod/ArtiStardewBridge/Observation/InventorySnapshotCapture.cs:56; stardew-mod/ArtiStardewBridge/Observation/InventorySnapshotCapture.cs:53; stardew-mod/ArtiStardewBridge/Observation/SceneSnapshotCapture.cs:115; stardew-mod/ArtiStardewBridge/Observation/SceneSnapshotCapture.cs:44; stardew-mod/ArtiStardewBridge/Observation/SceneSnapshotCapture.cs:80; stardew-mod/ArtiStardewBridge/Observation/SceneSnapshotCapture.cs:43; stardew-mod/ArtiStardewBridge/ModEntry.PlayerControl.cs:15; stardew-mod/ArtiStardewBridge/ModEntry.cs:3765; stardew-mod/ArtiStardewBridge/ModEntry.cs:3801; stardew-mod/ArtiStardewBridge/NativePurchaseAnimals.cs:96; stardew-mod/ArtiStardewBridge/NativePurchaseAnimals.cs:99; stardew-mod/ArtiStardewBridge/NativePurchaseAnimals.cs:55; stardew-mod/ArtiStardewBridge/NativePurchaseAnimals.cs:64; stardew-mod/ArtiStardewBridge/ModEntry.cs:665; stardew-mod/ArtiStardewBridge/Observation/SceneSnapshotCapture.cs:579; stardew-mod/ArtiStardewBridge/Observation/SceneSnapshotCapture.cs:580; stardew-mod/ArtiStardewBridge/Observation/SceneSnapshotCapture.cs:525; stardew-mod/ArtiStardewBridge/Observation/SceneSnapshotCapture.cs:534; stardew-mod/ArtiStardewBridge/Observation/SceneSnapshotCapture.cs:392; stardew-mod/ArtiStardewBridge/Observation/SceneSnapshotCapture.cs:388; stardew-mod/ArtiStardewBridge/ModEntry.cs:682; stardew-mod/ArtiStardewBridge/ModEntry.cs:684; stardew-mod/ArtiStardewBridge/ModEntry.cs:955; stardew-mod/ArtiStardewBridge/ModEntry.UiG3.cs:77; stardew-mod/ArtiStardewBridge/ModEntry.GenericUi.cs:240; stardew-mod/ArtiStardewBridge/ModEntry.GenericUi.cs:230; stardew-mod/ArtiStardewBridge/ModEntry.UiG3.cs:100; stardew-mod/ArtiStardewBridge/ModEntry.UiG3.cs:310; stardew-mod/ArtiStardewBridge/ModEntry.cs:4348; stardew-mod/ArtiStardewBridge/ModEntry.NativeDispatch.cs:133; stardew-mod/ArtiStardewBridge/ModEntry.NativeDispatch.cs:179; stardew-mod/ArtiStardewBridge/Actions/WaterOnceController.cs:129; stardew-mod/ArtiStardewBridge/Actions/WaterOnceController.cs:136; stardew-mod/ArtiStardewBridge/Actions/WaterOnceController.cs:123; stardew-mod/ArtiStardewBridge/BackgroundToolTileProbe.cs:93; stardew-mod/ArtiStardewBridge/FestivalDialogueWitness.cs:91; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:393; stardew-mod/ArtiStardewBridge/ModEntry.B3Context.cs:69; stardew-mod/ArtiStardewBridge/ModEntry.cs:3862; stardew-mod/ArtiStardewBridge/ModEntry.cs:3963; stardew-mod/ArtiStardewBridge/ModEntry.cs:4091; stardew-mod/ArtiStardewBridge/ModEntry.AnimalCapture.cs:20; stardew-mod/ArtiStardewBridge/ModEntry.Economy.cs:486; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:148; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:271; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:259; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:376; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:399; stardew-mod/ArtiStardewBridge/ModEntry.AnimalShopCapture.cs:19; stardew-mod/ArtiStardewBridge/ModEntry.B1Capture.cs:42; stardew-mod/ArtiStardewBridge/ModEntry.B1Capture.cs:83; stardew-mod/ArtiStardewBridge/ModEntry.B1Capture.cs:95; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:760; stardew-mod/ArtiStardewBridge/ModEntry.B3Capture.cs:134; stardew-mod/ArtiStardewBridge/ModEntry.B3Capture.cs:140; stardew-mod/ArtiStardewBridge/ModEntry.GenericWorld.cs:46; stardew-mod/ArtiStardewBridge/ModEntry.Gift.cs:57; stardew-mod/ArtiStardewBridge/ModEntry.Interact.cs:98; stardew-mod/ArtiStardewBridge/ModEntry.Interact.cs:151; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:90; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:189; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:367; stardew-mod/ArtiStardewBridge/ModEntry.InteractCapture.cs:30; stardew-mod/ArtiStardewBridge/ModEntry.InteractCapture.cs:101; stardew-mod/ArtiStardewBridge/ModEntry.AnimalCapture.cs:40; stardew-mod/ArtiStardewBridge/ModEntry.QuestCapture.cs:62; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:568; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:326; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:386; stardew-mod/ArtiStardewBridge/ModEntry.NativeEvidence.cs:99; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:458; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:913; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:873; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:198; stardew-mod/ArtiStardewBridge/ModEntry.EventStaging.cs:80; stardew-mod/ArtiStardewBridge/ModEntry.AnimalHouseRoutes.cs:151; stardew-mod/ArtiStardewBridge/ModEntry.AnimalHouseRoutes.cs:130; stardew-mod/ArtiStardewBridge/ModEntry.Interact.cs:44; stardew-mod/ArtiStardewBridge/ModEntry.GenericWorld.cs:30; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:830; stardew-mod/ArtiStardewBridge/ModEntry.FestivalReflex.cs:211; stardew-mod/ArtiStardewBridge/ModEntry.FestivalReflex.cs:210; stardew-mod/ArtiStardewBridge/ModEntry.AnimalHouseRoutes.cs:427; stardew-mod/ArtiStardewBridge/ModEntry.AnimalHouseRoutes.cs:426; stardew-mod/ArtiStardewBridge/ModEntry.AnimalHouseRoutes.cs:70; stardew-mod/ArtiStardewBridge/NativeB1Offers.cs:101; stardew-mod/ArtiStardewBridge/NativeB3Offers.cs:34; stardew-mod/ArtiStardewBridge/ReflexProbe.cs:693; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:316; stardew-mod/ArtiStardewBridge/ModEntry.GenericUi.cs:149; stardew-mod/ArtiStardewBridge/ModEntry.GenericUi.cs:235; stardew-mod/ArtiStardewBridge/ModEntry.FestivalReflex.cs:409; stardew-mod/ArtiStardewBridge/ModEntry.GenericWorld.cs:40; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:316; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:311; stardew-mod/ArtiStardewBridge/ModEntry.FestivalReflex.cs:341; stardew-mod/ArtiStardewBridge/NativePersonaFacts.cs:19; stardew-mod/ArtiStardewBridge/ModEntry.GenericUi.cs:145; stardew-mod/ArtiStardewBridge/ModEntry.VendorFacts.cs:15; stardew-mod/ArtiStardewBridge/ReflexProbe.cs:692; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:463; stardew-mod/ArtiStardewBridge/Observation/InventorySnapshotCapture.cs:137; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:358; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:349; stardew-mod/ArtiStardewBridge/ModEntry.Reflex.cs:46; stardew-mod/ArtiStardewBridge/ModEntry.Reflex.cs:43; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:642; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:635; stardew-mod/ArtiStardewBridge/ModEntry.AnimalHouseRoutes.cs:102; stardew-mod/ArtiStardewBridge/ModEntry.AnimalHouseRoutes.cs:83; stardew-mod/ArtiStardewBridge/ModEntry.Ui.cs:180; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:407; stardew-mod/ArtiStardewBridge/ModEntry.NativeEvidence.cs:86; stardew-mod/ArtiStardewBridge/ModEntry.ExtrasUi.cs:77; stardew-mod/ArtiStardewBridge/ModEntry.B1Capture.cs:62; stardew-mod/ArtiStardewBridge/ModEntry.B1Capture.cs:89; stardew-mod/ArtiStardewBridge/ModEntry.B3Capture.cs:24; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:162; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:155; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:170; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:177; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:512; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:532; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:255; stardew-mod/ArtiStardewBridge/ModEntry.Gift.cs:54; stardew-mod/ArtiStardewBridge/ModEntry.Gift.cs:35; stardew-mod/ArtiStardewBridge/ModEntry.AnimalCapture.cs:49; stardew-mod/ArtiStardewBridge/ModEntry.AnimalCapture.cs:44; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:308; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:58; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:82; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:73; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:337; stardew-mod/ArtiStardewBridge/ModEntry.QuestCapture.cs:59; stardew-mod/ArtiStardewBridge/ModEntry.QuestCapture.cs:37; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:672; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:687; stardew-mod/ArtiStardewBridge/BackgroundToolTileProbe.cs:28; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:107; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:105; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:340; stardew-mod/ArtiStardewBridge/NativeRouteCell.cs:58; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:403; stardew-mod/ArtiStardewBridge/GamepadProbe.cs:480; stardew-mod/ArtiStardewBridge/GamepadProbe.cs:457; stardew-mod/ArtiStardewBridge/GamepadProbe.cs:470; stardew-mod/ArtiStardewBridge/Observation/SceneSnapshotCapture.cs:297; stardew-mod/ArtiStardewBridge/Observation/SceneSnapshotCapture.cs:269; stardew-mod/ArtiStardewBridge/Observation/SceneSnapshotCapture.cs:262; stardew-mod/ArtiStardewBridge/Observation/SceneSnapshotCapture.cs:264; stardew-mod/ArtiStardewBridge/Observation/SceneSnapshotCapture.cs:304; stardew-mod/ArtiStardewBridge/ReflexProbe.cs:699; stardew-mod/ArtiStardewBridge/ReflexProbe.cs:628; stardew-mod/ArtiStardewBridge/ReflexProbe.cs:710; stardew-mod/ArtiStardewBridge/ReflexProbe.cs:659; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:387; stardew-mod/ArtiStardewBridge/ReflexProbe.cs:698; stardew-mod/ArtiStardewBridge/ModEntry.AnimalHouseRoutes.cs:34; stardew-mod/ArtiStardewBridge/ModEntry.AnimalHouseRoutes.cs:33; stardew-mod/ArtiStardewBridge/ReflexProbe.cs:711; stardew-mod/ArtiStardewBridge/ReflexProbe.cs:712; stardew-mod/ArtiStardewBridge/ReflexProbe.cs:713; stardew-mod/ArtiStardewBridge/Actions/WaterOnceController.cs:107; stardew-mod/ArtiStardewBridge/Actions/WaterOnceController.cs:104; stardew-mod/ArtiStardewBridge/BackgroundPadRuntime.cs:255; stardew-mod/ArtiStardewBridge/ModEntry.FestivalReflex.cs:363; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:325; stardew-mod/ArtiStardewBridge/ModEntry.Reflex.cs:191; stardew-mod/ArtiStardewBridge/ModEntry.cs:1980; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:214; stardew-mod/ArtiStardewBridge/ModEntry.GenericWorld.cs:69; stardew-mod/ArtiStardewBridge/ModEntry.Gift.cs:19; stardew-mod/ArtiStardewBridge/ModEntry.Interact.cs:39; stardew-mod/ArtiStardewBridge/ModEntry.Interact.cs:35; stardew-mod/ArtiStardewBridge/ModEntry.InteractCapture.cs:22; stardew-mod/ArtiStardewBridge/ModEntry.Pad.cs:78; stardew-mod/ArtiStardewBridge/ModEntry.QuestContext.cs:38; stardew-mod/ArtiStardewBridge/ModEntry.EventStaging.cs:65; stardew-mod/ArtiStardewBridge/ModEntry.Ui.cs:118; stardew-mod/ArtiStardewBridge/BackgroundEventControl.cs:41; stardew-mod/ArtiStardewBridge/NativeFestivalFishing.cs:17; stardew-mod/ArtiStardewBridge/ModEntry.cs:4274; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:391; stardew-mod/ArtiStardewBridge/ModEntry.Interact.cs:212; stardew-mod/ArtiStardewBridge/ModEntry.Interact.cs:200; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:174; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:76; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:66; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:340; stardew-mod/ArtiStardewBridge/ModEntry.GenericUi.cs:158; stardew-mod/ArtiStardewBridge/ModEntry.Occurrences.cs:63; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:1236; stardew-mod/ArtiStardewBridge/ModEntry.GenericWorld.cs:32; stardew-mod/ArtiStardewBridge/ModEntry.GenericWorld.cs:27; stardew-mod/ArtiStardewBridge/ModEntry.cs:4081; stardew-mod/ArtiStardewBridge/ModEntry.cs:4070; stardew-mod/ArtiStardewBridge/ModEntry.FishingCapture.cs:21; stardew-mod/ArtiStardewBridge/ModEntry.FishingCapture.cs:17; stardew-mod/ArtiStardewBridge/Actions/WaterOnceController.cs:162; stardew-mod/ArtiStardewBridge/BackgroundControlInputHooks.cs:2540; stardew-mod/ArtiStardewBridge/BackgroundControlInputHooks.cs:2541; stardew-mod/ArtiStardewBridge/ModEntry.GenericUi.cs:68; stardew-mod/ArtiStardewBridge/ModEntry.Economy.cs:222; stardew-mod/ArtiStardewBridge/ModEntry.cs:751; stardew-mod/ArtiStardewBridge/ModEntry.AnimalHouseRoutes.cs:448; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:682; stardew-mod/ArtiStardewBridge/ModEntry.AnimalHouseRoutes.cs:275; stardew-mod/ArtiStardewBridge/ModEntry.AnimalHouseRoutes.cs:267; stardew-mod/ArtiStardewBridge/ModEntry.AnimalRoutine.cs:65; stardew-mod/ArtiStardewBridge/ModEntry.AnimalRoutine.cs:98; stardew-mod/ArtiStardewBridge/ModEntry.AnimalRoutine.cs:86; stardew-mod/ArtiStardewBridge/ModEntry.B3Context.cs:88; stardew-mod/ArtiStardewBridge/ModEntry.B3Context.cs:71; stardew-mod/ArtiStardewBridge/ModEntry.B3Context.cs:30; stardew-mod/ArtiStardewBridge/ModEntry.B3Context.cs:53; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:257; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:244; stardew-mod/ArtiStardewBridge/ModEntry.cs:3672; stardew-mod/ArtiStardewBridge/ModEntry.cs:3694; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:260; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:1035; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:1027; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:1068; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:1078; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:1069; stardew-mod/ArtiStardewBridge/ModEntry.GoalRoutes.cs:22; stardew-mod/ArtiStardewBridge/ModEntry.GoalRoutes.cs:17; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:873; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:863; stardew-mod/ArtiStardewBridge/ModEntry.GenericWorld.cs:37; stardew-mod/ArtiStardewBridge/ModEntry.Economy.cs:295; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:722; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:739; stardew-mod/ArtiStardewBridge/ModEntry.UiKey.cs:184; stardew-mod/ArtiStardewBridge/ModEntry.VendorFacts.cs:42; stardew-mod/ArtiStardewBridge/ModEntry.Economy.cs:447; stardew-mod/ArtiStardewBridge/ModEntry.cs:3931; stardew-mod/ArtiStardewBridge/ModEntry.cs:2352; stardew-mod/ArtiStardewBridge/ModEntry.cs:2254; stardew-mod/ArtiStardewBridge/ModEntry.PlayerControl.cs:63; stardew-mod/ArtiStardewBridge/ModEntry.cs:3462; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:366; stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs:360; stardew-mod/ArtiStardewBridge/ModEntry.cs:1178; stardew-mod/ArtiStardewBridge/ModEntry.cs:1204; stardew-mod/ArtiStardewBridge/ModEntry.cs:456; stardew-mod/ArtiStardewBridge/ModEntry.FestivalReflex.cs:230; stardew-mod/ArtiStardewBridge/ModEntry.FestivalReflex.cs:229; stardew-mod/ArtiStardewBridge/ModEntry.FestivalReflex.cs:162; stardew-mod/ArtiStardewBridge/ModEntry.FestivalReflex.cs:161; stardew-mod/ArtiStardewBridge/ModEntry.cs:1353; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:515; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:511; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:765; stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs:810; stardew-mod/ArtiStardewBridge/ModEntry.FestivalReflex.cs:184; stardew-mod/ArtiStardewBridge/ModEntry.FestivalReflex.cs:192; stardew-mod/ArtiStardewBridge/ModEntry.AnimalHouseRoutes.cs:319; stardew-mod/ArtiStardewBridge/ModEntry.AnimalHouseRoutes.cs:353; stardew-mod/ArtiStardewBridge/NativePurchaseAnimals.cs:44; stardew-mod/ArtiStardewBridge/Observation/SceneSnapshotCapture.cs:239; stardew-mod/ArtiStardewBridge/ReflexProbe.cs:360; stardew-mod/ArtiStardewBridge/ReflexProbe.cs:484; stardew-mod/ArtiStardewBridge/ReflexProbe.cs:474; stardew-mod/ArtiStardewBridge/ReflexProbe.cs:556; stardew-mod/ArtiStardewBridge/NativeCraftingFacts.cs:52; stardew-mod/ArtiStardewBridge/NativeCraftingFacts.cs:88; stardew-mod/ArtiStardewBridge/ModEntry.AnimalShopCapture.cs:0; stardew-mod/ArtiStardewBridge/ModEntry.Extras.cs:0; stardew-mod/ArtiStardewBridge/NativeCalendarFacts.cs:0; stardew-mod/ArtiStardewBridge/NativeProgressFacts.cs:0; stardew-mod/ArtiStardewBridge/NativeRestFacts.cs:39; stardew-mod/ArtiStardewBridge/NativeBundleKnowledge.cs:0; stardew-mod/ArtiStardewBridge/ModEntry.ExtrasUi.cs:207; stardew-mod/ArtiStardewBridge/NativeProgressFacts.cs:286; stardew-mod/ArtiStardewBridge/NativeWorldKnowledge.cs:375; stardew-mod/ArtiStardewBridge/NativeWorldKnowledge.cs:378; stardew-mod/ArtiStardewBridge/BackgroundControlInputHooks.cs:2183; stardew-mod/ArtiStardewBridge/BackgroundControlInputHooks.cs:2300; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:258; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:260; stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs:262",
       "write": "lazy getters can migrate itemId, initialize bed type, reload maps/doors/warps, poll/cancel interpolation or invoke location-change callbacks, or initialize a missing separate wallet via Farmer.Money -> GetMoney",
       "replacement": "non-mutating identity, geometry, position, location and bed backing-state snapshots, including existing wallet fields without creating an account",
       "delete_phase": "R4",
@@ -1864,13 +1864,13 @@
           "line": 1445
         },
         {
-          "key": "game_call|ArtiStardewBridge.BgThroughProbe ArtiStardewBridge.ModEntry::<CaptureBedThroughTarget>g__Probe|606_3()|call|StardewValley.GameLocation StardewValley.Character::get_currentLocation()",
+          "key": "game_call|ArtiStardewBridge.BgThroughProbe ArtiStardewBridge.ModEntry::<CaptureBedThroughTarget>g__Probe|607_3()|call|StardewValley.GameLocation StardewValley.Character::get_currentLocation()",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs",
           "line": 424
         },
         {
-          "key": "game_call|ArtiStardewBridge.BgThroughProbe ArtiStardewBridge.ModEntry::<CaptureMoveThroughTarget>g__Probe|585_0()|call|StardewValley.GameLocation StardewValley.Character::get_currentLocation()",
+          "key": "game_call|ArtiStardewBridge.BgThroughProbe ArtiStardewBridge.ModEntry::<CaptureMoveThroughTarget>g__Probe|586_0()|call|StardewValley.GameLocation StardewValley.Character::get_currentLocation()",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/ModEntry.Interact.cs",
           "line": 249
@@ -1936,13 +1936,13 @@
           "line": 51
         },
         {
-          "key": "game_call|ArtiStardewBridge.Protocol.BgActionEffectFacts ArtiStardewBridge.ModEntry/<>c__DisplayClass566_0::<CaptureGiftKind>g__Sample|4()|callvirt|StardewValley.GameLocation StardewValley.Character::get_currentLocation()",
+          "key": "game_call|ArtiStardewBridge.Protocol.BgActionEffectFacts ArtiStardewBridge.ModEntry/<>c__DisplayClass567_0::<CaptureGiftKind>g__Sample|4()|callvirt|StardewValley.GameLocation StardewValley.Character::get_currentLocation()",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/ModEntry.Gift.cs",
           "line": 66
         },
         {
-          "key": "game_call|ArtiStardewBridge.Protocol.BgActionEffectFacts ArtiStardewBridge.ModEntry/<>c__DisplayClass699_0::<CaptureQuestDelivery>g__Sample|4()|callvirt|StardewValley.GameLocation StardewValley.Character::get_currentLocation()",
+          "key": "game_call|ArtiStardewBridge.Protocol.BgActionEffectFacts ArtiStardewBridge.ModEntry/<>c__DisplayClass700_0::<CaptureQuestDelivery>g__Sample|4()|callvirt|StardewValley.GameLocation StardewValley.Character::get_currentLocation()",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/ModEntry.QuestCapture.cs",
           "line": 72
@@ -2362,7 +2362,7 @@
           "line": 230
         },
         {
-          "key": "game_call|ArtiStardewBridge.Protocol.UiSlotItem ArtiStardewBridge.ModEntry/<>c__DisplayClass830_0::<ReadUiG3Facts>b__1(StardewValley.Item)|callvirt|System.String StardewValley.Item::get_QualifiedItemId()",
+          "key": "game_call|ArtiStardewBridge.Protocol.UiSlotItem ArtiStardewBridge.ModEntry/<>c__DisplayClass831_0::<ReadUiG3Facts>b__1(StardewValley.Item)|callvirt|System.String StardewValley.Item::get_QualifiedItemId()",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/ModEntry.UiG3.cs",
           "line": 100
@@ -2428,7 +2428,7 @@
           "line": 91
         },
         {
-          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c::<CaptureBedThroughTarget>b__606_0(StardewValley.Objects.BedFurniture)|callvirt|StardewValley.Objects.BedFurniture/BedType StardewValley.Objects.BedFurniture::get_bedType()",
+          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c::<CaptureBedThroughTarget>b__607_0(StardewValley.Objects.BedFurniture)|callvirt|StardewValley.Objects.BedFurniture/BedType StardewValley.Objects.BedFurniture::get_bedType()",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs",
           "line": 393
@@ -2470,22 +2470,22 @@
           "line": 486
         },
         {
-          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass385_0::<CaptureEventAction>b__16(StardewValley.NPC)|callvirt|Microsoft.Xna.Framework.Point StardewValley.Character::get_TilePoint()",
+          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass385_0::<CaptureEventAction>b__14(StardewValley.NPC)|callvirt|Microsoft.Xna.Framework.Point StardewValley.Character::get_TilePoint()",
           "count": 3,
           "file": "stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs",
-          "line": 120
+          "line": 148
         },
         {
-          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass385_0::<CaptureEventAction>g__EndedAfterEffect|8()|callvirt|StardewValley.GameLocation StardewValley.Character::get_currentLocation()",
+          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass385_0::<CaptureEventAction>g__EndedAfterEffect|6()|callvirt|StardewValley.GameLocation StardewValley.Character::get_currentLocation()",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs",
-          "line": 239
+          "line": 271
         },
         {
-          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass385_0::<CaptureEventAction>g__Identity|7()|callvirt|StardewValley.GameLocation StardewValley.Character::get_currentLocation()",
+          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass385_0::<CaptureEventAction>g__Identity|5()|callvirt|StardewValley.GameLocation StardewValley.Character::get_currentLocation()",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/ModEntry.EventActions.cs",
-          "line": 227
+          "line": 259
         },
         {
           "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass387_1::<EnrichEventActionContext>b__4(StardewValley.NPC)|callvirt|Microsoft.Xna.Framework.Point StardewValley.Character::get_TilePoint()",
@@ -2554,55 +2554,55 @@
           "line": 46
         },
         {
-          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass566_0::<CaptureGiftKind>g__Present|2()|callvirt|StardewValley.GameLocation StardewValley.Character::get_currentLocation()",
+          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass567_0::<CaptureGiftKind>g__Present|2()|callvirt|StardewValley.GameLocation StardewValley.Character::get_currentLocation()",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/ModEntry.Gift.cs",
           "line": 57
         },
         {
-          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass583_1::<CaptureInteractKind>g__StillPresent|4()|callvirt|StardewValley.GameLocation StardewValley.Character::get_currentLocation()",
+          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass584_1::<CaptureInteractKind>g__StillPresent|4()|callvirt|StardewValley.GameLocation StardewValley.Character::get_currentLocation()",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/ModEntry.Interact.cs",
           "line": 98
         },
         {
-          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass583_2::<CaptureInteractKind>g__StillPresent|7()|callvirt|StardewValley.GameLocation StardewValley.Character::get_currentLocation()",
+          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass584_2::<CaptureInteractKind>g__StillPresent|7()|callvirt|StardewValley.GameLocation StardewValley.Character::get_currentLocation()",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/ModEntry.Interact.cs",
           "line": 151
         },
         {
-          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass583_2::<CaptureInteractKind>g__StillPresent|7()|callvirt|System.String StardewValley.Item::get_QualifiedItemId()",
+          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass584_2::<CaptureInteractKind>g__StillPresent|7()|callvirt|System.String StardewValley.Item::get_QualifiedItemId()",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/ModEntry.Interact.cs",
           "line": 151
         },
         {
-          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass593_0::<CaptureNpcTalkKind>g__StillPresent|3()|callvirt|StardewValley.GameLocation StardewValley.Character::get_currentLocation()",
+          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass594_0::<CaptureNpcTalkKind>g__StillPresent|3()|callvirt|StardewValley.GameLocation StardewValley.Character::get_currentLocation()",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs",
           "line": 90
         },
         {
-          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass596_0::<CaptureEatKind>g__StillPresent|0()|callvirt|StardewValley.GameLocation StardewValley.Character::get_currentLocation()",
+          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass597_0::<CaptureEatKind>g__StillPresent|0()|callvirt|StardewValley.GameLocation StardewValley.Character::get_currentLocation()",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs",
           "line": 189
         },
         {
-          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass605_0::<MaybeRefreshSceneForNpc>b__0(StardewValley.NPC)|callvirt|Microsoft.Xna.Framework.Point StardewValley.Character::get_TilePoint()",
+          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass606_0::<MaybeRefreshSceneForNpc>b__0(StardewValley.NPC)|callvirt|Microsoft.Xna.Framework.Point StardewValley.Character::get_TilePoint()",
           "count": 2,
           "file": "stardew-mod/ArtiStardewBridge/ModEntry.InteractB.cs",
           "line": 367
         },
         {
-          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass611_0::<InventoryCount>b__0(StardewValley.Item)|callvirt|System.String StardewValley.Item::get_QualifiedItemId()",
+          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass612_0::<InventoryCount>b__0(StardewValley.Item)|callvirt|System.String StardewValley.Item::get_QualifiedItemId()",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/ModEntry.InteractCapture.cs",
           "line": 30
         },
         {
-          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass617_0::<ExtrasCapture>g__StillPresent|0()|callvirt|StardewValley.GameLocation StardewValley.Character::get_currentLocation()",
+          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass618_0::<ExtrasCapture>g__StillPresent|0()|callvirt|StardewValley.GameLocation StardewValley.Character::get_currentLocation()",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/ModEntry.InteractCapture.cs",
           "line": 101
@@ -2614,7 +2614,7 @@
           "line": 40
         },
         {
-          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass699_0::<CaptureQuestDelivery>g__Present|2()|callvirt|StardewValley.GameLocation StardewValley.Character::get_currentLocation()",
+          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c__DisplayClass700_0::<CaptureQuestDelivery>g__Present|2()|callvirt|StardewValley.GameLocation StardewValley.Character::get_currentLocation()",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/ModEntry.QuestCapture.cs",
           "line": 62
@@ -2758,6 +2758,12 @@
           "line": 70
         },
         {
+          "key": "game_call|System.String ArtiStardewBridge.ModEntry/GenericWorldCapture::FacedCell(ArtiStardewBridge.ModEntry,StardewValley.Farmer,StardewValley.GameLocation,Microsoft.Xna.Framework.Vector2,ArtiStardewBridge.NativeCodeActions/Cell)|callvirt|Microsoft.Xna.Framework.Vector2 StardewValley.Character::get_Tile()",
+          "count": 1,
+          "file": "stardew-mod/ArtiStardewBridge/ModEntry.GenericWorld.cs",
+          "line": 220
+        },
+        {
           "key": "game_call|System.Boolean ArtiStardewBridge.NativeB1Offers::BlacksmithReady(StardewValley.GameLocation,StardewValley.Farmer,Microsoft.Xna.Framework.Point)|callvirt|Microsoft.Xna.Framework.Vector2 StardewValley.Character::get_Tile()",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/NativeB1Offers.cs",
@@ -2835,6 +2841,13 @@
           "file": "stardew-mod/ArtiStardewBridge/NativePersonaFacts.cs",
           "line": 19,
           "reason": "ADR 40 / fix29: preserve the shipped actor self-state money fact. Farmer.Money delegates to GetMoney and can initialize a missing separate-wallet account; this single existing call is D29 consequential observation debt, not a pure query or global getter exemption."
+        },
+        {
+          "key": "game_call|System.String ArtiStardewBridge.NativePersonaFacts::Place(StardewValley.Farmer)|callvirt|StardewValley.GameLocation StardewValley.Character::get_currentLocation()",
+          "count": 1,
+          "file": "stardew-mod/ArtiStardewBridge/NativePersonaFacts.cs",
+          "line": 28,
+          "reason": "Co-op sight: read each online farmer's currentLocation?.NameOrUniqueName (as MapPage.drawMiniPortraits does) for peer_sleep.players[].place; D29 consequential observation debt like all other Character.currentLocation reads."
         },
         {
           "key": "game_call|System.Collections.Generic.Dictionary`2<System.String,System.Object> ArtiStardewBridge.ModEntry::GenericUiLedger()|callvirt|StardewValley.GameLocation StardewValley.Character::get_currentLocation()",
@@ -3377,10 +3390,10 @@
           "line": 118
         },
         {
-          "key": "game_call|System.String ArtiStardewBridge.NativeEventControl::Token()|call|StardewValley.GameLocation StardewValley.Character::get_currentLocation()",
+          "key": "game_call|System.String ArtiStardewBridge.NativeEventControl::Compute(System.Boolean)|call|StardewValley.GameLocation StardewValley.Character::get_currentLocation()",
           "count": 3,
           "file": "stardew-mod/ArtiStardewBridge/BackgroundEventControl.cs",
-          "line": 35
+          "line": 41
         },
         {
           "key": "game_call|System.String ArtiStardewBridge.NativeFestivalFishing::Token()|call|StardewValley.GameLocation StardewValley.Character::get_currentLocation()",
@@ -3443,7 +3456,7 @@
           "line": 158
         },
         {
-          "key": "game_call|System.ValueTuple`2<System.String,System.Int32> ArtiStardewBridge.ModEntry/<>c::<TickOccurrences>b__656_4(StardewValley.Item)|callvirt|System.String StardewValley.Item::get_QualifiedItemId()",
+          "key": "game_call|System.ValueTuple`2<System.String,System.Int32> ArtiStardewBridge.ModEntry/<>c::<TickOccurrences>b__657_4(StardewValley.Item)|callvirt|System.String StardewValley.Item::get_QualifiedItemId()",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/ModEntry.Occurrences.cs",
           "line": 63
@@ -4095,19 +4108,19 @@
           "line": 258
         },
         {
-          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c::<EnrichCombatChargeContext>b__770_0(StardewValley.Tools.MeleeWeapon)|callvirt|System.String StardewValley.Item::get_QualifiedItemId()",
+          "key": "game_call|System.Boolean ArtiStardewBridge.ModEntry/<>c::<EnrichCombatChargeContext>b__771_0(StardewValley.Tools.MeleeWeapon)|callvirt|System.String StardewValley.Item::get_QualifiedItemId()",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs",
           "line": 260
         },
         {
-          "key": "game_call|System.Collections.Generic.Dictionary`2<System.String,System.Object> ArtiStardewBridge.ModEntry/<>c::<EnrichCombatChargeContext>b__770_1(StardewValley.Tools.MeleeWeapon)|callvirt|System.String StardewValley.Item::get_DisplayName()",
+          "key": "game_call|System.Collections.Generic.Dictionary`2<System.String,System.Object> ArtiStardewBridge.ModEntry/<>c::<EnrichCombatChargeContext>b__771_1(StardewValley.Tools.MeleeWeapon)|callvirt|System.String StardewValley.Item::get_DisplayName()",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs",
           "line": 262
         },
         {
-          "key": "game_call|System.Collections.Generic.Dictionary`2<System.String,System.Object> ArtiStardewBridge.ModEntry/<>c::<EnrichCombatChargeContext>b__770_1(StardewValley.Tools.MeleeWeapon)|callvirt|System.String StardewValley.Item::get_QualifiedItemId()",
+          "key": "game_call|System.Collections.Generic.Dictionary`2<System.String,System.Object> ArtiStardewBridge.ModEntry/<>c::<EnrichCombatChargeContext>b__771_1(StardewValley.Tools.MeleeWeapon)|callvirt|System.String StardewValley.Item::get_QualifiedItemId()",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/ModEntry.ReflexG5.cs",
           "line": 262
@@ -4258,13 +4271,13 @@
           "line": 0
         },
         {
-          "key": "game_call|System.Collections.Generic.Dictionary`2<System.String,System.Object> ArtiStardewBridge.ModEntry/<>c__DisplayClass918_0::<ReadJournal>b__1(StardewValley.Quests.IQuest,System.Int32)|callvirt|System.Boolean StardewValley.Quests.IQuest::ShouldDisplayAsNew()",
+          "key": "game_call|System.Collections.Generic.Dictionary`2<System.String,System.Object> ArtiStardewBridge.ModEntry/<>c__DisplayClass919_0::<ReadJournal>b__1(StardewValley.Quests.IQuest,System.Int32)|callvirt|System.Boolean StardewValley.Quests.IQuest::ShouldDisplayAsNew()",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/NativeJournalFacts.cs",
           "line": 0
         },
         {
-          "key": "game_call|System.Collections.Generic.Dictionary`2<System.String,System.Object> ArtiStardewBridge.ModEntry/<>c__DisplayClass918_0::<ReadJournal>b__1(StardewValley.Quests.IQuest,System.Int32)|callvirt|System.Boolean StardewValley.Quests.IQuest::ShouldDisplayAsComplete()",
+          "key": "game_call|System.Collections.Generic.Dictionary`2<System.String,System.Object> ArtiStardewBridge.ModEntry/<>c__DisplayClass919_0::<ReadJournal>b__1(StardewValley.Quests.IQuest,System.Int32)|callvirt|System.Boolean StardewValley.Quests.IQuest::ShouldDisplayAsComplete()",
           "count": 1,
           "file": "stardew-mod/ArtiStardewBridge/NativeJournalFacts.cs",
           "line": 0

@@ -35,6 +35,51 @@ def same_movement_authority(a, b):
     return movement_authority(a) == movement_authority(b)
 
 
+_INVALID_EVENT_TARGET = object()
+
+
+def pending_event_target(offer, choice):
+    """(chosen_target, route_cost) for a pending ActChoice(event_action), None for other choices,
+    or _INVALID_EVENT_TARGET when an event_action names an unoffered or malformed handle."""
+    if getattr(choice, "kind", None) != "act" or getattr(choice, "operation", None) != "event_action":
+        return None
+    args = getattr(choice, "args", None)
+    if (not isinstance(args, Mapping) or set(args) != {"handle", "btn"} or args.get("btn") != "A"
+            or not isinstance(args.get("handle"), str)):
+        return _INVALID_EVENT_TARGET
+    targets = offer.get("targets") if isinstance(offer, Mapping) else None
+    if not isinstance(targets, Mapping) or args["handle"] not in targets:
+        return _INVALID_EVENT_TARGET
+    chosen = targets[args["handle"]]
+    try:
+        return chosen, route_cost(offer, chosen)
+    except (KeyError, TypeError):
+        return _INVALID_EVENT_TARGET
+
+
+def same_event_actions(before, after, *, target=None):
+    """Same native event-action authority, and for a pending event_action, the same chosen target and route cost."""
+    if target is _INVALID_EVENT_TARGET:
+        return False
+    if before == after:
+        return True
+    if (not isinstance(before, Mapping) or not isinstance(after, Mapping)
+            or "people" not in before or "people" not in after
+            or any(after.get(k) != before.get(k) for k in ("identity", "event_token", "sequence"))):
+        return False
+    if target is not None:
+        chosen, cost = target
+        new_targets = after.get("targets")
+        if not isinstance(new_targets, Mapping) or chosen not in new_targets.values():
+            return False
+        try:
+            if route_cost(after, chosen) != cost:
+                return False
+        except (KeyError, TypeError):
+            return False
+    return True
+
+
 def _reviewed(block):
     if block.get("generic") is True and block.get("player_control") is True:
         return True  # authority is the native instance/command token, revalidated on every consumed frame
@@ -58,7 +103,7 @@ def _reviewed(block):
 OUTCOMES = {"event_target": "EventTargetActivated", "festival_npc": "DialogueOpened",
             "festival_shop": "MenuOpened", "festival_seat": "FestivalSeated",
             "festival_egg": "FestivalEggCollected", "festival_egg_route": "FestivalEggCollected",
-            "event_interact": "EventInteractionObserved"}
+            "event_interact": "EventInteractionObserved", "festival_stand": "FestivalStood"}
 APPROACH_KINDS = {"event_target_route", "festival_npc_route", "festival_shop_route", "festival_seat_route", "event_interact_route"}
 ROUTE_KINDS = APPROACH_KINDS | {"festival_egg_route"}
 OUTCOMES.update({kind: OUTCOMES[kind[:-6]] for kind in APPROACH_KINDS})
@@ -121,6 +166,8 @@ def effect_valid(kind, before, after, target_id=None):
         return False
     if kind == "festival_seat":
         return before.get("sitting") is False and after.get("sitting") is True
+    if kind == "festival_stand":  # the game's own A while seated
+        return before.get("sitting") is True and after.get("sitting") is False
     return (kind in ("festival_egg", "festival_egg_route") and before.get("timer_positive") is True
             and after.get("timer_positive") is True and before.get("present") is True and after.get("present") is False
             and type(before.get("score")) is int and type(after.get("score")) is int
@@ -131,6 +178,8 @@ def action_offer(facts):
     """Request-local bounded offers copied from an authoritative native publication."""
     import arti_stardew_command as command
     block = facts.get("event_actions") if isinstance(facts, Mapping) else None
+    if festival_seated(block):
+        return _seated_offer(block)
     move = movement_offer(facts)
     if (not isinstance(block, Mapping) or move is None or block.get("event_token") != move["event_token"]
             or block.get("sequence") != move["sequence"]):
@@ -181,6 +230,33 @@ def action_offer(facts):
         result["seen"] = seen
     # ADR 240: what the event map shows is a fact before any route exists; a choice waits for its route.
     return result if offered or seen and (seen["people"] or seen["things"]) else None
+
+
+def festival_seated(actions):
+    """She sits on a seat of this festival map (the mod's seated block); festival_stand is its one control."""
+    return isinstance(actions, Mapping) and actions.get("seated") is True
+
+
+def _seated_offer(block):
+    """While seated the mod publishes no event movement, only its seated token and one festival_stand.
+
+    The native SeatedToken is the authority: it exists only in festival free roam before the main event, in the same
+    scope as the movement token (the reviewed pairs or generic player control), so any festival block it signs is
+    accepted here. The reviewed pairs alone would drop the stand at festivals outside them."""
+    import arti_stardew_command as command
+    pair = (block.get("festival_id"), block.get("sequence"))
+    targets = block.get("targets")
+    if (not token_shape(block.get("event_token")) or block.get("main_event_running") is not False
+            or not isinstance(pair[0], str) or not pair[0].startswith("festival_") or not isinstance(pair[1], str)
+            or not isinstance(targets, list) or len(targets) != 1
+            or not isinstance(targets[0], dict) or targets[0].get("kind") != "festival_stand"):
+        return None
+    try:
+        command.validate_world_interaction_args(targets[0])
+    except command.KesalahanPerintah:
+        return None
+    return {"event_token": block["event_token"], "sequence": pair[1], "target_tile": block.get("target_tile"),
+            "targets": {"e1": dict(targets[0])}, "seated": True, "people": {}, "event_id": pair[0]}
 
 
 SEEN_MAX = 24  # EventControlAction.MaxEventSeen
@@ -614,6 +690,20 @@ def displacement(direction, ticks, before, after, *, max_ticks=4, slide_px_per_t
 
 
 FESTIVAL_LEAVE_DETAIL = "festivalLeave"  # PadContextTable.FestivalLeaveDetail
+_FESTIVAL_HANDS = ("langkah", "hadap", "jalan_ke")
+
+
+def festival_dead_calls(calls, *, seated, fishing=False):
+    """On a festival map, leave out what the event motor refuses before any input: `aksi obj:` approaches,
+    `tebang`, `tangkap_ikan` unless a native festival contest is up, and every step while she sits (no event token)."""
+    out = []
+    for call in calls:
+        name, arg = getattr(call, "name", None), str(getattr(call, "arg", "") or "")
+        if (name == "tebang" or name == "aksi" and arg.startswith("obj:") or name == "tangkap_ikan" and not fishing
+                or seated and name in _FESTIVAL_HANDS):
+            continue
+        out.append(call)
+    return out
 
 
 def festival_free_roam(offer):
@@ -679,3 +769,14 @@ def festival_leave_offered(facts):
     pad = facts.get("pad")
     cell = pad.get("buttons", {}).get("Select") if isinstance(pad, Mapping) and pad.get("enabled") is True else None
     return isinstance(cell, Mapping) and cell.get("detail") == FESTIVAL_LEAVE_DETAIL
+
+
+FESTIVAL_SEATED_REFUSAL = "Denied:festival_leave:seated"  # PadContextTable, FestivalLeavePolicy.Seated
+
+
+def festival_pad_seated(facts):
+    """ui.context's pad Select cell refuses the leave because she sits on a festival seat. It reads the native
+    seated token, so it holds while the stand capture is withheld (a held object) and no event block is published."""
+    pad = facts.get("pad") if isinstance(facts, Mapping) else None
+    cell = pad.get("buttons", {}).get("Select") if isinstance(pad, Mapping) and pad.get("enabled") is True else None
+    return isinstance(cell, Mapping) and cell.get("refused") == FESTIVAL_SEATED_REFUSAL

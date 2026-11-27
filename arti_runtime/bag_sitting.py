@@ -224,7 +224,7 @@ def _fill(view, actions, selected):
                  and f"press:A:{c['id']}" in actions), None)
 
 
-def _execute_owned(runtime, session, arg, initial, selected):
+def _execute_owned(runtime, session, arg, initial, selected, *, allow_fill=True, close_without_move=None):
     """Execute a frozen explicit selection without another provider call."""
     from arti_stardew_generic_ui import ui_readback, exit_action
     from arti_runtime.transfer_outcomes import publish_menu, remember
@@ -310,6 +310,9 @@ def _execute_owned(runtime, session, arg, initial, selected):
                 if 'goods_remaining' in current.state:
                     current.state.update(goods_receiver=proof['after_receiver'],goods_menu=proof['after_menu'])
         if result.verified and result.cleanup and not result.uncertain:
+            from scripts.live7.menu_deadline import enabled
+            if enabled(getattr(runtime, "_config", None)):
+                runtime._live7_menu_press_verified(session, view, key)
             runtime._live7_ui_progress_seq=getattr(runtime,'_live7_ui_progress_seq',0)+1
         from scripts.live7.menu_visit import note_press
         note_press(runtime,view,key,closed=closing and runtime._state.latest(pid).active_menu is None)
@@ -356,7 +359,7 @@ def _execute_owned(runtime, session, arg, initial, selected):
         if any(not any((r['verb'],r['id'],r['item'],r['quality'],r['count'],r['name']) ==
                        (s['verb'],s['id'],s['item'],s['quality'],s['count'],s['name']) for r in current_rows) for s in selected):
             raise ValueError('bag_sitting_selection_changed')
-        bulk = _fill(view, _native_actions(view), selected)
+        bulk = _fill(view, _native_actions(view), selected) if allow_fill else None
         if bulk:
             press(bulk, view, selected)
         # Freeze the source slot and its quantity. A newly arriving item never
@@ -382,16 +385,22 @@ def _execute_owned(runtime, session, arg, initial, selected):
             reason = 'partial; requested quantities not fully moved'
         else:
             reason = 'completed'
-        closed = close_sitting()
-        if not closed:
-            reason += '; close unverified'
+        if moved or close_without_move is None:
+            closed = close_sitting()
+            if not closed:
+                reason += '; close unverified'
     except (ValueError, KeyError, TypeError, AttributeError) as exc:
         reason = str(exc)
-        if reason=='bag_sitting_close_reserved':
+        if reason=='bag_sitting_close_reserved' and (moved or close_without_move is None):
             try:
                 closed=close_sitting()
             except (ValueError,KeyError,TypeError,AttributeError):
                 closed=False
+    if not moved and close_without_move is not None:
+        close = close_without_move()
+        if close is not None:
+            closed = close["status"] == "closed"
+            inputs += int(close["status"] in ("closed", "uncertain"))
     uncertain = 'unverified' in reason or 'receiver_changed' in reason or 'cursor_changed' in reason
     rows = [dict(item=k[0], name=k[2], quality=k[1], requested=n, moved=moved_named[k],
                  remaining=None if uncertain else n-moved_named[k],
@@ -432,7 +441,7 @@ def verify_container(before, after, args, result, selected):
 
 
 @W.span('settle_readback', 77, runtime=False)
-def execute(runtime, session, arg, initial, selected):
+def execute(runtime, session, arg, initial, selected, *, allow_fill=True, close_without_move=None):
     # Hold the existing controller busy flag across the sitting, including
     # inter-input readbacks. The old single-item finish rule must not close the
     # chest after the first member of an already-chosen batch.
@@ -441,7 +450,8 @@ def execute(runtime, session, arg, initial, selected):
             raise ValueError('bag_sitting_input_busy')
         runtime._action_busy = True
     try:
-        result = _execute_owned(runtime, session, arg, initial, selected)
+        result = _execute_owned(runtime, session, arg, initial, selected, allow_fill=allow_fill,
+                                close_without_move=close_without_move)
         if result['native_inputs']==0 and any(s in result['reason'] for s in ('_changed','_view_unavailable')):
             runtime._live7_menu_changed(session,result['reason'])  # ADR 210; no input was taken
         if arg == 'world_batch':
@@ -474,16 +484,16 @@ def execute(runtime, session, arg, initial, selected):
             runtime._action_busy = False
 
 
-def active_selection(current, view, actions):
-    """The explicit world batch already named these stacks before opening."""
-    if (current is None or 'goods_remaining' not in current.state
+def active_selection(current, view, actions, *, single_store=False):
+    """The active skill already named these stacks before opening."""
+    if (current is None or ('goods_remaining' not in current.state and not single_store)
             or getattr(current,'status',None) != 'running' or current.pending is not None):
         return None
     call = current.call
     verb = {'simpan_ke_chest': 'simpan', 'kirim': 'kirim', 'jual': 'jual'}.get(call.name)
     if verb is None:
         return None
-    wanted = [call, *current.state['goods_remaining']]
+    wanted = [call, *current.state.get('goods_remaining', ())]
     rows = catalogue(view, actions)
     selected = []
     for c in wanted:

@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from math import dist, isfinite
 
 SETTING = "stardew_live7_raw_hands"
 KEY = "tangan"  # the block's plain line, on every page she is given
@@ -28,6 +29,11 @@ DIRS = ("up", "right", "down", "left")
 STEPS = ((0, -1), (1, 0), (0, 1), (-1, 0))
 WORLD_SKILLS = ("langkah", "hadap", "pakai")  # every call of these is a raw hand; `aksi` only with arg FRONT
 RESULT_CHARS = 240
+MOVED = "observed_movement"
+TURNED = "observed_turn_only"
+STILL = "observed_no_movement"
+TRANSITION = "observed_step_transition"
+OBSERVED_TRANSITIONS = ("declared", "incidental")
 # SAFETY (ADR 243): the mod's generic ACTION/USE path has neither the pad denylist nor the tool-tile guard
 # (ModEntry.Pad.cs PadDeniedForHold returns before PadContextTable for generic kinds; BackgroundControlInputHooks applies
 # BgToolTileGuard only to BgHoldKind.Tool). A raw press keeps their harms out here: the raw A is pressed with a plain
@@ -37,7 +43,7 @@ USE_TOOL = re.compile(r"^\(T\)\w*(?:Axe|Pickaxe|Hoe|WateringCan)$")
 CROP_BREAKER = re.compile(r"^\(T\)\w*(?:Axe|Pickaxe|Hoe)$")
 
 WORLD_LINE = ("Tanganmu sendiri, langsung ke game, tanpa perlu ada yang terdaftar di depanmu: "
-              "langkah up/right/down/left = melangkah satu petak ke arah itu; hadap x,y = menghadap petak di sebelahmu")
+              "langkah up/right/down/left = langkah pendek ke arah itu; hadap x,y = menghadap petak di sebelahmu")
 WORLD_PRESS = ("; aksi depan = tombol ACTION (A) pada petak yang kamu hadapi; "
                "pakai = memakai alat atau barang di tanganmu pada petak itu")
 WORLD_NO_PRESS = ("; tombol ACTION dan USE untuk petak depanmu belum dibuka game saat ini, "
@@ -202,17 +208,96 @@ def describe(call):
     return call.name + (" " + str(call.arg) if call.arg not in (None, "") else "")
 
 
+def step_readback(action):
+    """Read only the completed move's own, identity-bound pose."""
+    from arti_runtime.action_outcomes import get
+
+    if get(action, "cleanup_confirmed") is not True:
+        return None
+    before, after = get(action, "before") or {}, get(action, "after") or {}
+    pose = {k: before.get(k) for k in ("location", "location_id", "tile", "pixel", "facing")}
+    if transition := get(action, "movement_transition"):
+        observed = transition in OBSERVED_TRANSITIONS
+        return dict(kind=TRANSITION if observed else "unverified_step_transition", transition=transition,
+                    before=pose, destination=after.get("location") if observed else None)
+    if get(action, "lifecycle") != "completed":
+        return None
+    if get(action, "world_effect_status") not in ("observed_change", "unchanged"):
+        return None
+    identity = "location_id" if before.get("location_id") or after.get("location_id") else "location"
+    if not before.get(identity) or before[identity] != after.get(identity):
+        return None
+    start, end = pixel_pair(before.get("pixel")), pixel_pair(after.get("pixel"))
+    if start is None or end is None:
+        return None
+    # The native terminal covers the press itself. A later pose can change independently of that press.
+    px = 0 if get(action, "outcome") == "NOT_COMPLETED:NO_EFFECT" else dist(start, end)
+    if not isfinite(px):
+        return None
+    turned = type(before.get("facing")) is int and type(after.get("facing")) is int and before["facing"] != after["facing"]
+    return dict(kind=MOVED if px > 0 else TURNED if turned else STILL, px=px, before=pose)
+
+
+def pixel_pair(pixel):
+    if (isinstance(pixel, (tuple, list)) and len(pixel) == 2
+            and all(type(v) in (float, int) and isfinite(v) for v in pixel)):
+        return tuple(pixel)
+    return None
+
+
+def step_target(why, context):
+    """A named target in her reason must match exactly one observed, positioned target."""
+    from arti_runtime.fact_names import target_name
+    import arti_stardew_skills as S
+
+    if not why:
+        return None
+    matches = [ref for ref, row in (context.get("targets") or {}).items()
+               if isinstance(row, Mapping) and S._wave1_xy(row.get("tile")) is not None
+               and (name := target_name(ref, context))
+               and re.search(r"(?<!\w)" + re.escape(name) + r"(?!\w)", why, re.IGNORECASE)]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _step_words(movement):
+    kind = movement["kind"]
+    if kind == MOVED:
+        px = movement["px"]
+        return "kamu bergeser %s px" % ("%.2f" % px if px >= 0.01 else "kurang dari 0.01")
+    if kind == TURNED:
+        return "kamu hanya berbalik, posisimu tetap"
+    if kind == STILL:
+        return "posisimu tetap"
+    transition = movement["transition"]
+    if transition == "foreign":
+        return "laporan perpindahan berasal dari sesi atau pemain lain"
+    if transition == "stale":
+        return "laporan perpindahan sudah basi"
+    if transition not in OBSERVED_TRANSITIONS:
+        return "perpindahan belum terverifikasi"
+    before = movement["before"]
+    pose = "petak %s, piksel %s, hadap %s" % (before.get("tile"), before.get("pixel"), before.get("facing"))
+    return "kamu pindah dari %s (%s) ke %s. %s" % (
+        before.get("location"), pose, movement["destination"],
+        "Jalan keluar sesuai tujuanmu" if transition == "declared" else "Perpindahan saat melangkah, maksudnya belum jelas")
+
+
 def result_line(session):
     """Her last run, when it was a raw hand: what the game answered, in its own terms. None otherwise."""
-    runs = [r for r in getattr(session, "runs", ()) or () if getattr(r, "status", None) in ("finished", "failed")]
+    runs = [r for r in getattr(session, "runs", ()) or () if getattr(r, "status", None) in ("finished", "failed")
+            or (getattr(r, "status", None) in ("unknown", "interrupted") and r.state.get("step_movement"))]
     if not runs or not is_raw(runs[-1].call):
         return None
     run = runs[-1]
     said = describe(run.call)
+    state = run.state if isinstance(run.state, dict) else {}
+    if run.call.name == "langkah" and (movement := state.get("step_movement")):
+        return ("%s tadi: %s." % (said, _step_words(movement)))[:RESULT_CHARS]
     if run.status == "failed":
+        if run.call.name == "langkah" and run.reason in ("action_unreconciled", "movement_unverified"):
+            return "%s tadi: hasil geraknya belum terverifikasi." % said
         line = "%s tadi ditolak game sebelum ada perubahan: %s." % (said, str(run.reason or "ditolak")[:120])
         return line[:RESULT_CHARS]
-    state = run.state if isinstance(run.state, dict) else {}
     delta = state.get("generic_readback")
     effect = state.get("raw_effect")
     if isinstance(delta, Mapping):

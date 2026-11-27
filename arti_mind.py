@@ -19,11 +19,13 @@ Files (``arti-state/mind/``, gitignored):
 from __future__ import annotations
 
 from arti_runtime import ipc
+from arti_runtime import mind_scope
 from arti_runtime import plan_dates
 import contextlib
 from functools import wraps
 import json
 import os
+import pickle
 import re
 import tempfile
 import time
@@ -57,6 +59,7 @@ LIKES_MAX = 60
 LIKES_MAX_BYTES = 16_000
 LIKES_SHOWN = 3               # per polarity, at bedtime
 LIKE_LINE_CHARS = 70
+JOURNEY_MAX = 120             # per scope when live7_mind_scope is on; global when off
 TRAIT_LINES = 3
 GAME_PREF_LINES = 2
 PREFS_MAX = 12
@@ -224,6 +227,58 @@ def pick_prefs(prefs: Iterable[Mapping], *, game: str, tags: Iterable[str], proj
 # --------------------------------------------------------------------------- goals
 
 GOAL_STATUSES = ("open", "done", "dropped", "expired", "capped")  # expired: legacy TTL rows only (FIX75C)
+_GOALS_LOCK = threading.RLock()
+_LIKES_LOCK = threading.RLock()
+
+
+def _read_jsonl_scoped(path: Path) -> list[dict]:
+    """Read JSONL preserving distinct ``(scope_hash, id)`` pairs (last line wins per pair)."""
+    if not path.is_file():
+        return []
+    by_key: dict[tuple[Any, str], dict] = {}
+    for line in ipc.read_text(path, errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(row, dict) and isinstance(row.get("id"), str) and row["id"]:
+            scope = row.get("scope_hash")  # a malformed one belongs to no farm: kept as it is, shown nowhere
+            by_key[(scope if scope is None or isinstance(scope, str) else repr(scope), row["id"])] = row
+    return list(by_key.values())
+
+
+def unscoped_counts(base: Path, game: str) -> dict[str, int]:
+    """Counts (no text) of valid rows with neither ``scope_hash`` nor a sidecar mapping. Never writes."""
+    try:
+        folder = game_dir(base, game)
+        legacy_map = mind_scope.load_legacy_scopes(base, game)
+        goals = sum(
+            1 for r in _read_jsonl_scoped(folder / GOALS_FILE)
+            if valid_goal(r) and legacy_map.goal_scope(r) is None
+        )
+        journey = sum(
+            1 for r in _read_jsonl_scoped(folder / JOURNEY_FILE)
+            if legacy_map.journey_scope(r) is None
+        )
+        likes = sum(
+            1 for r in _read_jsonl_scoped(folder / LIKES_FILE)
+            if valid_like(r) and legacy_map.like_scope(r) is None
+        )
+        return {"goals": goals, "journey": journey, "likes": likes}
+    except (OSError, ValueError):
+        return {"goals": 0, "journey": 0, "likes": 0}
+
+
+def all_goal_ids(base: Path, game: str) -> set[str]:
+    """All goal IDs currently in ``goals.jsonl`` across all scopes, so new IDs never collide."""
+    try:
+        rows = _read_jsonl_scoped(game_dir(base, game) / GOALS_FILE)
+    except (OSError, ValueError):
+        return set()
+    return {r["id"] for r in rows if isinstance(r.get("id"), str) and r["id"]}
 
 
 def valid_goal(row: Any) -> bool:
@@ -233,22 +288,50 @@ def valid_goal(row: Any) -> bool:
             and type(row.get("set_on_day")) is int)
 
 
-def load_goals(base: Path, game: str) -> list[dict]:
+def load_goals(base: Path, game: str, *, scope: str | None = None, scoped: bool = False) -> list[dict]:
+    if not scoped:
+        try:
+            rows = arti_state.read_jsonl(game_dir(base, game) / GOALS_FILE)
+        except (OSError, ValueError):
+            return []
+        return [r for r in rows if valid_goal(r)]
+    if not scope:
+        return []
     try:
-        rows = arti_state.read_jsonl(game_dir(base, game) / GOALS_FILE)
+        target_hash = _scope_hash(scope)
+        rows = _read_jsonl_scoped(game_dir(base, game) / GOALS_FILE)
+        legacy_map = mind_scope.load_legacy_scopes(base, game)
     except (OSError, ValueError):
         return []
-    return [r for r in rows if valid_goal(r)]
+    return [r for r in rows if valid_goal(r) and legacy_map.goal_scope(r) == target_hash]
 
 
 def bound_goals(rows: Iterable[dict], *, max_history: int = GOAL_HISTORY_MAX,
-                max_bytes: int = GOALS_FILE_MAX_BYTES) -> tuple[list[dict], int]:
-    """(rows, trimmed): the file's count/byte bound. Open rows are never trimmed; the oldest closed rows go first."""
+                max_bytes: int = GOALS_FILE_MAX_BYTES,
+                scope_hash: str | None = None,
+                legacy_map: mind_scope.LegacyScopeMap | None = None) -> tuple[list[dict], int]:
+    """(rows, trimmed): the file's count/byte bound. Open rows are never trimmed; the oldest closed rows go first.
+
+    When ``scope_hash`` is given, history count and byte limits apply only to that scope's rows;
+    rows of other scopes and unmapped legacy rows are never counted or dropped.
+    """
     rows = list(rows)
-    closed = [i for i, r in enumerate(rows) if r.get("status") != "open"]
+    if scope_hash is None:
+        unscoped = [i for i, r in enumerate(rows) if not r.get("scope_hash")]  # a row that names its farm is never trimmed here
+        closed = [i for i in unscoped if rows[i].get("status") != "open"]
+        drop = set(closed[:max(0, len(closed) - max_history)])
+        size = lambda: sum(len(json.dumps(rows[j], ensure_ascii=False).encode("utf-8")) + 1  # noqa: E731
+                           for j in unscoped if j not in drop)
+        for i in closed:
+            if size() <= max_bytes:
+                break
+            drop.add(i)
+        return [r for i, r in enumerate(rows) if i not in drop], len(drop)
+    mine = [i for i, r in enumerate(rows) if mind_scope.row_matches_goal_scope(r, scope_hash, legacy_map)]
+    closed = [i for i in mine if rows[i].get("status") != "open"]
     drop = set(closed[:max(0, len(closed) - max_history)])
-    size = lambda: sum(len(json.dumps(r, ensure_ascii=False).encode("utf-8")) + 1  # noqa: E731
-                       for j, r in enumerate(rows) if j not in drop)
+    size = lambda: sum(len(json.dumps(rows[j], ensure_ascii=False).encode("utf-8")) + 1  # noqa: E731
+                       for j in mine if j not in drop)
     for i in closed:
         if size() <= max_bytes:
             break
@@ -256,11 +339,37 @@ def bound_goals(rows: Iterable[dict], *, max_history: int = GOAL_HISTORY_MAX,
     return [r for i, r in enumerate(rows) if i not in drop], len(drop)
 
 
-def save_goals(base: Path, game: str, rows: Iterable[dict]) -> int:
+def save_goals(base: Path, game: str, rows: Iterable[dict], *,
+               scope: str | None = None, scoped: bool = False) -> int:
     """Writes the bounded file; returns how many closed history rows the bound trimmed (0 normally)."""
-    kept, trimmed = bound_goals(rows)
-    arti_state.write_jsonl_atomic(game_dir(base, game) / GOALS_FILE, kept)
-    return trimmed
+    path = game_dir(base, game) / GOALS_FILE
+    if not scoped:
+        kept, trimmed = bound_goals(rows)
+        arti_state.write_jsonl_atomic(path, kept)
+        return trimmed
+    target_hash = mind_scope.scope_hash(scope or "")
+    with _GOALS_LOCK, mind_scope.file_lock(path):
+        legacy_map = mind_scope.load_legacy_scopes(base, game)
+        disk_rows = _read_jsonl_scoped(path)
+        incoming = [dict(r) for r in rows if mind_scope.row_matches_goal_scope(r, target_hash, legacy_map)]
+        incoming_by_id = {r["id"]: r for r in incoming if isinstance(r.get("id"), str) and r["id"]}
+        merged: list[dict] = []
+        placed: set[str] = set()
+        for existing in disk_rows:
+            if legacy_map.goal_scope(existing) != target_hash:
+                merged.append(existing)
+                continue
+            eid = existing.get("id")
+            if isinstance(eid, str) and eid in incoming_by_id:
+                merged.append(incoming_by_id[eid])
+                placed.add(eid)
+        for row in incoming:
+            rid = row.get("id")
+            if not isinstance(rid, str) or rid not in placed:
+                merged.append(row)
+        kept, trimmed = bound_goals(merged, scope_hash=target_hash, legacy_map=legacy_map)
+        arti_state.write_jsonl_atomic(path, kept)
+        return trimmed
 
 
 def expired_recent(row: Mapping, day: int) -> bool:
@@ -296,14 +405,16 @@ def last_progress(row: Mapping, game: str) -> str | None:
     return stamp + ": " + " ".join(str(text).split())[:LAST_PROGRESS_CHARS]
 
 
-def cap_overflow(rows: Iterable[dict], day: int) -> tuple[list[dict], list[dict]]:
+def cap_overflow(rows: Iterable[dict], day: int, *, scope_hash: str | None = None,
+                 legacy_map: mind_scope.LegacyScopeMap | None = None) -> tuple[list[dict], list[dict]]:
     """(rows, newly capped): the safety cap. More alive goals than ``GOAL_CAPS`` in a horizon (a legacy file or a
     concurrent writer; reflection refuses new goals over the cap before this) marks the oldest ``capped`` with
     ``capped_on_day``. Logged by the caller and shown to her as ``tujuan.dibatasi``; the row stays on disk."""
     out = [dict(r) for r in rows]
     capped = []
     for horizon, cap in GOAL_CAPS.items():
-        alive = [r for r in out if valid_goal(r) and goal_alive(r, day) and r["horizon"] == horizon]
+        alive = [r for r in out if valid_goal(r) and goal_alive(r, day) and r["horizon"] == horizon
+                 and mind_scope.row_matches_goal_scope(r, scope_hash, legacy_map)]
         for row in alive[:max(0, len(alive) - cap)]:
             row.update(status="capped", capped_on_day=day)
             capped.append(row)
@@ -534,40 +645,49 @@ def _preserve_newer_state_facts(native_facts, previous):
 def write_now(base: Path, *, game: str, why: str | None, goal_ref: str | None, goal_today: Iterable[str],
               game_time: Any = None, decision_ts: float | None = None, goal_dates: Iterable[Mapping] = (),
               native_facts: Mapping | None = None, calendar=(), observed_ts: float | None = None,
-              intent_date: str | None = None, doing: Mapping | None = None) -> dict:
+              intent_date: str | None = None, doing: Mapping | None = None,
+              scope: str | None = None, scoped: bool = False) -> dict:
     """Overwrite ``now.json`` with the latest decision intent (a missing why stays null, never invented).
 
     ``doing`` (ADR 232 part I): the skill and argument she just chose; ``doing_now`` and ``heading_to`` carry it
     with the game clock it was chosen at, ``where_now`` the place and clock her body was last read at.
 
     A decision is not progress: the controller's ``blocked`` flag survives it (fix10c, a12 gift answers)."""
-    ts = float(decision_ts if decision_ts is not None else time.time())
-    previous = _read_now_raw(base) or {}
-    native_facts = dict(native_facts) if native_facts is not None else {}
-    authored_clock = game_time
-    if (observed_ts is not None and previous.get("game") == game
-            and type(previous.get("observed_ts")) in (int, float) and previous["observed_ts"] > observed_ts):
-        game_time, observed_ts = previous.get("game_time"), previous["observed_ts"]
-        _preserve_newer_state_facts(native_facts, previous)
-    row = {"schema": NOW_SCHEMA, "game": str(game), "why": why, "goal_ref": goal_ref,
-           "goal_today": [str(t) for t in goal_today][:GOAL_CAPS["today"]],
-           "decision_ts": ts, "game_time": game_time, "observed_ts": ts if observed_ts is None else observed_ts,
-           "blocked": previous.get("blocked") if isinstance(previous.get("blocked"), dict) else None}
-    # FIX73D: every goal rides with its authored and target day, not only the dated ones, so the persona line can
-    # tell a goal written for an earlier day from today's (plan_dates.intent_views).
-    row["goal_dates"] = [dict(id=g["id"], **{k: g[k] for k in ("text", "authored_on_day", "referenced_days", "event_days",
-                                                                "for_day", "horizon") if k in g})
-                         for g in goal_dates if g.get("referenced_days") or type(g.get("for_day")) is int]
-    authored = plan_dates.ordinal(game, intent_date or (authored_clock or {}).get("date")) if isinstance(authored_clock, Mapping) else None
-    row["why_dates"] = plan_dates.references(why or "", game=game, authored_day=authored, calendar=calendar)
-    row["why_event_days"] = plan_dates.event_references(why or "", game=game, authored_day=authored, calendar=calendar)
-    row["intent_authored_on_day"] = authored
-    row["native_facts"] = dict(native_facts) if native_facts is not None else {}
-    from arti_runtime.time_grounding import location_change
-    row["location_change"] = location_change(previous, game_time, row["observed_ts"])
-    _now_places(row, previous, doing, authored_clock)
-    _write_json_atomic(Path(base) / NOW_FILE, row)
-    return row
+    target_hash = mind_scope.scope_hash(scope or "") if scoped else None
+    now_path = Path(base) / NOW_FILE
+    lock_ctx = mind_scope.file_lock(now_path) if scoped else contextlib.nullcontext()
+    with lock_ctx:
+        ts = float(decision_ts if decision_ts is not None else time.time())
+        previous = _read_now_raw(base) or {}
+        if previous.get("cleared") is True or (scoped and previous.get("scope_hash") != target_hash):
+            previous = {}
+        native_facts = dict(native_facts) if native_facts is not None else {}
+        authored_clock = game_time
+        if (observed_ts is not None and previous.get("game") == game
+                and type(previous.get("observed_ts")) in (int, float) and previous["observed_ts"] > observed_ts):
+            game_time, observed_ts = previous.get("game_time"), previous["observed_ts"]
+            _preserve_newer_state_facts(native_facts, previous)
+        row = {"schema": NOW_SCHEMA, "game": str(game), "why": why, "goal_ref": goal_ref,
+               "goal_today": [str(t) for t in goal_today][:GOAL_CAPS["today"]],
+               "decision_ts": ts, "game_time": game_time, "observed_ts": ts if observed_ts is None else observed_ts,
+               "blocked": previous.get("blocked") if isinstance(previous.get("blocked"), dict) else None}
+        if target_hash is not None:
+            row["scope_hash"] = target_hash
+        # Every goal rides with its authored and target day, not only the dated ones, so the persona line can
+        # tell a goal written for an earlier day from today's (plan_dates.intent_views).
+        row["goal_dates"] = [dict(id=g["id"], **{k: g[k] for k in ("text", "authored_on_day", "referenced_days", "event_days",
+                                                                    "for_day", "horizon") if k in g})
+                             for g in goal_dates if g.get("referenced_days") or type(g.get("for_day")) is int]
+        authored = plan_dates.ordinal(game, intent_date or (authored_clock or {}).get("date")) if isinstance(authored_clock, Mapping) else None
+        row["why_dates"] = plan_dates.references(why or "", game=game, authored_day=authored, calendar=calendar)
+        row["why_event_days"] = plan_dates.event_references(why or "", game=game, authored_day=authored, calendar=calendar)
+        row["intent_authored_on_day"] = authored
+        row["native_facts"] = dict(native_facts) if native_facts is not None else {}
+        from arti_runtime.time_grounding import location_change
+        row["location_change"] = location_change(previous, game_time, row["observed_ts"])
+        _now_places(row, previous, doing, authored_clock)
+        _write_json_atomic(now_path, row)
+        return row
 
 
 TRIP_SKILLS = ("pergi_ke",)  # a chosen trip names where she intends to go, never where she is
@@ -597,43 +717,82 @@ def _now_places(row, previous, doing=None, chosen_at=None):
 
 
 @_serialize_now_update
-def note_doing(base: Path, *, game: str, doing: Mapping, chosen_at: Any = None) -> dict | None:
+def note_doing(base: Path, *, game: str, doing: Mapping, chosen_at: Any = None,
+               scope: str | None = None, scoped: bool = False) -> dict | None:
     """ADR 232 part I: record the skill she just chose (``doing_now``) and a chosen trip's destination
     (``heading_to``) on the current ``now.json`` row, each with the game clock it was chosen at."""
-    row = _read_now_raw(base)
-    if row is None or row.get("game") != game:
-        return None
-    _now_places(row, dict(row), doing, chosen_at)
-    _write_json_atomic(Path(base) / NOW_FILE, row)
-    return row
+    target_hash = mind_scope.scope_hash(scope or "") if scoped else None
+    now_path = Path(base) / NOW_FILE
+    lock_ctx = mind_scope.file_lock(now_path) if scoped else contextlib.nullcontext()
+    with lock_ctx:
+        row = _read_now_raw(base)
+        if row is None or row.get("cleared") is True or row.get("game") != game:
+            return None
+        if scoped and row.get("scope_hash") != target_hash:
+            return None
+        _now_places(row, dict(row), doing, chosen_at)
+        _write_json_atomic(now_path, row)
+        return row
 
 
 @_serialize_now_update
 def mark_state(base: Path, *, game: str, game_time: Any = None, blocked: Mapping | None = None,
-               observed_ts: float | None = None, native_facts: Mapping | None = None) -> dict:
+               observed_ts: float | None = None, native_facts: Mapping | None = None,
+               scope: str | None = None, scoped: bool = False) -> dict:
     """Controller heartbeat on ``now.json``: the game clock and a generic blocked flag, never the decision.
 
     ``blocked`` = ``{"since_ts": wall seconds of the last progress, "menu_open": bool}`` or None. PM-1 fix10c
     (a12): during an 18.9 min stall no decision wrote the file, so the persona saw a stale why and invented motion."""
-    row = _read_now_raw(base) or {"schema": NOW_SCHEMA, "game": str(game), "why": None, "goal_ref": None,
-                                  "goal_today": [], "decision_ts": None}
-    stamp = float(observed_ts if observed_ts is not None else time.time())
-    native_facts = dict(native_facts) if native_facts is not None else {}
-    if (row.get("game") == game and type(row.get("observed_ts")) in (int, float)
-            and row["observed_ts"] > stamp):
-        game_time, stamp = row.get("game_time"), row["observed_ts"]
-        _preserve_newer_state_facts(native_facts, row)
-    row["native_facts"] = dict(native_facts) if native_facts is not None else {}
-    from arti_runtime.time_grounding import location_change
-    row["location_change"] = location_change(row, game_time, stamp)
-    row["observed_ts"] = stamp
-    if game_time is not None:
-        row["game_time"] = game_time
-    row["blocked"] = ({"since_ts": float(blocked["since_ts"]), "menu_open": bool(blocked.get("menu_open"))}
-                      if isinstance(blocked, Mapping) and type(blocked.get("since_ts")) in (int, float) else None)
-    _now_places(row, dict(row))  # ADR 232 part I: the heartbeat moves where_now; doing_now / heading_to stay
-    _write_json_atomic(Path(base) / NOW_FILE, row)
-    return row
+    target_hash = mind_scope.scope_hash(scope or "") if scoped else None
+    now_path = Path(base) / NOW_FILE
+    lock_ctx = mind_scope.file_lock(now_path) if scoped else contextlib.nullcontext()
+    with lock_ctx:
+        existing = _read_now_raw(base)
+        fresh_row = {"schema": NOW_SCHEMA, "game": str(game), "why": None, "goal_ref": None,
+                     "goal_today": [], "decision_ts": None}
+        if existing is None or existing.get("cleared") is True:
+            row = fresh_row
+        elif scoped and (existing.get("game") != game or existing.get("scope_hash") != target_hash):
+            row = fresh_row
+        else:
+            row = existing
+        if target_hash is not None:
+            row["scope_hash"] = target_hash
+        stamp = float(observed_ts if observed_ts is not None else time.time())
+        native_facts = dict(native_facts) if native_facts is not None else {}
+        if (row.get("game") == game and type(row.get("observed_ts")) in (int, float)
+                and row["observed_ts"] > stamp):
+            game_time, stamp = row.get("game_time"), row["observed_ts"]
+            _preserve_newer_state_facts(native_facts, row)
+        row["native_facts"] = dict(native_facts) if native_facts is not None else {}
+        from arti_runtime.time_grounding import location_change
+        row["location_change"] = location_change(row, game_time, stamp)
+        row["observed_ts"] = stamp
+        if game_time is not None:
+            row["game_time"] = game_time
+        row["blocked"] = ({"since_ts": float(blocked["since_ts"]), "menu_open": bool(blocked.get("menu_open"))}
+                          if isinstance(blocked, Mapping) and type(blocked.get("since_ts")) in (int, float) else None)
+        _now_places(row, dict(row))  # the heartbeat moves where_now; doing_now / heading_to stay
+        _write_json_atomic(now_path, row)
+        return row
+
+
+@_serialize_now_update
+def clear_now(base: Path, *, scope: str | None = None, reason: str | None = None) -> bool:
+    """Atomically clear ``now.json`` at cycle end. Never clears another scope's live row."""
+    target_hash = mind_scope.scope_hash(scope) if isinstance(scope, str) and scope.strip() else None
+    now_path = Path(base) / NOW_FILE
+    with mind_scope.file_lock(now_path):
+        existing = _read_now_raw(base)
+        if (isinstance(existing, dict) and existing.get("cleared") is not True
+                and mind_scope.is_scope_hash(existing.get("scope_hash"))
+                and existing.get("scope_hash") != target_hash):
+            return False  # also when this cycle ended before it knew its own farm
+        tombstone: dict[str, Any] = {"schema": NOW_SCHEMA, "cleared": True, "cleared_ts": time.time()}
+        if reason:
+            tombstone["reason"] = str(reason)
+        _write_json_atomic(now_path, tombstone)
+        return True
 
 
 def _ts(row: Mapping, key: str) -> float | None:
@@ -641,13 +800,14 @@ def _ts(row: Mapping, key: str) -> float | None:
     return float(value) if type(value) in (int, float) else None
 
 
-def read_now(base: Path, *, now: float | None = None, max_age_sec: float = NOW_MAX_AGE_SEC) -> dict | None:
+def read_now(base: Path, *, now: float | None = None, max_age_sec: float = NOW_MAX_AGE_SEC,
+             scope_hash: str | None = None, require_scope: bool = False) -> dict | None:
     """The current row, or None when missing, unreadable, malformed or stale. Never raises.
 
     Current = the newest of the decision and the controller heartbeat is within ``max_age_sec``; a stale
     decision under a live heartbeat is still returned (the line then says so instead of presenting it as now)."""
     row = _read_now_raw(base)
-    if row is None:
+    if row is None or row.get("cleared") is True:
         return None
     stamps = [t for t in (_ts(row, "decision_ts"), _ts(row, "observed_ts")) if t is not None]
     if not stamps:
@@ -655,6 +815,9 @@ def read_now(base: Path, *, now: float | None = None, max_age_sec: float = NOW_M
     age = (time.time() if now is None else now) - max(stamps)
     if not 0 <= age <= max_age_sec:
         return None
+    if require_scope:
+        if not mind_scope.is_scope_hash(scope_hash) or row.get("scope_hash") != scope_hash:
+            return None
     return row
 
 
@@ -714,10 +877,14 @@ def intent_line(row: Mapping | None, *, now: float | None = None, max_age_sec: f
             + ", bukan fakta yang sudah terjadi; jangan dibacakan mentah, pakai kalau relevan)\n" + current + dates_line)
 
 
-def intent_block(base: Path, *, now: float | None = None, max_age_sec: float = NOW_MAX_AGE_SEC) -> str:
+def intent_block(base: Path, *, now: float | None = None, max_age_sec: float = NOW_MAX_AGE_SEC,
+                 scope_hash: str | None = None, require_scope: bool = False) -> str:
     """``"\\n[NIATKU] ...\\n"`` for the persona turn, or '' (missing/stale/broken file → nothing)."""
     try:
-        line = intent_line(read_now(base, now=now, max_age_sec=max_age_sec), now=now, max_age_sec=max_age_sec)
+        line = intent_line(
+            read_now(base, now=now, max_age_sec=max_age_sec, scope_hash=scope_hash, require_scope=require_scope),
+            now=now, max_age_sec=max_age_sec,
+        )
     except Exception:  # noqa: BLE001 - the persona turn never fails on the mind file
         return ""
     return "\n" + line + "\n" if line else ""
@@ -725,11 +892,21 @@ def intent_block(base: Path, *, now: float | None = None, max_age_sec: float = N
 
 # --------------------------------------------------------------------------- journey (one row per game day)
 
-def load_journey(base: Path, game: str) -> list[dict]:
+def load_journey(base: Path, game: str, *, scope: str | None = None, scoped: bool = False) -> list[dict]:
+    if not scoped:
+        try:
+            return arti_state.read_jsonl(game_dir(base, game) / JOURNEY_FILE)
+        except (OSError, ValueError):
+            return []
+    if not scope:
+        return []
     try:
-        return arti_state.read_jsonl(game_dir(base, game) / JOURNEY_FILE)
+        target_hash = _scope_hash(scope)
+        rows = _read_jsonl_scoped(game_dir(base, game) / JOURNEY_FILE)
+        legacy_map = mind_scope.load_legacy_scopes(base, game)
     except (OSError, ValueError):
         return []
+    return [r for r in rows if legacy_map.journey_scope(r) == target_hash]
 
 
 # fix55C / ADR 78 (REVIEW2 #6): the deferred reflection thread and the main thread's record_discoveries both rewrite the
@@ -737,76 +914,133 @@ def load_journey(base: Path, game: str) -> list[dict]:
 _JOURNEY_LOCK = threading.RLock()
 
 
-def save_journey_row(base: Path, game: str, row: dict) -> None:
+def save_journey_row(base: Path, game: str, row: dict, *,
+                     scope: str | None = None, scoped: bool = False) -> None:
     with _JOURNEY_LOCK:
-        _save_journey_row(base, game, row)
+        _save_journey_row(base, game, row, scope=scope, scoped=scoped)
 
 
-def _save_journey_row(base: Path, game: str, row: dict) -> None:
-    prior = load_journey(base, game)
-    old = next((r for r in prior if r.get("id") == row["id"]), {})
+def _merge_journey_discoveries(existing_rows: Iterable[Mapping], incoming: Iterable[Any]) -> list[Any]:
     discoveries, seen = [], set()
-    for item in old.get("discoveries", []) + row.get("discoveries", []):
+    for prior in existing_rows:
+        for item in prior.get("discoveries", []) or ():
+            key = ("id", item["id"]) if isinstance(item, dict) and isinstance(item.get("id"), str) else (
+                "legacy", json.dumps(item, sort_keys=True, ensure_ascii=False))
+            if key not in seen:
+                seen.add(key)
+                discoveries.append(item)
+    for item in incoming or ():
         key = ("id", item["id"]) if isinstance(item, dict) and isinstance(item.get("id"), str) else (
             "legacy", json.dumps(item, sort_keys=True, ensure_ascii=False))
         if key not in seen:
             seen.add(key)
             discoveries.append(item)
-    row = dict(row, discoveries=discoveries)
-    rows = [r for r in prior if r.get("id") != row["id"]] + [row]
-    arti_state.write_jsonl_atomic(game_dir(base, game) / JOURNEY_FILE, rows[-120:])
+    return discoveries
+
+
+def _save_journey_row(base: Path, game: str, row: dict, *,
+                      scope: str | None = None, scoped: bool = False) -> None:
+    path = game_dir(base, game) / JOURNEY_FILE
+    if not scoped:
+        prior = load_journey(base, game)
+        owned = [r for r in prior if r.get("scope_hash")]  # rows that name their farm: never counted, replaced or trimmed here
+        prior = [r for r in prior if not r.get("scope_hash")]
+        old = next((r for r in prior if r.get("id") == row["id"]), {})
+        discoveries = _merge_journey_discoveries([old], row.get("discoveries", []))
+        row = dict(row, discoveries=discoveries)
+        rows = [r for r in prior if r.get("id") != row["id"]] + [row]
+        arti_state.write_jsonl_atomic(path, owned + rows[-JOURNEY_MAX:])
+        return
+    target_hash = mind_scope.scope_hash(scope or "")
+    with mind_scope.file_lock(path):
+        legacy_map = mind_scope.load_legacy_scopes(base, game)
+        prior = _read_jsonl_scoped(path)
+        other = [r for r in prior if legacy_map.journey_scope(r) != target_hash]
+        mine = [r for r in prior if legacy_map.journey_scope(r) == target_hash]
+        row_day = row.get("day") if type(row.get("day")) is int else None
+        raw_id = str(row.get("id") or row.get("date") or (f"day-{row_day}" if row_day is not None else ""))
+        prefix = target_hash[:16] + ":"
+        scoped_id = raw_id if raw_id.startswith(prefix) else prefix + raw_id
+        date_val = row.get("date") or (raw_id[len(prefix):] if raw_id.startswith(prefix) else raw_id)
+        if row_day is not None:
+            matches = lambda r: r.get("day") == row_day  # noqa: E731
+        else:
+            matches = lambda r: r.get("id") in (raw_id, scoped_id) or (bool(date_val) and r.get("date") == date_val)  # noqa: E731
+        old_matches = [r for r in mine if matches(r)]
+        discoveries = _merge_journey_discoveries(old_matches, row.get("discoveries", []))
+        saved = dict(row, id=scoped_id, date=date_val, scope_hash=target_hash, discoveries=discoveries)
+        kept_mine = ([r for r in mine if not matches(r)] + [saved])[-JOURNEY_MAX:]
+        arti_state.write_jsonl_atomic(path, other + kept_mine)
 
 
 def record_discoveries(base: Path, game: str, *, scope: str, discoveries: Iterable[Mapping],
-                       day: int, day_label: str) -> list[dict]:
+                       day: int, day_label: str, scoped: bool = False) -> list[dict]:
     """Durable first-seen receipts, independent of reflection success and session restarts.
 
     The adapter's scope identifies the world+actor. The mind stores facts, never derives game semantics.
     """
     with _JOURNEY_LOCK:
-        return _record_discoveries(base, game, scope=scope, discoveries=discoveries, day=day, day_label=day_label)
+        return _record_discoveries(base, game, scope=scope, discoveries=discoveries, day=day,
+                                   day_label=day_label, scoped=scoped)
 
 
 def _record_discoveries(base: Path, game: str, *, scope: str, discoveries: Iterable[Mapping],
-                        day: int, day_label: str) -> list[dict]:
+                        day: int, day_label: str, scoped: bool = False) -> list[dict]:
     import hashlib
     path = game_dir(base, game) / "discoveries.jsonl"
-    rows = arti_state.read_jsonl(path) if path.exists() else []
-    known = {r.get("id") for r in rows}
-    scope_hash = hashlib.sha256(scope.encode()).hexdigest()
-    fresh = []
-    for event in discoveries:
-        if not isinstance(event, Mapping) or not isinstance(event.get("id"), str):
-            continue
-        identity = hashlib.sha256((scope + "\0" + event["id"]).encode()).hexdigest()
-        if identity in known:
-            continue
-        text = event.get("text")
-        row = dict(id=identity, kind=str(event.get("kind") or "unknown"),
-                   subject=str(event.get("subject") or "unknown"),
-                   text=text if isinstance(text, str) and text.strip() else "discovery: unknown",
-                   source=str(event.get("source") or "unknown"),
-                   date=str(event.get("date") or day_label), observed_day=day,
-                   day=event.get("day") if type(event.get("day")) is int else day,
-                   day_label=str(event.get("day_label") or day_label), scope_hash=scope_hash,
-                   native_seq=event.get("seq") if type(event.get("seq")) is int else 0,
-                   event_time=event.get("event_time") or event.get("date") or day_label,
-                   event_place=event.get("event_place") or (event.get("subject") if event.get("kind") == "location_entered" else None))
-        if isinstance(event.get("place_name"), str):
-            row["place_name"] = event["place_name"]
-        if isinstance(event.get("references"), list):
-            row["references"] = event["references"]
-        known.add(identity)
-        fresh.append(row)
-    if fresh:
-        for label in dict.fromkeys(r["day_label"] for r in fresh):
-            group = [r for r in fresh if r["day_label"] == label]
-            journey = next((r for r in load_journey(base, game) if r.get("id") == label),
-                           dict(v=MIND_VERSION, schema=JOURNEY_SCHEMA, id=label, date=label,
-                                day=group[0]["day"], effects={}, places=[], discoveries=[]))
-            save_journey_row(base, game, dict(journey, discoveries=journey.get("discoveries", []) + group))
-        arti_state.write_jsonl_atomic(path, rows + fresh)
-    return fresh
+    lock_ctx = mind_scope.file_lock(path) if scoped else contextlib.nullcontext()
+    with lock_ctx:
+        rows = arti_state.read_jsonl(path) if path.exists() else []
+        known = {r.get("id") for r in rows}
+        scope_hash = hashlib.sha256(scope.encode()).hexdigest()
+        fresh = []
+        for event in discoveries:
+            if not isinstance(event, Mapping) or not isinstance(event.get("id"), str):
+                continue
+            identity = hashlib.sha256((scope + "\0" + event["id"]).encode()).hexdigest()
+            if identity in known:
+                continue
+            text = event.get("text")
+            row = dict(id=identity, kind=str(event.get("kind") or "unknown"),
+                       subject=str(event.get("subject") or "unknown"),
+                       text=text if isinstance(text, str) and text.strip() else "discovery: unknown",
+                       source=str(event.get("source") or "unknown"),
+                       date=str(event.get("date") or day_label), observed_day=day,
+                       day=event.get("day") if type(event.get("day")) is int else day,
+                       day_label=str(event.get("day_label") or day_label), scope_hash=scope_hash,
+                       native_seq=event.get("seq") if type(event.get("seq")) is int else 0,
+                       event_time=event.get("event_time") or event.get("date") or day_label,
+                       event_place=event.get("event_place") or (event.get("subject") if event.get("kind") == "location_entered" else None))
+            if isinstance(event.get("place_name"), str):
+                row["place_name"] = event["place_name"]
+            if isinstance(event.get("references"), list):
+                row["references"] = event["references"]
+            known.add(identity)
+            fresh.append(row)
+        if fresh:
+            # Every receipt has its actor's scope. Once a store's days name their farms, a caller that was not told writes
+            # the day under its own farm too (a festival's story lines once wrote the old way, and the file's old
+            # limit dropped the oldest days of other farms).
+            scoped = scoped or any(r.get("scope_hash") for r in load_journey(base, game))
+            for label in dict.fromkeys(r["day_label"] for r in fresh):
+                group = [r for r in fresh if r["day_label"] == label]
+                if scoped:
+                    existing = load_journey(base, game, scope=scope, scoped=True)
+                    gday = group[0]["day"]
+                    journey = next(
+                        (r for r in existing if (r.get("day") == gday if type(gday) is int else r.get("date") == label)),
+                        dict(v=MIND_VERSION, schema=JOURNEY_SCHEMA, id=label, date=label,
+                             day=gday, effects={}, places=[], discoveries=[]),
+                    )
+                    save_journey_row(base, game, dict(journey, discoveries=journey.get("discoveries", []) + group),
+                                     scope=scope, scoped=True)
+                else:
+                    journey = next((r for r in load_journey(base, game) if r.get("id") == label),
+                                   dict(v=MIND_VERSION, schema=JOURNEY_SCHEMA, id=label, date=label,
+                                        day=group[0]["day"], effects={}, places=[], discoveries=[]))
+                    save_journey_row(base, game, dict(journey, discoveries=journey.get("discoveries", []) + group))
+            arti_state.write_jsonl_atomic(path, rows + fresh)
+        return fresh
 
 
 def recent_discoveries(base: Path, game: str, *, limit: int = 3, day: int | None = None,
@@ -841,17 +1075,19 @@ def item_descriptions(base: Path, game: str, *, scope: str | None = None) -> dic
     return native_descriptions(rows)
 
 
-def yesterday_line(base: Path, game: str, day: int) -> str | None:
+def yesterday_line(base: Path, game: str, day: int, *,
+                   scope: str | None = None, scoped: bool = False) -> str | None:
     """Her own one-line summary of the previous game day, when a reflection wrote one."""
-    for row in reversed(load_journey(base, game)):
+    for row in reversed(load_journey(base, game, scope=scope, scoped=scoped)):
         if row.get("day") == day - 1 and isinstance((row.get("reflection") or {}).get("today"), str):
             text = row["reflection"]["today"].strip()
             return text[:200] if text else None
     return None
 
 
-def yesterday_dates(base: Path, game: str, day: int):
-    for row in reversed(load_journey(base, game)):
+def yesterday_dates(base: Path, game: str, day: int, *,
+                    scope: str | None = None, scoped: bool = False):
+    for row in reversed(load_journey(base, game, scope=scope, scoped=scoped)):
         if row.get("day") == day - 1:
             return (row.get("reflection") or {}).get("today_dates")
     return None
@@ -869,50 +1105,90 @@ def valid_like(row: Any) -> bool:
             and not text_reason(row.get("text"), PREF_TEXT_MAX + 20))
 
 
-def load_likes(base: Path, game: str) -> list[dict]:
+def load_likes(base: Path, game: str, *, scope: str | None = None, scoped: bool = False) -> list[dict]:
+    if not scoped:
+        try:
+            rows = arti_state.read_jsonl(game_dir(base, game) / LIKES_FILE)
+        except (OSError, ValueError):
+            return []
+        return [r for r in rows if valid_like(r)]
+    if not scope:
+        return []
     try:
-        rows = arti_state.read_jsonl(game_dir(base, game) / LIKES_FILE)
+        target_hash = _scope_hash(scope)
+        rows = _read_jsonl_scoped(game_dir(base, game) / LIKES_FILE)
+        legacy_map = mind_scope.load_legacy_scopes(base, game)
     except (OSError, ValueError):
         return []
-    return [r for r in rows if valid_like(r)]
+    return [r for r in rows if valid_like(r) and legacy_map.like_scope(r) == target_hash]
 
 
-def bound_likes(rows: Iterable[dict], *, max_rows: int = LIKES_MAX, max_bytes: int = LIKES_MAX_BYTES) -> tuple[list[dict], int]:
+def bound_likes(rows: Iterable[dict], *, max_rows: int = LIKES_MAX, max_bytes: int = LIKES_MAX_BYTES,
+                scope_hash: str | None = None,
+                legacy_map: mind_scope.LegacyScopeMap | None = None) -> tuple[list[dict], int]:
     rows = list(rows)
-    trimmed = max(0, len(rows) - max_rows)
-    rows = rows[trimmed:]
-    while rows and sum(len(json.dumps(r, ensure_ascii=False).encode("utf-8")) + 1 for r in rows) > max_bytes:
-        rows.pop(0)
+    if scope_hash is None:
+        trimmed = max(0, len(rows) - max_rows)
+        rows = rows[trimmed:]
+        while rows and sum(len(json.dumps(r, ensure_ascii=False).encode("utf-8")) + 1 for r in rows) > max_bytes:
+            rows.pop(0)
+            trimmed += 1
+        return rows, trimmed
+    lmap = legacy_map or mind_scope.EMPTY_LEGACY_MAP
+    other = [r for r in rows if lmap.like_scope(r) != scope_hash]
+    mine = [r for r in rows if lmap.like_scope(r) == scope_hash]
+    trimmed = max(0, len(mine) - max_rows)
+    mine = mine[trimmed:]
+    while mine and sum(len(json.dumps(r, ensure_ascii=False).encode("utf-8")) + 1 for r in mine) > max_bytes:
+        mine.pop(0)
         trimmed += 1
-    return rows, trimmed
+    return other + mine, trimmed
 
 
 def save_likes(base: Path, game: str, *, day: int, day_label: str, fun: Iterable[Mapping], not_fun: Iterable[Mapping],
-               evidence: Mapping[str, str] | None = None) -> dict:
+               evidence: Mapping[str, str] | None = None,
+               scope: str | None = None, scoped: bool = False) -> dict:
     """Append her verified claims for ``day`` (that day's rows are replaced, never doubled).
     Returns ``{saved, trimmed}``; a bad-shaped claim is skipped, never repaired."""
     evidence = dict(evidence or {})
+    target_hash = mind_scope.scope_hash(scope or "") if scoped else None
     fresh = []
     for polarity, claims in (("like", fun), ("dislike", not_fun)):
         for n, claim in enumerate(claims, 1):
             if not isinstance(claim, Mapping):
                 continue
-            row = dict(v=MIND_VERSION, schema=LIKE_SCHEMA, id="%d-%s-%d" % (day, polarity, n), day=day, date=str(day_label),
+            like_id = ("%s:%d-%s-%d" % (target_hash[:16], day, polarity, n)) if target_hash else ("%d-%s-%d" % (day, polarity, n))
+            row = dict(v=MIND_VERSION, schema=LIKE_SCHEMA, id=like_id, day=day, date=str(day_label),
                        polarity=polarity, text=claim.get("text"), ref=str(claim.get("ref") or ""))
+            if target_hash is not None:
+                row["scope_hash"] = target_hash
             if evidence.get(row["ref"]):
                 row["evidence"] = str(evidence[row["ref"]])[:140]
             if valid_like(row):
                 fresh.append(row)
-    rows = [r for r in load_likes(base, game) if r.get("day") != day] + fresh
-    rows, trimmed = bound_likes(rows)
-    arti_state.write_jsonl_atomic(game_dir(base, game) / LIKES_FILE, rows)
-    return dict(saved=len(fresh), trimmed=trimmed)
+    path = game_dir(base, game) / LIKES_FILE
+    if not scoped:
+        prior = load_likes(base, game)
+        owned = [r for r in prior if r.get("scope_hash")]  # rows that name their farm: never counted, replaced or trimmed here
+        rows = [r for r in prior if not r.get("scope_hash") and r.get("day") != day] + fresh
+        rows, trimmed = bound_likes(rows)
+        arti_state.write_jsonl_atomic(path, owned + rows)
+        return dict(saved=len(fresh), trimmed=trimmed)
+    with _LIKES_LOCK, mind_scope.file_lock(path):
+        legacy_map = mind_scope.load_legacy_scopes(base, game)
+        disk_rows = _read_jsonl_scoped(path)
+        other = [r for r in disk_rows if legacy_map.like_scope(r) != target_hash]
+        mine = [r for r in disk_rows if valid_like(r) and legacy_map.like_scope(r) == target_hash and r.get("day") != day]
+        mine_kept, trimmed = bound_likes(mine + fresh)
+        arti_state.write_jsonl_atomic(path, other + mine_kept)
+        return dict(saved=len(fresh), trimmed=trimmed)
 
 
-def likes_lines(base: Path, game: str, *, before_day: int | None = None, limit: int = LIKES_SHOWN) -> dict[str, list[str]]:
+def likes_lines(base: Path, game: str, *, before_day: int | None = None, limit: int = LIKES_SHOWN,
+                scope: str | None = None, scoped: bool = False) -> dict[str, list[str]]:
     """``{"suka": [...], "nggak_suka": [...]}``: her newest dated rows, oldest first, as ``"<date>: <her words>"``.
     ``before_day`` leaves out the day being reflected on (its claims are in the reply, not yet memory)."""
-    rows = [r for r in load_likes(base, game) if before_day is None or r["day"] < before_day]
+    rows = [r for r in load_likes(base, game, scope=scope, scoped=scoped) if before_day is None or r["day"] < before_day]
     out = {}
     for key, polarity in (("suka", "like"), ("nggak_suka", "dislike")):
         picked = [r for r in rows if r["polarity"] == polarity][-limit:]
@@ -928,7 +1204,7 @@ def diary_beats(base: Path, *, wall_date: str) -> list[str]:
     except OSError:
         return []
     for folder in games:
-        for row in arti_state.read_jsonl(folder / JOURNEY_FILE):
+        for row in _read_jsonl_scoped(folder / JOURNEY_FILE):
             reflection = row.get("reflection") or {}
             if str(row.get("reflected_at") or "")[:10] != wall_date or not isinstance(reflection.get("today"), str):
                 continue
@@ -972,9 +1248,10 @@ def record_items(base: Path, game: str, *, scope: str, kind: str, items: Iterabl
     An item is ``{id, status, title?, text?, facts?}``. The first-seen day is kept; status changes append to a bounded
     history. A record missing from a later read is not deleted (absence is not a fact here)."""
     import hashlib
+    from arti_runtime import jsonl_snapshot
     path = game_dir(base, game) / LEDGER_FILE
-    rows = arti_state.read_jsonl(path) if path.exists() else []
-    by_id = {r.get("id"): r for r in rows}
+    # Strict: the file is written whole below, so an unreadable ledger must raise here and never look empty.
+    by_id = {r.get("id"): r for r in jsonl_snapshot.rows(path, strict=True)}
     scope_hash = _scope_hash(scope)
     changed, dirty = [], False
     for item in items:
@@ -999,17 +1276,26 @@ def record_items(base: Path, game: str, *, scope: str, kind: str, items: Iterabl
         by_id[identity] = row
     if dirty:
         arti_state.write_jsonl_atomic(path, list(by_id.values()))
-    return changed
+    return _own(changed)
+
+
+def _own(rows: list[dict]) -> list[dict]:
+    """Rows of JSON, copied whole: a caller may change what it got, as after a fresh read of the file."""
+    return pickle.loads(pickle.dumps(rows, pickle.HIGHEST_PROTOCOL))
 
 
 def ledger_rows(base: Path, game: str, *, scope: str, kind: str | None = None) -> list[dict]:
-    path = game_dir(base, game) / LEDGER_FILE
+    """The matching rows, from one parsed snapshot per file revision; the caller's own copies.
+
+    Parsing the whole ledger once per native observation and several times per heartbeat cost a large share
+    of the play process's time, so one snapshot serves every reader until the file changes."""
+    from arti_runtime import jsonl_snapshot
     try:
-        rows = arti_state.read_jsonl(path) if path.exists() else []
+        rows = jsonl_snapshot.rows(game_dir(base, game) / LEDGER_FILE)
     except (OSError, ValueError):
         return []
     scope_hash = _scope_hash(scope)
-    return [r for r in rows if r.get("scope_hash") == scope_hash and (kind is None or r.get("kind") == kind)]
+    return _own([r for r in rows if r.get("scope_hash") == scope_hash and (kind is None or r.get("kind") == kind)])
 
 
 def save_progress(base: Path, game: str, *, scope: str, day: int, day_label: str, snapshot: Mapping) -> dict:

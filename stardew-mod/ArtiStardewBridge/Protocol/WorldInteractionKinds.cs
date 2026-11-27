@@ -58,6 +58,7 @@ public static class WorldInteractionKinds
         EventControlAction.Npc or EventControlAction.NpcRoute => "DialogueOpened",
         EventControlAction.Shop or EventControlAction.ShopRoute => "MenuOpened",
         EventControlAction.Seat or EventControlAction.SeatRoute => "FestivalSeated",
+        EventControlAction.Stand => "FestivalStood",
         EventControlAction.Interact or EventControlAction.InteractRoute => "EventInteractionObserved",
         EventControlAction.Egg or EventControlAction.EggRoute => "FestivalEggCollected",
         Door or AnimalHouseRoute.Kind => LocationChanged,

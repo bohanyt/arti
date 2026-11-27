@@ -4,7 +4,10 @@ The existing mind ledger holds read receipts, questions/guesses and day-plan
 receipts. It never supplies a goal or an answer. All entry points are opt-in in
 the adapter; importing this module changes no legacy prompt or lifetime.
 """
+from collections import Counter
 from copy import deepcopy
+from dataclasses import dataclass
+from functools import lru_cache
 import hashlib
 import json
 import re
@@ -13,11 +16,16 @@ from datetime import datetime
 
 import arti_mind as M
 import arti_mind_reflect as R
+from arti_runtime import same_words
 
 SETTING = 'stardew_live7_goal_ladder'
+PLAN_ON_PAGE_SETTING = 'stardew_live7_plan_on_page'
 CAPS = dict(M.GOAL_CAPS, season=3)
+PAGE_TEXT_WIDTHS = (72, 48, 32, 20, 12)
 TIMEOUT_S = 20.0
 INPUT_BYTES = 14000
+NOTE_SLOTS = 6  # open questions, and open guesses
+NOTE_SET_ASIDE_DAYS = 5  # a full slot gives way from its oldest note once that one is this old
 # ADR 228 part B: speech kinds (owner, herself, a viewer or a donation; all ADR 216 receipts).
 SPEECH = ('owner_said', 'arti_said', 'viewer_said')
 # ADR 232 part A: lines said TO her (the owner, a viewer, a donation), as against her own spoken lines.
@@ -59,14 +67,26 @@ def _tag_words(tags):
     return out - _GENERIC_WORDS
 
 
+@lru_cache(maxsize=4096)
+def _said(text):
+    from arti_runtime.stream_notes import said_words
+    return frozenset(said_words(text))
+
+
+@lru_cache(maxsize=16)
+def _touching_stems(tag_words):
+    from arti_runtime.stream_notes import _PREFIXES
+    return tuple(prefix + stem for prefix in _PREFIXES
+                 for stem, touched in SAID_TOUCHES.items() if tag_words.intersection(touched))
+
+
 def said_touches(text, tag_words):
     """True when what was said names her place, a destination or a choice on this page."""
-    from arti_runtime.stream_notes import said_words, _PREFIXES
-    words = said_words(text)
+    words = _said(text)
     if words & tag_words:
         return True
-    return any(word.startswith(prefix + stem) for word in words for prefix in _PREFIXES
-               for stem, touched in SAID_TOUCHES.items() if set(touched) & tag_words)
+    stems = _touching_stems(frozenset(tag_words))
+    return bool(stems) and any(word.startswith(stems) for word in words)
 GAME = 'stardew'
 NOTES = 'goal_note'
 PLAN = 'goal_plan'
@@ -83,7 +103,9 @@ SYSTEM = (
     'stream, waktu_game saat diucapkan dan pembicara, bukan penemuan, aturan atau bukti game. '
     'Ucapan pemilik adalah pelajaran yang kamu dengar; kalian sama-sama belajar. '
     'yang_kamu_suka adalah ingatan kesukaanmu sendiri, bukan bukti penyelesaian game. '
-    'baru_kulihat menandai yang belum sempat ditunjukkan lagi. Kamu boleh penasaran, menduga, atau belum tahu. '
+    'baru_kulihat menandai yang belum sempat ditunjukkan lagi. rencana_terakhir berisi rencana-rencanamu yang lalu; '
+    'hal_baru menghitung yang pertama kali kamu lihat hari itu. tempat_terakhir: tempat yang pernah kamu datangi dan kapan '
+    'terakhir, yang paling lama dulu. Kamu boleh penasaran, menduga, atau belum tahu. '
     'catatan.new: pertanyaan atau dugaanmu, prompted_by menunjuk ref yang memicunya; about berisi tempat atau nama '
     'pilihan yang menurutmu berkaitan. catatan.found: yang kamu temukan sendiri, dengan id catatan, text dan ref '
     'dari bukti yang kemudian kamu lihat atau lakukan. Catatanmu boleh tetap terbuka. '
@@ -125,6 +147,10 @@ def enabled(config):
     return (config or {}).get(SETTING, False) is True
 
 
+def plan_on_page_enabled(config):
+    return enabled(config) and config.get(PLAN_ON_PAGE_SETTING, False) is True
+
+
 def rows(base, scope, kind):
     return M.ledger_rows(base, GAME, scope=scope, kind=kind) if base is not None and scope else []
 
@@ -134,7 +160,7 @@ def put(base, scope, kind, items, day):
                           day=day, day_label=M.plan_dates.label(GAME, day))
 
 
-def remember(base, scope, evidence, day):
+def remember(base, scope, evidence, day, *, mind_scoped=False):
     """Publish through fix123A's sole receipt API; captured text keeps its existing owner.
 
     No parallel first-seen store. Native discovery writers still own their text
@@ -203,7 +229,7 @@ def remember(base, scope, evidence, day):
                 M.record_discoveries(base, GAME, scope=scope, day=seen_day,
                     day_label=M.plan_dates.label(GAME, seen_day), discoveries=[dict(id=event_id, kind='captured_text',
                     subject=str(e.get('subject') or identity), text=text, source=source,
-                    date=M.plan_dates.label(GAME, seen_day), event_place=e.get('event_place'))])
+                    date=M.plan_dates.label(GAME, seen_day), event_place=e.get('event_place'))], scoped=mind_scoped)
                 text_ids.add(text_ref)
         receipt = store.repeat(known, kind, identity, game_day=seen_day, clock=e.get('clock'),
                                place=e.get('event_place'), source=source, text_ref=text_ref)
@@ -247,7 +273,7 @@ def facts(base, scope, *, only=None):
     announced, delivered = set(delivery.get('announced') or ()), set(delivery.get('delivered') or ())
     paged = set(delivery.get('said_paged') or ())
     out = []
-    text_index = None
+    text_index = every = None
     selected = dict(kind=only[0], id=only[1]) if only is not None else {}
     from arti_runtime.experience_facts import person_shown
     for receipt in store.receipts(rows=text_rows, **selected):
@@ -270,6 +296,12 @@ def facts(base, scope, *, only=None):
             if shown and shown.get('complete') is True:
                 texts[text_ref] = shown['text']
         text = texts.get(text_ref, 'nama atau teks belum tertangkap') if isinstance(text_ref, str) else 'nama atau teks belum tertangkap'
+        stamp = None
+        if native_kind == 'letter_opened':  # when it came, from every box sighting of this farm, as on her page
+            from types import SimpleNamespace
+            from arti_runtime.native_notices import letter_stamp
+            every = every or SimpleNamespace(rows=store.receipts(rows=text_rows))
+            stamp = letter_stamp(every, receipt)
         speech = native_kind in SPEECH
         # Stream text owners are speech even when a legacy text_read receipt points there.
         if not speech and str(receipt.get('source') or '').startswith('stream:'):
@@ -286,7 +318,7 @@ def facts(base, scope, *, only=None):
                         speaker=native_kind.removesuffix('_said'), clock=receipt.get('clock'),
                         **_said_by(native_kind, owners.get(text_ref))) if speech else {}),
                 **(dict(paged=True) if speech and key in paged else {}),
-                notified=ref in delivered, announced=key in announced,
+                notified=ref in delivered, announced=key in announced, **(dict(stempel=stamp) if stamp and index == 0 else {}),
                 **(dict(surface=identity) if native_kind == 'menu_tab_opened' else {}),
                 **(dict(bundle_id=identity) if native_kind == 'bundle_note_opened' else {})))
     return out
@@ -336,22 +368,26 @@ def acknowledge(base, scope, refs, day, *, full=True, current=None):
         facts=dict(old, announced=sorted(announced), delivered=sorted(delivered)))], day)
 
 
-def said_shown(said_rows, evidence):
+def _said_excerpt_matches(row, receipt):
+    text = row['text']
+    return row.get('tanggal') == said_when(receipt) and (
+        text == receipt['text'] or text.endswith('…') and len(text) > 1 and receipt['text'].startswith(text[:-1]))
+
+
+def said_shown(said_rows, evidence, *, require_attribution=False):
     """ADR 232 part A: the receipt refs of the said lines a page's ``dikatakan`` rows show (same game date, the same
     words or their visibly shortened start)."""
     shown = [r for r in said_rows or () if isinstance(r, dict) and isinstance(r.get('text'), str)]
-    out = []
-    for e in evidence:
-        if e.get('basis') not in SPEECH or e.get('ref') != e.get('receipt_ref'):
-            continue
-        when = said_when(e)
-        for r in shown:
-            text = r['text']
-            if r.get('tanggal') == when and (text == e['text'] or (text.endswith('…') and len(text) > 1
-                                                                    and e['text'].startswith(text[:-1]))):
-                out.append(e['receipt_ref'])
-                break
-    return out
+    receipts = [e for e in evidence if e.get('basis') in SPEECH and e.get('ref') == e.get('receipt_ref')]
+    if not require_attribution:
+        return [e['receipt_ref'] for e in receipts if any(_said_excerpt_matches(r, e) for r in shown)]
+    refs = []
+    for row in shown:
+        matches = [e['receipt_ref'] for e in receipts if row.get('oleh') == (e.get('oleh') or e.get('speaker'))
+                   and _said_excerpt_matches(row, e)]
+        if len(matches) == 1:
+            refs.append(matches[0])
+    return refs
 
 
 def page_said(base, scope, refs, day):
@@ -367,12 +403,15 @@ def page_said(base, scope, refs, day):
         facts=dict(old, said_paged=paged[-SAID_PAGED_KEEP:]))], day)
 
 
-def expire(goals, day):
+def expire(goals, day, *, scope_hash=None, legacy_map=None):
     """The only automatic intent mutation: the explicitly chosen season ends."""
+    from arti_runtime import mind_scope
+
     result = []
     for row in goals:
         row = dict(row)
-        if (row.get('horizon') == 'season' and row.get('status') == 'open'
+        if (mind_scope.row_matches_goal_scope(row, scope_hash, legacy_map)
+                and row.get('horizon') == 'season' and row.get('status') == 'open'
                 and day > ((row['set_on_day'] - 1) // 28 + 1) * 28):
             row.update(status='expired', expired_on_day=((row['set_on_day'] - 1) // 28 + 1) * 28 + 1)
         result.append(row)
@@ -448,12 +487,186 @@ def note_views(base, scope):
             for r in rows(base, scope, NOTES)]
 
 
+def make_room(base, scope, notes, kind, day, text=None, about=()):
+    """Whether one more open note of this kind fits. When every slot holds an old note nothing new can be asked
+    for: her newest note sets the oldest of its kind aside (kept in the ledger, closed).
+
+    In a full list a note of a day a reload took back gives way first, then the oldest one the new note asks
+    again, then the older of two that ask the same, whatever their age; then the oldest of five days or more. (One
+    question in many wordings must not hold every slot and refuse every new note.)"""
+    same = sorted((r for r in notes if r.get('kind') == kind and r['status'] == 'open'),
+                  key=lambda r: r['day'] if type(r['day']) is int else 0)
+    if len(same) < NOTE_SLOTS:
+        return True
+    dated = [r for r in same if type(r['day']) is int]
+    ahead = [r for r in dated if r['day'] > day]
+    lived = [r for r in dated if r['day'] <= day]
+
+    def alike(a, words, tags):
+        return same_words.same(a['text'], words, a.get('about'), tags)
+    old = next(iter([*reversed(ahead),
+                     *(r for r in lived if text and alike(r, text, about)),
+                     *(r for i, r in enumerate(lived) if any(alike(r, n['text'], n.get('about')) for n in lived[i + 1:])),
+                     *(r for r in lived if day - r['day'] >= NOTE_SET_ASIDE_DAYS)]), None)
+    if old is None:
+        return False
+    f = {k: v for k, v in old.items() if k not in ('id', 'text', 'day', 'status')}
+    put(base, scope, NOTES, [dict(id=old['id'], status='dropped', text=old['text'],
+                                  facts=dict(f, closed_day=day, set_aside=True))], day)
+    old['status'] = 'dropped'
+    return True
+
+
 def plan(base, scope, day):
     return next((r.get('facts') or {} for r in rows(base, scope, PLAN) if r['item_id'] == str(day)), {})
 
 
-def build_input(base, scope, *, day, target_day, mode, evidence, native, calendar=(), daily=None, verified=(), remembered_day=None, max_bytes=INPUT_BYTES):
-    goals = expire(M.load_goals(base, GAME), target_day)
+@dataclass(frozen=True)
+class PagePlan:
+    target_day: int | None
+    status: str
+    entries: tuple[tuple[int, str], ...] = ()
+
+
+def _plan_entries(row, target_day):
+    facts = row.get('facts')
+    if not isinstance(facts, dict) or row.get('status') != 'planned':
+        return None
+    additions = facts.get('additions', [])
+    if not isinstance(additions, list) or any(not isinstance(entry, dict) for entry in additions):
+        return None
+    entries = [(facts.get('authored_on_day', row.get('first_day')), facts.get('text'))]
+    entries.extend((entry.get('day'), entry.get('text')) for entry in additions)
+    if any(type(day) is not int or not 0 < day <= target_day or not isinstance(text, str)
+           or len(text) > R.TOMORROW_MAX or '\ufffd' in text
+           or any(0xD800 <= ord(ch) <= 0xDFFF for ch in text) for day, text in entries):
+        return None
+    # A damaged UTF-8 row cannot supply her words.
+    return tuple((day, text) for day, text in entries if text.strip())
+
+
+def read_page_plan(base, scope, day):
+    if day is None:
+        return PagePlan(day, 'no_plan')
+    other = None
+    for row in rows(base, scope, PLAN):
+        key = row.get('item_id')
+        if key == str(day):
+            entries = _plan_entries(row, day) or ()
+            return PagePlan(day, 'no_room' if entries else 'no_plan', entries)
+        if isinstance(key, str) and re.fullmatch(r'[1-9][0-9]{0,8}', key):
+            target = int(key)
+            if _plan_entries(row, target) and (other is None or target > other):
+                other = target
+    return PagePlan(other, 'other_day') if other is not None else PagePlan(day, 'no_plan')
+
+
+def planning_order(evidence):
+    """News with words, then what she had from the last two days, news without words, then what she already
+    had, newest first, and last what she had without words. The bytes run out at the end of this order.
+
+    In the ledger's order (oldest first) the bound would cut the newest rows, and a late plan would be made
+    from what she saw in her first days."""
+    def at(e):
+        return e['day'] if type(e.get('day')) is int else 0
+    newest = max(map(at, evidence), default=0)
+
+    def rank(e):
+        if e.get('text_available') is False:
+            return 4 if e.get('notified') else 2
+        # A page she answered today has shown her a row already (`notified`); no plan may have seen it.
+        return 0 if not e.get('notified') else 1 if at(e) >= newest - 1 else 3
+    ordered = sorted(evidence, key=lambda e: (rank(e), -at(e)))
+    # The same words of the same kind once, at their newest; a repeat she already had comes after everything
+    # else. News stays where it is (it is acknowledged by its place here), and so does a text of several pieces.
+    seen, first, again = set(), [], []
+    for e in ordered:
+        same = _sight(e)
+        repeat = same in seen and e.get('notified') and len(str(e.get('text') or '')) < 240
+        (again if repeat else first).append(e)
+        seen.add(same)
+    return first + again
+
+
+# A place, a person or a thing is itself, whatever its label says.
+NAMED_SIGHTS = frozenset(('place_entered', 'location_entered', 'villager_met', 'npc_met', 'item_first_held', 'item_obtained'))
+
+
+def _sight(e):
+    """What makes a sight the same one again: its kind and its words, or what it is."""
+    kind = e.get('receipt_kind') or e.get('kind')
+    if kind in NAMED_SIGHTS or e.get('text_available') is False:
+        return kind, e.get('receipt_id') or e.get('subject') or e.get('ref')
+    return kind, e.get('text'), str(e.get('ref')).partition('#')[2]  # the pieces of one long text are not each other
+
+
+# Counters and notices that change by themselves are no sight of hers.
+NO_SIGHT = frozenset(('hud_notice', 'mailbox_visible', 'mailbox_empty_visible', 'shipping_summary_seen', 'menu_text', 'menu_tab_opened', 'system_read'))
+PLANS_SHOWN = 5
+QUIET_DAYS = 3
+
+
+def plan_history(base, scope, evidence, upto):
+    """Her last plans, newest first, each with how many things she saw for the first time that day."""
+    first = {}
+    for e in evidence:
+        if (e.get('basis') not in SPEECH and (e.get('receipt_kind') or e.get('kind')) not in NO_SIGHT
+                and type(e.get('day')) is int and '#' not in str(e.get('ref'))):
+            same = _sight(e)
+            first[same] = min(first.get(same, e['day']), e['day'])
+    new = Counter(first.values())
+    def words(f):
+        added = [a.get('text') for a in f.get('additions') or () if isinstance(a, dict)]
+        return ' … '.join(w for w in (f.get('text'), *added[-1:]) if isinstance(w, str) and w.strip())
+    days = sorted((int(r['item_id']), text) for r in rows(base, scope, PLAN)
+                  if str(r.get('item_id')).isdigit() and int(r['item_id']) <= upto and (text := words(r.get('facts') or {})))
+    return [dict(tanggal=M.plan_dates.label(GAME, d), rencana=text if len(text) <= 160 else text[:159].rstrip() + '…',
+                 hal_baru=new.get(d, 0)) for d, text in days[-PLANS_SHOWN:]][::-1]
+
+
+def same_plans(history):
+    """How many of her newest plans share at least two content words, and which (at most four)."""
+    found = 0, []
+    for n in range(QUIET_DAYS, len(history) + 1):
+        shared = same_words.common([p['rencana'] for p in history[:n]])
+        if len(shared) < same_words.MIN_SHARED:
+            break
+        found = n, shared[:4]
+    return found
+
+
+PLACES_SHOWN = 8
+
+
+def places_last(base, scope, upto):
+    """Places she has been and the day of her last visit, longest ago first. Her homes, event maps and numbered
+    maps (floors, buildings) are left out; a place without a readable name keeps the id her pages show, in words. A
+    visit of a day a reload took back is not counted."""
+    from arti_runtime import save_reload
+    from arti_runtime.place_names import place_label
+    from arti_runtime.place_page import visit_days, visit_records
+    reload = save_reload.latest(base, scope)
+    records = visit_records(base, scope)
+    found = []
+    for place, date in visit_days(base, scope).items():
+        if re.search(r'\d|-', place) or re.match(r'Cabin|FarmHouse|Cellar|Temp$', place):
+            continue
+        for visit in reversed(records.get(place) or [dict(date=date)]):
+            day = M.plan_dates.ordinal(GAME, visit['date'])
+            if type(day) is int and day <= upto and not save_reload.before_reload(reload, day=day, at=visit.get('at')):
+                label = place_label(place) or re.sub(r'(?<=[a-z])(?=[A-Z])|_', ' ', place)
+                found.append((day, label, visit['date']))
+                break
+    return ['%s: %s' % (label, date) for _, label, date in sorted(found)[:PLACES_SHOWN]]
+
+
+def build_input(base, scope, *, day, target_day, mode, evidence, native, calendar=(), daily=None, verified=(), remembered_day=None, unread=None, unread_seen=None, max_bytes=INPUT_BYTES, mind_scoped=False):
+    from arti_runtime import mind_scope
+
+    target_hash = mind_scope.scope_hash(scope) if mind_scoped else None
+    legacy_map = mind_scope.load_legacy_scopes(base, GAME) if mind_scoped else None
+    goals = expire(M.load_goals(base, GAME, scope=scope, scoped=mind_scoped), target_day,
+                   scope_hash=target_hash, legacy_map=legacy_map)
     live = M.open_goals(goals, target_day, horizons=M.SEASON_HORIZONS)
     current_plan = plan(base, scope, target_day)
     wants = []
@@ -473,6 +686,15 @@ def build_input(base, scope, *, day, target_day, mode, evidence, native, calenda
         prompts.append('Ada kabar baru di bawah. Ada yang ingin kamu tambahkan ke rencanamu? Yang lain tetap.')
     else:
         prompts.append('Dengan keinginanmu musim ini dan yang kamu tahu, tanggal rencana mau kamu pakai buat apa?')
+    history = plan_history(base, scope, evidence, remembered_day if remembered_day is not None else day) if mode != 'append' else []
+    alike, shared = same_plans(history)
+    if alike:
+        prompts.append('Dalam %d rencana terakhirmu kata-kata ini selalu ada: %s. Tetap itu, atau ada yang lain yang ingin kamu coba?'
+                       % (alike, ', '.join(shared)))
+    elif len(history) >= QUIET_DAYS and not any(p['hal_baru'] for p in history[:QUIET_DAYS]):
+        prompts.append('Dalam %d rencana terakhirmu tidak ada hal baru yang tercatat. Tetap itu, atau ada yang lain yang ingin kamu coba?' % QUIET_DAYS)
+    if unread is None:
+        unread, unread_seen = (daily or {}).get('surat_belum_dibaca'), (daily or {}).get('surat_terakhir_terlihat')
     native_refs = [dict(ref=f['ref'], text='%s: %s' % (f['text'], f['value']), value=f['value'],
                         day=f.get('day', day)) for f in native]
     payload = dict(tanggal=M.plan_dates.label(GAME, day), tanggal_rencana=M.plan_dates.label(GAME, target_day),
@@ -480,8 +702,9 @@ def build_input(base, scope, *, day, target_day, mode, evidence, native, calenda
         keinginan=wants, slots={h: '%d/%d' % (len(live[h]), CAPS[h]) for h in M.SEASON_HORIZONS},
         catatan=[{k: r[k] for k in ('id', 'text', 'day', 'kind', 'prompted_by', 'prompt', 'about') if k in r}
                  for r in note_views(base, scope) if r['status'] == 'open'],
-        yang_kulihat=[{k: e[k] for k in ('ref', 'text', 'day', 'place', 'basis', 'receipt_kind', 'receipt_id', 'text_ref', 'text_available', 'stream_date', 'speaker') if k in e}
-                     for e in sorted(evidence, key=lambda e: bool(e.get('notified'))) if e.get('basis') not in SPEECH],
+        yang_kulihat=[dict({k: e[k] for k in ('ref', 'text', 'day', 'place', 'basis', 'receipt_kind', 'receipt_id', 'text_ref', 'text_available', 'stream_date', 'speaker') if k in e},
+                           **({'text': '%s (%s)' % (e['text'], e['stempel'])} if e.get('stempel') else {}))
+                     for e in planning_order(evidence) if e.get('basis') not in SPEECH],
         # ADR 231 part D: who said it and when, the game day and clock too (the page's own `tanggal`), as facts.
         dikatakan=[dict({k:e[k] for k in ('ref','text','day','clock','basis','stream_date','speaker','oleh','text_available','receipt_kind','receipt_id','text_ref') if k in e},
                         **({'waktu_game': said_when(e)} if type(e.get('day')) is int else {}))
@@ -491,7 +714,14 @@ def build_input(base, scope, *, day, target_day, mode, evidence, native, calenda
         kabar=dict(daily or {}), rencana_sebelumnya=current_plan.get('text', ''),
         verified=[dict(ref=r['ref'], text=r['text'], day=r.get('day', day)) for r in verified],
         season_asked=season_first)
-    likes = M.likes_lines(base, GAME, before_day=day)
+    if history:
+        payload['rencana_terakhir'] = history
+        if places := places_last(base, scope, remembered_day if remembered_day is not None else day):
+            payload['tempat_terakhir'] = places
+    if type(unread) is int and unread > 0:
+        payload['kotak_surat'] = '%d surat di kotak suratmu belum kamu buka%s.' % (
+            unread, ' (terakhir terlihat %s)' % unread_seen if unread_seen else '')
+    likes = M.likes_lines(base, GAME, before_day=day, scope=scope, scoped=mind_scoped)
     if likes:
         payload['yang_kamu_suka'] = likes
     if remembered_day is not None:
@@ -518,14 +748,21 @@ def build_input(base, scope, *, day, target_day, mode, evidence, native, calenda
         payload['dikatakan'].pop(0)
         payload['ucapan_ditunda'] = payload.get('ucapan_ditunda', 0) + 1
     if R._size(payload) > max_bytes:
+        payload.pop('tempat_terakhir', None)
+    if R._size(payload) > max_bytes:
         raise ValueError('planning_input_bound')
     return payload
 
 
-def apply_reply(base, scope, raw, payload, *, day, target_day, mode):
+def apply_reply(base, scope, raw, payload, *, day, target_day, mode, mind_scoped=False):
     """Only her validated reply writes goals/questions/answers. No default goals."""
+    from arti_runtime import mind_scope
+
     obj = json.loads(raw)
-    goals = expire(M.load_goals(base, GAME), target_day)
+    target_hash = mind_scope.scope_hash(scope) if mind_scoped else None
+    legacy_map = mind_scope.load_legacy_scopes(base, GAME) if mind_scoped else None
+    goals = expire(M.load_goals(base, GAME, scope=scope, scoped=mind_scoped), target_day,
+                   scope_hash=target_hash, legacy_map=legacy_map)
     open_rows = [g for g in goals if M.goal_alive(g, target_day)]
     fact_rows = payload['yang_kulihat'] + payload.get('dikatakan', []) + payload['verified'] + payload['ukuran_yang_kulihat']
     all_text = {r['ref']: r['text'] for r in fact_rows}
@@ -557,29 +794,6 @@ def apply_reply(base, scope, raw, payload, *, day, target_day, mode):
             f['closed_day'] = day
             put(base, scope, NOTES, [dict(id=note_id, status='dropped', text=note['text'], facts=f)], day)
             note['status'] = 'dropped'
-    for i, item in enumerate(raw_notes.get('new') or []):
-        if not isinstance(item, dict) or item.get('kind') not in ('question', 'guess') or M.text_reason(item.get('text'), 100):
-            dropped.append(dict(kind='note', reason='invalid'))
-            continue
-        if item.get('prompted_by') not in all_text:
-            dropped.append(dict(kind='note', reason='unknown_prompt'))
-            continue
-        if sum(r['kind'] == item['kind'] and r['status'] == 'open' for r in notes) >= 6:
-            dropped.append(dict(kind='note', reason='slot_full'))
-            continue
-        identity = ('q' if item['kind'] == 'question' else 'g') + str(day) + '-' + str(i + 1)
-        while identity in ids:
-            identity += 'n'
-        tags = [t for t in item.get('about', ()) if isinstance(t, str) and len(t) <= 40][:5]
-        f = dict(kind=item['kind'], prompted_by=item['prompted_by'], prompt=all_text[item['prompted_by']],
-                 about=tags, known_refs=list(all_text))
-        trigger = next(r for r in fact_rows if r['ref'] == item['prompted_by'])
-        if trigger.get('receipt_kind'):
-            f['source_receipt'] = dict(kind=trigger['receipt_kind'], id=trigger['receipt_id'], text_ref=trigger.get('text_ref'))
-        put(base, scope, NOTES, [dict(id=identity, status='open', text=item['text'], facts=f)], day)
-        notes.append(dict(id=identity, text=item['text'], status='open', day=day, **f))
-        ids.add(identity)
-        note_new['new:' + str(i)] = identity
     for item in raw_notes.get('found') or []:
         if not isinstance(item, dict):
             continue
@@ -594,13 +808,39 @@ def apply_reply(base, scope, raw, payload, *, day, target_day, mode):
         f = {k: note[k] for k in ('kind', 'prompted_by', 'prompt', 'about', 'known_refs', 'source_receipt') if k in note}
         f.update(found=item['text'], evidence=item['ref'], evidence_text=fact_text[item['ref']], found_day=day)
         put(base, scope, NOTES, [dict(id=note['id'], status='found', text=note['text'], facts=f)], day)
+        note['status'] = 'found'
+    for i, item in enumerate(raw_notes.get('new') or []):
+        if not isinstance(item, dict) or item.get('kind') not in ('question', 'guess') or M.text_reason(item.get('text'), 100):
+            dropped.append(dict(kind='note', reason='invalid'))
+            continue
+        if item.get('prompted_by') not in all_text:
+            dropped.append(dict(kind='note', reason='unknown_prompt'))
+            continue
+        tags = [t for t in item.get('about', ()) if isinstance(t, str) and len(t) <= 40][:5]
+        if not make_room(base, scope, notes, item['kind'], day, item['text'], tags):
+            dropped.append(dict(kind='note', reason='slot_full'))
+            continue
+        identity = ('q' if item['kind'] == 'question' else 'g') + str(day) + '-' + str(i + 1)
+        while identity in ids:
+            identity += 'n'
+        f = dict(kind=item['kind'], prompted_by=item['prompted_by'], prompt=all_text[item['prompted_by']],
+                 about=tags, known_refs=list(all_text))
+        trigger = next(r for r in fact_rows if r['ref'] == item['prompted_by'])
+        if trigger.get('receipt_kind'):
+            f['source_receipt'] = dict(kind=trigger['receipt_kind'], id=trigger['receipt_id'], text_ref=trigger.get('text_ref'))
+        put(base, scope, NOTES, [dict(id=identity, status='open', text=item['text'], facts=f)], day)
+        notes.append(dict(id=identity, text=item['text'], status='open', day=day, **f))
+        ids.add(identity)
+        note_new['new:' + str(i)] = identity
     new_raw = (obj.get('goals') if isinstance(obj.get('goals'), dict) else {}).get('new') or []
     if not isinstance(new_raw, list):
         new_raw = []
     before = {g['id'] for g in goals}
     # A morning writes effective today; a night writes tomorrow, preserving actual authorship.
+    reserved = M.all_goal_ids(base, GAME) if mind_scoped else ()
     result_rows, refused = R.apply(goals, result, day=day, game=GAME, calendar=payload['kalender'],
-        effective_day=target_day, horizons=M.SEASON_HORIZONS, caps=CAPS)
+        effective_day=target_day, horizons=M.SEASON_HORIZONS, caps=CAPS,
+        scope_hash=target_hash, legacy_map=legacy_map, reserved_ids=reserved)
     new_links = {}
     for i, source in enumerate(new_raw):
         if isinstance(source, dict):
@@ -625,7 +865,7 @@ def apply_reply(base, scope, raw, payload, *, day, target_day, mode):
             g['watch'] = dict(ref=watch['ref'], value=watch['value'])
         if g['horizon'] == 'season':
             g['ends_on_day'] = ((target_day - 1) // 28 + 1) * 28
-    history_trimmed = M.save_goals(base, GAME, result_rows)
+    history_trimmed = M.save_goals(base, GAME, result_rows, scope=scope, scoped=mind_scoped)
     summary = result['tomorrow']
     old_plan = plan(base, scope, target_day)
     text = old_plan.get('text', '') if mode == 'append' else summary
@@ -644,11 +884,15 @@ def apply_reply(base, scope, raw, payload, *, day, target_day, mode):
     M.save_journey_row(base, GAME, dict(v=M.MIND_VERSION, schema=M.JOURNEY_SCHEMA,
         id=M.plan_dates.label(GAME, remembered), day=remembered, date=M.plan_dates.label(GAME, remembered),
         reflected_at=datetime.now().astimezone().isoformat(timespec='seconds'), reflected_at_day=day,
-        reflection=dict(today=result['today'], tomorrow=result['tomorrow'], fun=result['fun'], not_fun=result['not_fun'])))
+        reflection=dict(today=result['today'], tomorrow=result['tomorrow'], fun=result['fun'], not_fun=result['not_fun'])),
+        scope=scope, scoped=mind_scoped)
     M.save_likes(base, GAME, day=remembered, day_label=M.plan_dates.label(GAME, remembered),
-                 fun=result['fun'], not_fun=result['not_fun'], evidence=fact_text)
+                 fun=result['fun'], not_fun=result['not_fun'], evidence=fact_text,
+                 scope=scope, scoped=mind_scoped)
+    unscoped = M.unscoped_counts(base, GAME) if mind_scoped else None
     return dict(new=[g['id'] for g in result_rows if g['id'] not in before], dropped=dropped + refused,
-                season_asked=payload['season_asked'], history_trimmed=history_trimmed)
+                season_asked=payload['season_asked'], history_trimmed=history_trimmed,
+                **({'unscoped_rows': unscoped} if unscoped and any(unscoped.values()) else {}))
 
 
 REASK_SYSTEM = ('Kamu ARTI. Satu bagian tulisanmu di rencana tadi melebihi batasnya, jadi bagian itu belum '
@@ -700,13 +944,15 @@ def reask(complete, raw):
 
 def reflect(complete, base, scope, **inputs):
     start = time.monotonic()
+    mind_scoped = bool(inputs.pop('mind_scoped', False))
     try:
-        payload = build_input(base, scope, **inputs)
+        payload = build_input(base, scope, mind_scoped=mind_scoped, **inputs)
         messages = [{'role': 'system', 'content': SYSTEM}, {'role': 'user', 'content': json.dumps(payload, ensure_ascii=False)}]
         raw = complete(messages, SCHEMA, timeout_sec=TIMEOUT_S)
         first = raw
         raw, reasked = reask(complete, raw)
-        result = apply_reply(base, scope, raw, payload, day=inputs['day'], target_day=inputs['target_day'], mode=inputs['mode'])
+        result = apply_reply(base, scope, raw, payload, day=inputs['day'], target_day=inputs['target_day'], mode=inputs['mode'],
+                             mind_scoped=mind_scoped)
         request_bytes = R._size(dict(messages=messages, schema=SCHEMA))
         return dict(ev='goal_planning', mode=inputs['mode'], day=inputs['day'], target_day=inputs['target_day'],
                     input_bytes=R._size(payload), input_token_estimate=(request_bytes + 3) // 4,
@@ -720,8 +966,8 @@ def reflect(complete, base, scope, **inputs):
 
 
 def render(prefs, goals, *, day, evidence, native, notes=(), tags=(), legacy_targets=(), max_bytes=M.BLOCK_MAX_BYTES,
-           said_bytes=None, newest_told_first=False):
-    """One line set long -> season -> today, file order within each horizon.
+           said_bytes=None, newest_told_first=False, plan_on_page=False):
+    """One line set long -> season -> today. The current today date comes first.
 
     The bound is the entire mind block. One goal per horizon at 600 B; extras
     remain in reflection and are counted. No goal is modified or ranked.
@@ -739,9 +985,12 @@ def render(prefs, goals, *, day, evidence, native, notes=(), tags=(), legacy_tar
         remaining = [g for g in live[h] if progress(g, native)[0] is not True and not (
             not g.get('watch') and met_status(g['text'] + ' ' + str(g.get('done_when') or ''), legacy_targets))]
         if remaining:
-            g = remaining[0]
-            block['tujuan'][h] = [dict(id=g['id'], text=g['text'], set=M.dated_goal(g, GAME).get('authored_on_day'),
-                                      maju=progress(g, native)[1])]
+            g = max(remaining, key=lambda row: row['set_on_day']) if plan_on_page and h == 'today' else remaining[0]
+            view = dict(id=g['id'], text=g['text'], set=M.dated_goal(g, GAME).get('authored_on_day'),
+                        maju=progress(g, native)[1])
+            if plan_on_page and h == 'today' and g['set_on_day'] < day:
+                view['tanggal'] = M.plan_dates.label(GAME, g['set_on_day'])
+            block['tujuan'][h] = [view]
             if len(remaining) > 1:
                 block.setdefault('rinci', {})[h] = len(remaining) - 1
     if live['week']:
@@ -767,7 +1016,8 @@ def render(prefs, goals, *, day, evidence, native, notes=(), tags=(), legacy_tar
         # ADR 228 part B: the newest line, plus every stored line that touches her place, a destination or a
         # choice on this page, newest first, within the said rows' own cap. Always attributed, dated, verbatim.
         words = _tag_words(tags)
-        order = [len(spoken) - 1] + [i for i in range(len(spoken) - 2, -1, -1) if said_touches(spoken[i]['text'], words)]
+        touching = [i for i in reversed(range(len(spoken))) if said_touches(spoken[i]['text'], words)]
+        order = [len(spoken) - 1] + [i for i in touching if i != len(spoken) - 1]
         # ADR 232 part A (mabar, 2026-11-17): her own spoken replies are said rows too, so the owner's line was never
         # the newest one when her next page came and rode it only if it touched the page. A line said TO her that is
         # newer than every said line her answered play pages carried rides first (newest first); before any page
@@ -779,7 +1029,6 @@ def render(prefs, goals, *, day, evidence, native, notes=(), tags=(), legacy_tar
         order = fresh + [i for i in order if i not in fresh]
         if newest_told_first:
             own = [i for i, e in enumerate(spoken) if e.get('basis') == 'arti_said']
-            touching = [i for i in reversed(range(len(spoken))) if said_touches(spoken[i]['text'], words)]
             order = list(dict.fromkeys(told[-1:] + own[-1:] + touching))
         chosen = []
         for pos, i in enumerate(order if len(order) > 1 else ()):  # one row: exactly main's single newest line
@@ -804,12 +1053,14 @@ def render(prefs, goals, *, day, evidence, native, notes=(), tags=(), legacy_tar
         if newest_told_first:
             said_rank = {id(r): (0, -priority) for priority, (_, r) in enumerate(chosen)}
     tag_set = M._tags(tags)
-    relevant = next((n for n in notes if n['status'] == 'open' and M._tags(n.get('about') or ()) & tag_set), None)
+    # Her newest open note about this page; a note of a day a reload took back comes after every lived one.
+    relevant = max((n for n in notes if n['status'] == 'open' and M._tags(n.get('about') or ()) & tag_set),
+                   key=lambda n: (n['day'] <= day, n['day']) if type(n['day']) is int else (False, 0), default=None)
     if relevant:
         block['penasaran'] = dict(id=relevant['id'], text=relevant['text'], day=relevant['day'],
                                   jenis='pertanyaanmu' if relevant['kind'] == 'question' else 'dugaanmu')
     # Trim excerpts uniformly, not goals by estimated value. Full authored text is retained on disk.
-    for width in (72, 48, 32, 20, 12):
+    for width in PAGE_TEXT_WIDTHS:
         if M.block_bytes(block) <= max_bytes:
             return block
         for views in block['tujuan'].values():

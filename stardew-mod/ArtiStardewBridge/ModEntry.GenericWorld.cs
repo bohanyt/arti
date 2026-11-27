@@ -14,12 +14,9 @@ public sealed partial class ModEntry
     readonly GiftTargetInstances genericWorldInstances = new();
     // Generic buttons share the existing owner, retained pad hold, stop and release proof.
     // They never choose the intended effect or invoke a feature-specific game method.
-    bool GenericWorldReady => (this.config.GenericWorldInputEnabled || this.OrdinaryInteractSurface()) && this.WorldInteractionBackgroundReady
-        && this.PadPathConfigured // ADR 244: no focus term
-        && (Context.IsPlayerFree && Context.CanPlayerMove || NativeEventControl.Token() is not null)
-        && Game1.activeClickableMenu is null
-        && (!(Game1.eventUp || Game1.CurrentEvent is not null) || NativeEventControl.Token() is not null) && Game1.currentMinigame is null
-        && Game1.chatBox?.isActive() != true && Game1.player?.UsingTool != true && Game1.player?.CursorSlotItem is null;
+    bool GenericWorldReady => GenericWorldCapture.ActorReady(this) && (this.config.GenericWorldInputEnabled || this.OrdinaryInteractSurface()
+        || Game1.player is { } player && Game1.currentLocation is { } location && NativeB1Offers.HasCodeCells(location)
+            && GenericWorldCapture.FacedCodeAction(this, player, location, player.GetGrabTile()) is not null);
 
     static bool IsOpenableContainer(StardewValley.Object? item) => item is StardewValley.Objects.Chest chest
         && OpenableContainer.Eligible(true, chest.giftbox.Value, chest.playerChest.Value);
@@ -51,18 +48,21 @@ public sealed partial class ModEntry
     (WorldInteractionTarget? Target, StardewValley.Objects.Chest? Chest, BgActionTarget? Action)
         CaptureGenericWorld(string kind)
     {
-        if (!GenericWorld.IsKind(kind) || !this.GenericWorldReady || Game1.player is not Farmer player
+        if (!GenericWorld.IsKind(kind) || !GenericWorldCapture.ActorReady(this) || Game1.player is not Farmer player
             || player.currentLocation is not GameLocation location)
             return (null, null, null);
         Vector2 tile = kind == GenericWorld.Use && BackgroundToolTileProbe.ToolTile(player) is { } tool
             ? new Vector2(tool.X, tool.Y) : player.GetGrabTile();
         if (!location.isTileOnMap(tile) || Math.Abs(tile.X - player.Tile.X) + Math.Abs(tile.Y - player.Tile.Y) > 1)
             return (null, null, null);
+        string? codeAction = kind == GenericWorld.Action ? GenericWorldCapture.FacedCodeAction(this, player, location, tile) : null;
+        if (codeAction is null && !this.config.GenericWorldInputEnabled && !this.OrdinaryInteractSurface())
+            return (null, null, null);
         Item? held = player.CurrentItem;
         int slot = player.CurrentToolIndex, day = Game1.Date.TotalDays;
         var identity = this.CurrentCommandIdentity();
         string? eventPin = NativeEventControl.Token();
-        string source = "generic:" + SceneIdentity.Token(location.NameOrUniqueName) + ":" + (int)tile.X + "," + (int)tile.Y;
+        string source = codeAction ?? ("generic:" + SceneIdentity.Token(location.NameOrUniqueName) + ":" + (int)tile.X + "," + (int)tile.Y);
         string admission = this.GenericWorldAdmission(player, location, tile);
         string token = this.InteractToken(kind, admission, source, player, null);
         var target = new WorldInteractionTarget(token, source, (int)tile.X, (int)tile.Y,
@@ -73,9 +73,11 @@ public sealed partial class ModEntry
         bool Present() => Bound() && ReferenceEquals(player.currentLocation, location)
             && player.CurrentToolIndex == slot && ReferenceEquals(player.CurrentItem, held)
             && this.CaptureGenericWorld(kind).Target == target;
+        string binding = identity.SessionId + ":" + player.UniqueMultiplayerID + ":" + day;
         BgActionEffectFacts Sample() => SampleInteractEffect(Bound, "") with
         {
-            Generic = Bound() ? this.SampleGenericWorld(player, location, tile, identity.SessionId + ":" + player.UniqueMultiplayerID + ":" + day) : null,
+            Generic = !Bound() ? null : codeAction is null ? this.SampleGenericWorld(player, location, tile, binding)
+                : ReferenceEquals(Game1.currentLocation, location) ? GenericWorldCapture.MenuFrame(this, location, tile, binding) : null,
         };
         return (target, null, new BgActionTarget(BgActionKind.Generic, null, null, "", Present, Sample)
         {
@@ -144,8 +146,7 @@ public sealed partial class ModEntry
         Put("hay_stock", location.GetRootLocation().piecesOfHay.Value);
         foreach (var quest in this.ReadQuestFacts(player, QuestTargetLocation)) Put("quest:" + quest.Id, quest.Wire());
         Put("location", CurrentLocationId(player));
-        Put("menu", Game1.activeClickableMenu is { } menu
-            ? new { type = menu.GetType().Name, receiver = this.ReceiverTokenOf(CurrentInteractiveMenu(menu)) } : null);
+        Put("menu", GenericWorldCapture.ObservedMenu(this));
         Put("money", player.Money);
         return new GenericWorldFrame(binding, SceneIdentity.Token(location.NameOrUniqueName) + ":" + cx + "," + cy,
             Game1.ticks, fields, fields.Count <= GenericWorld.MaxFields);
@@ -164,5 +165,88 @@ public sealed partial class ModEntry
                 ["meaning"] = "ACTION / USE with the current held item. Observe the delta; no expected effect is implied." };
         }
         catch { snapshot.Remove("world_buttons"); }
+    }
+
+    static class GenericWorldCapture
+    {
+        internal static bool ActorReady(ModEntry mod) => mod.WorldInteractionBackgroundReady
+            && mod.PadPathConfigured // no focus term
+            && (Context.IsPlayerFree && Context.CanPlayerMove || NativeEventControl.Token() is not null)
+            && Game1.activeClickableMenu is null
+            && (!(Game1.eventUp || Game1.CurrentEvent is not null) || NativeEventControl.Token() is not null)
+            && Game1.currentMinigame is null && Game1.chatBox?.isActive() != true
+            && Game1.player?.UsingTool != true && Game1.player?.CursorSlotItem is null;
+
+        internal static IReadOnlyList<NativeCodeActions.Cell> CodeCells(ModEntry mod, Farmer? player, GameLocation? location)
+        {
+            if (player is null || location is null || !NativeB1Offers.HasCodeCells(location)
+                || !mod.config.UiPadMenusEnabled || !ReferenceEquals(Game1.currentLocation, location)
+                || !CodeActionCells.Allowed(!Context.IsMainPlayer && !Context.IsSplitScreen,
+                    Game1.eventUp || Game1.CurrentEvent is not null || location.currentEvent is not null
+                    || Game1.farmEvent is not null || Game1.isFestival()))
+                return Array.Empty<NativeCodeActions.Cell>();
+            var cells = NativeCodeActions.Current.Read(location, player, Game1.ticks, out Exception? fault);
+            if (fault is not null) LogCodeCellsFault(mod, fault);
+            return cells;
+        }
+
+        static void LogCodeCellsFault(ModEntry mod, Exception fault) =>
+            mod.Monitor.Log("Code ACTION cells unavailable until the next location: " + fault.GetType().Name, LogLevel.Warn);
+
+        internal static string? FacedCodeAction(ModEntry mod, Farmer player, GameLocation location, Vector2 grab)
+        {
+            if (!NativeB1Offers.HasCodeCells(location) || Game1.keyboardDispatcher?.Subscriber is not null
+                || player.isRidingHorse() || player.mount is not null || player.IsSitting())
+                return null;
+            Point tile = grab.ToPoint();
+            var cells = CodeCells(mod, player, location);
+            for (int i = 0; i < cells.Count; i++)
+                if (cells[i].Tile.Equals(tile))
+                {
+                    try { return FacedCell(mod, player, location, grab, cells[i]); }
+                    catch (Exception fault)
+                    {
+                        NativeCodeActions.Current.Disable();
+                        LogCodeCellsFault(mod, fault);
+                        return null;
+                    }
+                }
+            return null;
+        }
+
+        static string? FacedCell(ModEntry mod, Farmer player, GameLocation location, Vector2 grab, NativeCodeActions.Cell cell)
+        {
+            Point tile = cell.Tile;
+            Vector2 actorTile = player.Tile;
+            Point stand = actorTile.ToPoint();
+            var facing = (tile.X - stand.X, tile.Y - stand.Y) switch
+            {
+                (0, -1) => 0, (1, 0) => 1, (0, 1) => 2, (-1, 0) => 3, _ => -1,
+            };
+            if (facing < 0 || facing != player.FacingDirection
+                || !NativeCodeActions.Visible(tile, stand, Game1.viewport, Game1.tileSize)
+                || !NativeB1Offers.CanPressUnreadNote(location, player, cell, actorTile)
+                || location.doesTileHaveProperty(tile.X, tile.Y, "Action", "Buildings") is not null
+                || !WorldExtras.PlainActionHand(ExtrasHeldClass(player.CurrentItem), ExtrasToolType(player.CurrentItem))
+                || player.ActiveObject is not null || location.objects.ContainsKey(grab)
+                || mod.InteractOccupantMiss(player, location, TileRect(grab), grab, includeBelow: true) is not null)
+                return null;
+            return CodeActionCells.Ref(location.NameOrUniqueName, tile.X, tile.Y);
+        }
+
+        internal static GenericWorldFrame MenuFrame(ModEntry mod, GameLocation location, Vector2 tile, string binding)
+        {
+            var fields = new Dictionary<string, string> { ["menu"] = JsonSerializer.Serialize(ObservedMenu(mod)) };
+            return new GenericWorldFrame(binding, SceneIdentity.Token(location.NameOrUniqueName) + ":" + (int)tile.X + "," + (int)tile.Y,
+                Game1.ticks, fields);
+        }
+
+        internal static object? ObservedMenu(ModEntry mod)
+        {
+            if (Game1.activeClickableMenu is not { } menu) return null;
+            string? receiver = mod.ReceiverTokenOf(CurrentInteractiveMenu(menu));
+            return NativeJunimoUi.Unreadable(menu) ? new { type = "Menu", receiver, unreadable = true }
+                : new { type = menu.GetType().Name, receiver };
+        }
     }
 }

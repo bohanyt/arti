@@ -6,9 +6,13 @@ namespace ArtiStardewBridge;
 // Read current page fields, never its potentially stale aggregation. No menu field is changed by this capture.
 internal static class NativeJunimoUi
 {
+    internal const string UnreadableText = "Simbol yang tidak bisa kubaca.";
+    internal static bool Unreadable(object? menu) => menu is JunimoNoteMenu { scrambledText: true };
+
     internal static List<ClickableComponent> Components(JunimoNoteMenu menu)
     {
         var result = new List<ClickableComponent>();
+        if (Unreadable(menu)) return result;
         if (menu.specificBundlePage)
         {
             result.AddRange(menu.inventory.inventory);

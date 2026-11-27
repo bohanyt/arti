@@ -269,7 +269,7 @@ internal sealed partial class BackgroundMoveRuntime
         BgActionTarget? target = this.holdTarget;
         if (target is null || target.Kind == BgActionKind.Chest)
             return true;
-        if (target.SeatMotion is { } seat && !seat.Faulted && !seat.Settled && seat.Started)
+        if (target.SeatMotion is { } seat && !seat.Faulted && !seat.Settled && !seat.Ended && seat.Started)
             return false;
         if (this.effectBefore is not { } before || this.effectNow is not { } current)
             return true;

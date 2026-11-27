@@ -96,7 +96,10 @@ def init_session_artifacts(config: dict) -> None:
     _session_id = get_session_id(config)
     tdir = _ROOT / config.get("transcript_dir", "transcripts")
     _transcript_path = tdir / f"{_session_id}.jsonl"
-    data_dir = _ROOT / "data"
+    # A live run keeps its transcript in its own run folder, outside the checkout (relative_to must not
+    # raise before the file is opened). Its manifest stays beside it.
+    inside = _transcript_path.resolve().is_relative_to(_ROOT)
+    data_dir = _ROOT / "data" if inside else tdir
     _manifest_path = data_dir / "session_manifest.json"
     _started_at = time.strftime("%Y-%m-%dT%H:%M:%S")
     _turn_seq = 0
@@ -106,7 +109,7 @@ def init_session_artifacts(config: dict) -> None:
         "session_id": _session_id,
         "started_at": _started_at,
         "ended_at": None,
-        "transcript_path": str(_transcript_path.relative_to(_ROOT)).replace("\\", "/"),
+        "transcript_path": str(_transcript_path.relative_to(_ROOT) if inside else _transcript_path).replace("\\", "/"),
         "profile": config.get("active_profile", "default"),
         "trigger_count": 0,
     }

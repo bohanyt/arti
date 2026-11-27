@@ -389,19 +389,20 @@ def warp_crossing_closed(grid: Mapping | None, actor: tuple[int, int], source: t
     40,0, which is '#' in every observed Beach window (38,0 and 39,0 are '.'); the move_through there stopped at
     pixel y 66.8 and then read NOT_COMPLETED:NO_EFFECT. Unobserved cells (off-grid, out of bounds) are never
     closed: no grid means the old behaviour."""
-    if not grid:
-        return False
+    return bool(grid) and any((value := grid.get(cell)) is not None and value not in WARP_CROSSING_OPEN
+                              for cell in warp_crossing_cells(actor, source))
+
+
+def warp_crossing_cells(actor: tuple[int, int], source: tuple[int, int]):
+    """Cells after an aligned stand through the native warp source."""
     (ax, ay), (sx, sy) = actor, source
     if ax != sx and ay != sy:
-        return False
+        return
     dx, dy = (sx > ax) - (sx < ax), (sy > ay) - (sy < ay)
     x, y = ax, ay
     for _ in range(abs(sx - ax) + abs(sy - ay)):
         x, y = x + dx, y + dy
-        cell = grid.get((x, y))
-        if cell is not None and cell not in WARP_CROSSING_OPEN:
-            return True
-    return False
+        yield x, y
 
 
 def _location_size(facts: Mapping, current_location: str | None) -> tuple[int, int]:
@@ -439,8 +440,8 @@ def open_warp_alternatives(facts: Mapping | None, current_location: str | None, 
 
 def navigation_entries(facts: Mapping, motor_tile: tuple[int, int], objective: InteractObjective | None,
                        current_location: str | None, *, grid: Mapping | None = None,
-                       excluded: set | frozenset = frozenset()) -> list[dict]:
-    """Approach catalog entries for exits under a navigation objective (nearest per destination).
+                       excluded: set | frozenset = frozenset(), all_exits: bool = False) -> list[dict]:
+    """Approach catalog entries for admitted exits. The hop planner can rank all exits by path.
 
     PART_B4: a warp whose straight crossing the current ``grid`` shows closed, or that is ``excluded`` (an observed
     no-effect crossing this day), ranks after every other warp to the same destination. It is never dropped: with no
@@ -449,6 +450,7 @@ def navigation_entries(facts: Mapping, motor_tile: tuple[int, int], objective: I
         return []
     width, height = _location_size(facts, current_location)
     best: dict[str, tuple[tuple[int, int], dict]] = {}
+    candidates = []
     warps = _walk_warp_sources(facts)
     for ref, fact in facts.items():
         if not isinstance(fact, Mapping) or not isinstance(ref, str) or len(ref) > 120:
@@ -482,6 +484,9 @@ def navigation_entries(facts: Mapping, motor_tile: tuple[int, int], objective: I
             continue
         entry["revision"] = _revision(fact)
         distance = abs(tile[0] - motor_tile[0]) + abs(tile[1] - motor_tile[1])
+        if all_exits:
+            candidates.append((distance, entry))
+            continue
         # The crossing check starts AFTER the stand. A blocked stand cannot be
         # approached either: prefer another native exit to the same destination.
         # Off-window/unknown cells retain their old rank; this grants no walkability.
@@ -494,7 +499,9 @@ def navigation_entries(facts: Mapping, motor_tile: tuple[int, int], objective: I
         key = str(target)
         if key not in best or rank < best[key][0]:
             best[key] = (rank, entry)
-    return [entry for _, entry in sorted(best.values(), key=lambda item: (item[0][1], item[1]["ref"]))]
+    if not all_exits:
+        candidates = [(rank[1], entry) for rank, entry in best.values()]
+    return [entry for _, entry in sorted(candidates, key=lambda item: (item[0], item[1]["ref"]))]
 
 
 def is_forage_fact(fact: object) -> bool:

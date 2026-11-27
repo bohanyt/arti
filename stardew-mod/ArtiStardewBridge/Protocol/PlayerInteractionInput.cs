@@ -26,6 +26,7 @@ public readonly record struct WorldInteractionTarget(string TargetToken, string 
         && TileX is >= 0 and <= 4096 && TileY is >= 0 and <= 4096
         && ActorTileX is >= 0 and <= 4096 && ActorTileY is >= 0 and <= 4096
         && Facing is >= 0 and <= 3 && (GenericWorld.IsKind(Kind) || Kind == WorldExtras.HarvestCrop
+            || Kind == EventControlAction.Stand // seated, the grab tile can be her own tile
             ? Math.Abs(TileX-ActorTileX)+Math.Abs(TileY-ActorTileY) <= 1
             : Kind == AnimalHouseRoute.Kind || EventControlAction.IsApproach(Kind) || (Kind == EventControlAction.EggRoute
             ? Math.Abs(TileX-ActorTileX)+Math.Abs(TileY-ActorTileY) <= EventControlAction.MaxRouteTiles + 1

@@ -136,6 +136,19 @@ public sealed partial class ModEntry
         public int ComponentId;
         public int UpdateFrames; // native game updates that ran with the frame seated
         public List<NetMutex> Locks = new();
+        // After the old receiver goes away, only readback may run for a world note close.
+        public bool SettlingUnreadableClose => this.Operation == "close" && this.Delivered
+            && this.Owner is JunimoNoteMenu { scrambledText: true, fromGameMenu: false }
+            && !ReferenceEquals(GenericInputOwner, this.Owner);
+        public bool HoldsMutex
+        {
+            get
+            {
+                foreach (var mutex in this.Locks)
+                    if (mutex.IsLockHeld()) return true;
+                return false;
+            }
+        }
         /// <summary>ADR 250 review B3/S3: the minigame this press is aimed at (no menu surface), pinned at admission.</summary>
         public StardewValley.Minigames.IMinigame? Minigame;
         /// <summary>ADR 250 review S1: the owner's input seen in her window during her seated frames (named, not delivered).</summary>
@@ -203,6 +216,9 @@ public sealed partial class ModEntry
         GenericGraph graph = GenericMenuSurface is { } top ? GenericInspect(top) : GenericInspectHud();
         GenericWidget? widget = graph.Widgets.SingleOrDefault(w => w.Id == id);
         bool close = operation == "close";
+        if (NativeJunimoUi.Unreadable(graph.Dispatch)
+            && (!close || !JunimoNoteMenu.canClick || UiPadReadyToClose(graph.Dispatch) != true))
+            throw new InvalidOperationException("unreadable_menu_close_only");
         // PM-1 fix11b #2: an essential grant menu holding her items is never exited by any gesture (her own or a
         // recovery/watchdog path); vanilla OK/close discards them. Taking/swapping/dropping stays available.
         if (GrantOf(graph) is not null && GenericUiGrant.ExitGesture(operation, widget?.Path, widget?.Kind))
@@ -267,6 +283,9 @@ public sealed partial class ModEntry
     static List<NetMutex> GenericMenuLocks(GenericGraph graph)
     {
         var locks = new HashSet<NetMutex>(ReferenceEqualityComparer.Instance);
+        if (graph.Dispatch is JunimoNoteMenu { scrambledText: true } note
+            && NativeB1Offers.NoteMutex(Game1.currentLocation, note) is { } noteMutex)
+            locks.Add(noteMutex);
         foreach (var menu in new[] { graph.Root, graph.Dispatch }.Where(m => m is not null).Distinct())
             foreach (var field in GenericFields(menu.GetType()))
             {
@@ -310,10 +329,13 @@ public sealed partial class ModEntry
         this.RestoreGenericUiFrame();
         if (this.uiMotor is not { } lease) return;
         if (lease.Fault is not null) { this.FinishGenericUiFrame(); return; }
-        if (!this.UiMotorValid(lease) || !lease.Watchdog && this.actionOwner.StopLatched || this.actionOwner.RecordFaulted || !lease.Watchdog && this.actionOwner.ReleaseRequested
+        bool settlingClose = lease.SettlingUnreadableClose;
+        if (!(settlingClose ? this.UiMotorBound(lease) : this.UiMotorValid(lease))
+            || !lease.Watchdog && this.actionOwner.StopLatched || this.actionOwner.RecordFaulted || !lease.Watchdog && this.actionOwner.ReleaseRequested
             || !lease.Watchdog && NowUnixMs() > this.actionOwner.LeaseExpiresUnixMs
-            || lease.Deadline.ElapsedMilliseconds > 4000)
+            || !settlingClose && lease.Deadline.ElapsedMilliseconds > 4000)
         { lease.Fault = "ui_frame_cancelled"; this.FinishGenericUiFrame(); return; }
+        if (settlingClose) { this.FinishGenericUiFrame(); return; }
         if (Game1.paused || Game1.HostPaused) return;
         // ADR 250 review B4: a frame is staged only on a path that consumes it once, in the window state it is staged in.
         // Checked at every frame, so a focus change in the middle of her press is caught before the next frame.
@@ -493,7 +515,18 @@ public sealed partial class ModEntry
     {
         this.RestoreGenericUiFrame();
         if (this.uiMotor is not { } lease) return;
-        if (lease.Fault is null && !ReferenceEquals(GenericInputOwner, lease.Owner)
+        if (lease.Fault is null && lease.SettlingUnreadableClose)
+        {
+            var (waiting, fault) = GenericUiReceipt.SettleWorldClose(
+                lease.Succession.Successors.Count > 0
+                    && lease.Succession.Successors[^1] is { result_menu: null, effect: "closed" },
+                GenericInputOwner is not null || Game1.eventUp || Game1.CurrentEvent is not null || Game1.farmEvent is not null,
+                lease.HoldsMutex, Context.IsPlayerFree && Context.CanPlayerMove,
+                lease.Deadline.ElapsedMilliseconds);
+            if (waiting) return;
+            lease.Fault = fault;
+        }
+        else if (lease.Fault is null && !ReferenceEquals(GenericInputOwner, lease.Owner)
             && lease.Locks.Any(m => m.IsLockHeld()))
         {
             if (lease.Deadline.ElapsedMilliseconds < 4000) return;
